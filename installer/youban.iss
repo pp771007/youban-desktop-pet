@@ -1,0 +1,75 @@
+﻿; 柚伴的安裝程式（Inno Setup 6.5 以上）。由 scripts/package.ps1 呼叫：
+;   ISCC /DAppVersion=<版號> /DSourceDir=<打包好的資料夾> installer\youban.iss
+; 裝在目前使用者底下（%LOCALAPPDATA%\Programs），不用系統管理員權限、不跳 UAC。
+
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
+#ifndef SourceDir
+  #define SourceDir "..\dist\youban-desktop-pet"
+#endif
+#define AppName "柚伴"
+#define AppExe "Youban.exe"
+; 跟 crates/petcore/src/autostart.rs 的 VALUE_NAME 一致：安裝時勾的、設定裡開的是同一筆。
+#define RunValue "YoubanDesktopPet"
+#define RunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+
+[Setup]
+; AppId 決定「這是同一個程式」：重裝、升級會覆蓋同一份，不要改。
+AppId={{BE915530-EB05-4723-8486-D27F510796C5}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher=pp771007
+AppPublisherURL=https://github.com/pp771007/youban-desktop-pet
+AppSupportURL=https://github.com/pp771007/youban-desktop-pet/issues
+DefaultDirName={localappdata}\Programs\Youban Desktop Pet
+DisableProgramGroupPage=yes
+DisableDirPage=auto
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+OutputDir=..\dist
+OutputBaseFilename=youban-desktop-pet-setup-{#AppVersion}
+SetupIconFile=..\crates\petcore\assets\app.ico
+UninstallDisplayIcon={app}\{#AppExe}
+UninstallDisplayName={#AppName}
+WizardStyle=modern
+Compression=lzma2/max
+SolidCompression=yes
+; 裝新版時柚伴正在跑：自動請它關掉，裝完不自動重開（最後一頁有「啟動柚伴」可以勾）。
+CloseApplications=yes
+RestartApplications=no
+
+[Languages]
+Name: "zh"; MessagesFile: "ChineseTraditional.isl"
+
+[Tasks]
+Name: "autostart"; Description: "開機時自動啟動柚伴"
+Name: "desktopicon"; Description: "在桌面建立捷徑"; Flags: unchecked
+
+[Files]
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+
+[Registry]
+Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; ValueData: """{app}\{#AppExe}"""; Tasks: autostart
+
+[Run]
+Filename: "{app}\{#AppExe}"; Description: "啟動柚伴"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; 先請執行中的柚伴自己結束，檔案才刪得掉。
+Filename: "{app}\{#AppExe}"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitYouban"
+
+[Code]
+// 開機自動啟動可能是安裝時勾的，也可能是之後在設定裡打開的：解除安裝時一律清掉，不留一筆指向已刪檔案的啟動項目。
+// 設定、提醒、陪伴天數（%APPDATA%\youban-desktop-pet）刻意留著，重裝回來還在。
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', '{#RunValue}');
+end;

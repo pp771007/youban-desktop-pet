@@ -348,7 +348,7 @@ fn send_core(command: serde_json::Value) -> CmdResult<()> {
 
 #[tauri::command]
 fn start_core() -> CmdResult<()> {
-    let exe = paths::sibling_exe(paths::CORE_EXE).ok_or("找不到 petcore.exe")?;
+    let exe = paths::sibling_exe(paths::CORE_EXE).ok_or(format!("找不到 {}", paths::CORE_EXE))?;
     Command::new(exe).spawn().map(|_| ()).map_err(err)
 }
 
@@ -359,7 +359,7 @@ fn open_pets_dir() -> CmdResult<()> {
 }
 
 fn core_cli(arg: &str) -> CmdResult<String> {
-    let exe = paths::sibling_exe(paths::CORE_EXE).ok_or("找不到 petcore.exe")?;
+    let exe = paths::sibling_exe(paths::CORE_EXE).ok_or(format!("找不到 {}", paths::CORE_EXE))?;
     let out = Command::new(exe).args([AUTOSTART_FLAG, arg]).output().map_err(err)?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     if out.status.success() { Ok(text) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }

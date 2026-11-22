@@ -123,7 +123,7 @@ fn check_and_stage(dir: &Path) -> Result<Option<String>, Box<dyn std::error::Err
     zip::ZipArchive::new(io::Cursor::new(bytes))?.extract(&staged)?;
     if !staged.join(CORE_EXE).is_file() {
         fs::remove_dir_all(&staged)?;
-        return Err("zip has no petcore.exe".into());
+        return Err(format!("zip has no {CORE_EXE}").into());
     }
     write_atomic(&dir.join(VERSION_FILE), tag.as_bytes())?;
     Ok(Some(tag.to_owned()))

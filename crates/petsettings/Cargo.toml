@@ -3,6 +3,11 @@ name = "petsettings"
 version.workspace = true
 edition.workspace = true
 
+# 玩家看到的執行檔名。要跟 `petkit::paths::SETTINGS_EXE` 一致。
+[[bin]]
+name = "YoubanSettings"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

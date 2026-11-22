@@ -3,6 +3,11 @@ name = "petcore"
 version.workspace = true
 edition.workspace = true
 
+# 玩家看到的執行檔名（crate 名稱 petcore 只在程式內部用）。要跟 `petkit::paths::CORE_EXE` 一致。
+[[bin]]
+name = "Youban"
+path = "src/main.rs"
+
 [build-dependencies]
 serde_json.workspace = true
 embed-resource = "3"

@@ -1,8 +1,9 @@
 # Build release binaries and pack them into dist/youban-desktop-pet-<version>.zip
 # (the name must start with ASSET_PREFIX in crates/petcore/src/updater.rs)
 # (the same zip the auto-updater downloads from GitHub Releases).
-# Layout inside the zip: petcore.exe, petsettings.exe, pets/
-# Also writes dist/youban-desktop-pet-<version>.zip.sha256 ("<hash>  <file>", LF, no BOM)
+# Layout inside the zip: Youban.exe, YoubanSettings.exe, pets/
+# If Inno Setup 6.5+ (ISCC.exe) is installed, also builds dist/youban-desktop-pet-setup-<version>.exe
+# (installer/youban.iss). Every output gets a .sha256 next to it ("<hash>  <file>", LF, no BOM)
 # so `sha256sum -c` works on Linux / Git Bash too.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -17,19 +18,31 @@ $zip = Join-Path $root "dist\youban-desktop-pet-$version.zip"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-Copy-Item 'target\release\petcore.exe', 'target\release\petsettings.exe' $stage
+Copy-Item 'target\release\Youban.exe', 'target\release\YoubanSettings.exe' $stage
 Copy-Item -Recurse 'pets' (Join-Path $stage 'pets')
 
 if (Test-Path $zip) { Remove-Item -Force $zip }
 # Not Compress-Archive: Windows PowerShell 5.1 writes backslashes into zip entry names,
 # which other tools (and the updater's zip reader) treat as part of the file name.
-tar.exe -a -c -f $zip -C $stage pets petcore.exe petsettings.exe
+tar.exe -a -c -f $zip -C $stage pets Youban.exe YoubanSettings.exe
 if ($LASTEXITCODE -ne 0) { throw 'tar failed' }
+$outputs = @($zip)
+
+$iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($iscc) {
+    & $iscc /Q "/DAppVersion=$version" "/DSourceDir=$stage" 'installer\youban.iss'
+    if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+    $outputs += Join-Path $root "dist\youban-desktop-pet-setup-$version.exe"
+} else {
+    Write-Host 'Inno Setup not found; skipped the installer (zip only)'
+}
 Remove-Item -Recurse -Force $stage
 
-$hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-$name = Split-Path -Leaf $zip
-# PowerShell's own file writers add CRLF (and 5.1 a BOM); write the bytes ourselves.
-[System.IO.File]::WriteAllText("$zip.sha256", "$hash  $name`n", (New-Object System.Text.UTF8Encoding $false))
-Write-Host "packed $zip"
-Write-Host "sha256 $hash"
+foreach ($file in $outputs) {
+    $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+    $name = Split-Path -Leaf $file
+    # PowerShell's own file writers add CRLF (and 5.1 a BOM); write the bytes ourselves.
+    [System.IO.File]::WriteAllText("$file.sha256", "$hash  $name`n", (New-Object System.Text.UTF8Encoding $false))
+    Write-Host "packed $file"
+    Write-Host "sha256 $hash"
+}

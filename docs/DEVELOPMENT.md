@@ -21,11 +21,11 @@
 
 ```
 cargo build
-target\debug\petcore.exe          # 桌寵
-target\debug\petsettings.exe      # 設定（也可以從桌寵右鍵選單開）
+target\debug\Youban.exe           # 桌寵（crate 名稱是 petcore）
+target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也可以從桌寵右鍵選單開）
 ```
 
-`petcore.exe` 的其他用法：
+`Youban.exe` 的其他用法：
 
 | 指令 | 用途 |
 |---|---|
@@ -47,10 +47,12 @@ target\debug\petsettings.exe      # 設定（也可以從桌寵右鍵選單開�
    git push origin v0.2.0
    ```
 
-3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release，掛上 `youban-desktop-pet-<版本>.zip` 與它的 `.sha256`，說明最後自動附上 SHA-256 驗證碼。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
+3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
+
+自動更新下載的是 zip（兩種版本都一樣）：新的檔案直接蓋進安裝資料夾。
 
 想先確認建置沒壞：Actions 頁手動 Run workflow，只測試和打包（zip 留在執行紀錄），不發 Release。
-本機打包：`powershell -File scripts\package.ps1`（產生 `dist\youban-desktop-pet-<版本>.zip`）。
+本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。
 
 柚伴每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。
 從 `target\` 底下跑的開發版不會自動更新。
@@ -60,5 +62,5 @@ target\debug\petsettings.exe      # 設定（也可以從桌寵右鍵選單開�
 ```
 cargo test                                         # 規則與邏輯（排程、假日、桌寵包、行為、模組）
 node crates/petsettings/ui-tests/settings.test.mjs # 設定畫面（無頭瀏覽器）
-target\debug\petcore.exe --soak 600                # 記憶體曲線要平
+target\debug\Youban.exe --soak 600                # 記憶體曲線要平
 ```

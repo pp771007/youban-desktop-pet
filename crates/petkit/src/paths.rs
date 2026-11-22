@@ -11,8 +11,9 @@ const BASE_VARS: [&str; 2] = ["APPDATA", "LOCALAPPDATA"];
 const PETS_DIR: &str = "pets";
 /// 開發時執行檔在 `target/debug/`，往上找幾層就能碰到 repo 根目錄的 `pets/`。
 const PETS_SEARCH_DEPTH: usize = 5;
-pub const CORE_EXE: &str = "petcore.exe";
-pub const SETTINGS_EXE: &str = "petsettings.exe";
+/// 執行檔名，跟兩個 crate 的 `[[bin]] name` 一致。
+pub const CORE_EXE: &str = "Youban.exe";
+pub const SETTINGS_EXE: &str = "YoubanSettings.exe";
 
 fn base_dir(var: &str) -> PathBuf {
     env::var_os(var).map(PathBuf::from).unwrap_or_else(env::temp_dir)

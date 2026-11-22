@@ -18,7 +18,7 @@ pub fn cli(arg: Option<&str>) -> Result<(), String> {
             println!("{}", if is_enabled() { "on" } else { "off" });
             Ok(())
         }
-        _ => Err("用法：petcore --autostart on|off|status".into()),
+        _ => Err("用法：Youban.exe --autostart on|off|status".into()),
     }
 }
 

@@ -33,6 +33,9 @@ jobs:
       - name: 測試
         run: cargo test
 
+      - name: 裝 Inno Setup（做安裝程式用；語言檔要 6.5 以上）
+        run: choco upgrade innosetup -y --no-progress
+
       - name: 打包
         shell: pwsh
         run: ./scripts/package.ps1
@@ -43,6 +46,7 @@ jobs:
           name: zip
           path: |
             dist/*.zip
+            dist/*.exe
             dist/*.sha256
 
       - name: 發 Release
@@ -51,10 +55,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 說明 = tag 訊息 ＋ SHA-256 驗證碼與驗證方法（玩家下載後可以自己比對）
+          # 說明 = tag 訊息 ＋ 下載哪個 ＋ 每個檔的 SHA-256（玩家下載後可以自己比對）
+          $setup = Get-Item dist/*-setup-*.exe
           $zip = Get-Item dist/*.zip
-          $hash = (Get-Content "$($zip.FullName).sha256" -Raw).Split(' ')[0]
+          $hashOf = { param($f) (Get-Content "$($f.FullName).sha256" -Raw).Split(' ')[0] }
           $notes = (git tag -l --format='%(contents)' "${{ github.ref_name }}") -join "`n"
-          $notes += "`n`n### 檔案驗證`n`nSHA-256：``$hash```n`n下載後在 PowerShell 執行 ``Get-FileHash $($zip.Name)``，算出來的值跟上面一樣就是完整、沒被改過的檔案。`n"
+          $notes += "`n`n### 下載哪一個`n`n- **``$($setup.Name)``**：安裝版（建議），會建開始選單捷徑，也能從「設定 → 應用程式」移除`n- **``$($zip.Name)``**：免安裝版，解開執行 ``Youban.exe```n"
+          $notes += "`n### 檔案驗證（SHA-256）`n`n| 檔案 | SHA-256 |`n|---|---|`n| ``$($setup.Name)`` | ``$(& $hashOf $setup)`` |`n| ``$($zip.Name)`` | ``$(& $hashOf $zip)`` |`n`n下載後在 PowerShell 執行 ``Get-FileHash <檔名>``，算出來的值跟上面一樣就是完整、沒被改過的檔案。`n"
           [System.IO.File]::WriteAllText("$PWD/notes.md", $notes)
-          gh release create "${{ github.ref_name }}" $zip.FullName "$($zip.FullName).sha256" --title "柚伴 ${{ github.ref_name }}" --notes-file notes.md
+          gh release create "${{ github.ref_name }}" $setup.FullName "$($setup.FullName).sha256" $zip.FullName "$($zip.FullName).sha256" --title "柚伴 ${{ github.ref_name }}" --notes-file notes.md

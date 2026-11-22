@@ -39,6 +39,8 @@ const SNAPSHOT_CARDS_FLAG: &str = "--snapshot-cards";
 const FRAMES_FLAG: &str = "--frames";
 const SLICE_FLAG: &str = "--slice";
 const SEND_FLAG: &str = "--send";
+/// 叫執行中的柚伴結束（解除安裝程式在刪檔前用；不用自己組 JSON）。
+const QUIT_FLAG: &str = "--quit";
 const SOAK_FLAG: &str = "--soak";
 const AUTOSTART_FLAG: &str = "--autostart";
 const SNAPSHOT_DEFAULT_DPI: u32 = 96;
@@ -69,7 +71,7 @@ fn main() {
     match arg(1) {
         Some(SLICE_FLAG) => {
             let (Some(sheet), Some(pet)) = (arg(2), arg(3)) else {
-                eprintln!("用法：petcore --slice <多格圖.png> <桌寵資料夾名> <名稱1> <名稱2> ...");
+                eprintln!("用法：Youban.exe --slice <多格圖.png> <桌寵資料夾名> <名稱1> <名稱2> ...");
                 std::process::exit(2);
             };
             let names: Vec<String> = args.iter().skip(4).cloned().collect();
@@ -96,6 +98,7 @@ fn main() {
             }
         }
         Some(SEND_FLAG) => std::process::exit(if send(arg(2).unwrap_or("{}")) { 0 } else { 1 }),
+        Some(QUIT_FLAG) => std::process::exit(if send(&serde_json::json!({ "cmd": petkit::ipc::CMD_QUIT }).to_string()) { 0 } else { 1 }),
         Some(AUTOSTART_FLAG) => std::process::exit(match autostart::cli(arg(2)) {
             Ok(()) => 0,
             Err(e) => {

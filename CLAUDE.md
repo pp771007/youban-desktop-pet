@@ -1,6 +1,6 @@
 # 柚伴（Youban Desktop Pet）給 Claude 的規則
 
-產品名稱在 `petkit::APP_NAME`。資料夾是 `%APPDATA%\youban-desktop-pet`、`%LOCALAPPDATA%\youban-desktop-pet`；改名前的舊資料夾在啟動時自動搬過來（`petkit::paths::migrate_legacy_dirs`，要在寫任何檔案之前呼叫）。執行檔名稱（`petcore`、`petsettings`）沒改；視窗類別、開機啟動的登錄值、環境變數都用 `YoubanDesktopPet` / `YOUBAN_DESKTOP_PET_` 開頭。
+產品名稱在 `petkit::APP_NAME`。資料夾是 `%APPDATA%\youban-desktop-pet`、`%LOCALAPPDATA%\youban-desktop-pet`；改名前的舊資料夾在啟動時自動搬過來（`petkit::paths::migrate_legacy_dirs`，要在寫任何檔案之前呼叫）。執行檔是 `Youban.exe`、`YoubanSettings.exe`（crate 名稱還是 `petcore`、`petsettings`，執行檔名由 `[[bin]]` 指定，要跟 `petkit::paths::CORE_EXE` / `SETTINGS_EXE` 一致）；視窗類別、開機啟動的登錄值、環境變數都用 `YoubanDesktopPet` / `YOUBAN_DESKTOP_PET_` 開頭。
 
 `README.md` 只寫給玩家看（怎麼裝、怎麼玩、常見問題），不放程式資訊。指令、資料夾結構、測試跑法、發版在 `docs/DEVELOPMENT.md`；架構與取捨在 `docs/PLAN.md`；畫面規範在 `docs/design-system.md`。這裡只放「讀程式看不出來、做錯了才會發現」的事。
 
@@ -24,10 +24,10 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 ## 改完怎麼驗
 
 - **改了 `crates/petsettings/ui/` 一定要重新 `cargo build -p petsettings`**：Tauri 把前端打包進執行檔，只改檔案的話實機看到的還是舊版。換了 `crates/petsettings/icons/icon.ico` 則要先 `cargo clean -p petsettings`，不然執行檔圖示不會更新。
-- 程式圖示（柚子）的原圖去背後放在三處：`docs/media/logo.png`（README）、`crates/petsettings/icons/icon.ico`、`crates/petcore/assets/app.ico`（`app.rc` 編進 petcore.exe）。托盤圖示另外用目前這隻桌寵的站姿圖。
-- 看畫面不用動到使用者的螢幕：`petcore --snapshot`（各狀態＋頭上特效）、`--snapshot-cards`（提醒卡、講話泡泡、點心與球）、`--frames`（每個動作 25fps PNG 序列）。
+- 程式圖示（柚子）的原圖去背後放在三處：`docs/media/logo.png`（README）、`crates/petsettings/icons/icon.ico`、`crates/petcore/assets/app.ico`（`app.rc` 編進 Youban.exe）。托盤圖示另外用目前這隻桌寵的站姿圖。
+- 看畫面不用動到使用者的螢幕：`Youban.exe --snapshot`（各狀態＋頭上特效）、`--snapshot-cards`（提醒卡、講話泡泡、點心與球）、`--frames`（每個動作 25fps PNG 序列）。
 - **動作要給影片看，不要給逐格拼圖**：`--frames` 的序列用 ffmpeg 疊到純色底轉 mp4，再裁到桌寵附近。
-- 實機端對端：`petcore --send '{"cmd":"..."}'` 送測試指令（`say`、`toy`、`drop`、`dumpStatus`…，名稱在 `petkit::ipc`），`dumpStatus` 寫到 `%LOCALAPPDATA%\youban-desktop-pet\status.json`。`--send` 從 Bash 下；Windows PowerShell 5.1 會吃掉 JSON 的雙引號。
+- 實機端對端：`Youban.exe --send '{"cmd":"..."}'` 送測試指令（`say`、`toy`、`drop`、`dumpStatus`…，名稱在 `petkit::ipc`），`dumpStatus` 寫到 `%LOCALAPPDATA%\youban-desktop-pet\status.json`。`--send` 從 Bash 下；Windows PowerShell 5.1 會吃掉 JSON 的雙引號。
 - **使用者不在電腦前時，桌寵會睡著、也不講話**（看滑鼠鍵盤多久沒動）。這時要實測行為，就暫時把 `config.json` 的 `sleepAfterSecs` 調大，測完還原；或用測試指令直接觸發。需要一個能移動又不搶焦點的測試視窗：PowerShell 開 WinForms，`ShowWindow(h, 4)`＋`SetWindowPos(..., SWP_NOACTIVATE)`。
 
 ## 圖片素材

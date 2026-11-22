@@ -1,6 +1,6 @@
 //! 不開視窗的截圖工具（檢查畫面用，不需要把東西放到使用者桌面上、也不用擷取螢幕）：
-//! - `petcore --snapshot <out.png> [dpi]`：每個狀態各畫一格桌寵，排成一張
-//! - `petcore --snapshot-cards <out.png> [dpi]`：每種卡片的淺色與深色版本，排成一張（最後附上點心與球）
+//! - `Youban.exe --snapshot <out.png> [dpi]`：每個狀態各畫一格桌寵，排成一張
+//! - `Youban.exe --snapshot-cards <out.png> [dpi]`：每種卡片的淺色與深色版本，排成一張（最後附上點心與球）
 
 use std::path::Path;
 

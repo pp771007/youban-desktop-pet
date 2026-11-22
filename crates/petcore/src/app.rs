@@ -987,7 +987,7 @@ impl App {
 
     fn open_settings(&mut self, page: Option<&str>) {
         let Some(exe) = paths::settings_exe() else {
-            self.enqueue("core", "info".into(), Card::warning("找不到設定程式", Some("petsettings.exe 要跟 petcore.exe 放在同一個資料夾".into())));
+            self.enqueue("core", "info".into(), Card::warning("找不到設定程式", Some(format!("{} 要跟 {} 放在同一個資料夾", paths::SETTINGS_EXE, paths::CORE_EXE))));
             return;
         };
         let mut cmd = std::process::Command::new(exe);

@@ -74,10 +74,10 @@ D. 細緻像素風：高解析度像素藝術，邊緣乾淨
 ## 第 2 步：動作圖（一張圖 4 個姿勢）
 
 ChatGPT 出圖次數有限，所以**一張圖畫 4 個姿勢，排成 2×2**（風格探索那張已經驗證過：4 隻一起出、透明背景照樣成功）。
-程式這邊用 `petcore --slice` 自動找出每一隻、裁好、依「左上 → 右上 → 左下 → 右下」命名，不用手動切：
+程式這邊用 `Youban.exe --slice` 自動找出每一隻、裁好、依「左上 → 右上 → 左下 → 右下」命名，不用手動切：
 
 ```
-petcore --slice <多格圖.png> capybara walk_01 walk_02 walk_03 walk_04
+Youban.exe --slice <多格圖.png> capybara walk_01 walk_02 walk_03 walk_04
 ```
 
 開新對話、附上 `art/<桌寵>/reference.png`，「共用規範」**只貼一次**，之後每次貼一組。
