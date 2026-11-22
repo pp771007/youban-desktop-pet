@@ -1,0 +1,51 @@
+# 推 v* tag → 在 GitHub 的 Windows 機器上測試、打包、發 Release（附 zip）。
+# 手動執行（Actions 頁的 Run workflow）只測試和打包、把 zip 留在執行紀錄裡，不發 Release —— 用來先確認建置沒壞。
+# Release 說明取自 tag 的訊息：`git tag -a v0.2.0 -m "給玩家看的更新說明"`。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: tag 要跟 Cargo.toml 的版號一致
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} 跟 Cargo.toml 的版號 $version 不一樣" }
+
+      - name: 測試
+        run: cargo test
+
+      - name: 打包
+        shell: pwsh
+        run: ./scripts/package.ps1
+
+      - name: 留一份 zip 在執行紀錄
+        uses: actions/upload-artifact@v4
+        with:
+          name: zip
+          path: dist/*.zip
+
+      - name: 發 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" (Get-Item dist/*.zip).FullName --title "柚伴 ${{ github.ref_name }}" --notes-from-tag

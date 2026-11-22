@@ -38,4 +38,4 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 ## Git
 
 - GitHub 上是**公開** repo（私人 repo 的 Release 下載要權杖，自動更新用不了）；什麼不能寫見最上面那節。
-- 發版照 `docs/DEVELOPMENT.md` 的「發版」：`scripts\package.ps1` 打包 → 推 tag `v<版本>` → `gh release create` 掛 zip。已發布的 tag 不要再動。
+- 發版照 `docs/DEVELOPMENT.md` 的「發版」：改版號 → 推帶玩家說明的 annotated tag → GitHub Actions 自動測試、打包、發 Release。已發布的 tag 不要再動。
