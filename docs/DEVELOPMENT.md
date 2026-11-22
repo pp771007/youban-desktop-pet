@@ -52,9 +52,10 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 自動更新下載的是 zip（兩種版本都一樣）：新的檔案直接蓋進安裝資料夾。
 
 想先確認建置沒壞：Actions 頁手動 Run workflow，只測試和打包（zip 留在執行紀錄），不發 Release。
-本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。
+本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。不想裝進系統的話，Inno Setup 的安裝檔可以 `/PORTABLE=1 /CURRENTUSER /DIR=<資料夾>` 解到任何地方，再把 `$env:ISCC` 指到裡面的 `ISCC.exe`。
+在 Git Bash 裡跑會叫到 GNU tar 而失敗，請從 PowerShell 跑。
 
-柚伴每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。
+柚伴每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。安裝版下載安裝程式在背景安靜地裝，免安裝版下載 zip 直接換檔。
 從 `target\` 底下跑的開發版不會自動更新。
 
 ## 測試
