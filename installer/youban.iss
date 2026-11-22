@@ -25,6 +25,8 @@ AppPublisherURL=https://github.com/pp771007/youban-desktop-pet
 AppSupportURL=https://github.com/pp771007/youban-desktop-pet/issues
 DefaultDirName={localappdata}\Programs\Youban Desktop Pet
 DisableProgramGroupPage=yes
+; 歡迎頁有左側大圖，像正式軟體；資料夾頁只在第一次裝時出現（之後升級直接沿用）
+DisableWelcomePage=no
 DisableDirPage=auto
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
