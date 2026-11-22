@@ -28,7 +28,8 @@ tar.exe -a -c -f $zip -C $stage pets Youban.exe YoubanSettings.exe
 if ($LASTEXITCODE -ne 0) { throw 'tar failed' }
 $outputs = @($zip)
 
-$iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+# $env:ISCC can point at a portable copy (innosetup-6.x.exe /PORTABLE=1 /DIR=...).
+$iscc = @($env:ISCC, "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if ($iscc) {
     & $iscc /Q "/DAppVersion=$version" "/DSourceDir=$stage" 'installer\youban.iss'
     if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }

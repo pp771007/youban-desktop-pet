@@ -13,10 +13,11 @@
 ; 跟 crates/petcore/src/autostart.rs 的 VALUE_NAME 一致：安裝時勾的、設定裡開的是同一筆。
 #define RunValue "YoubanDesktopPet"
 #define RunKey "Software\Microsoft\Windows\CurrentVersion\Run"
+; AppId 決定「這是同一個程式」：重裝、升級會覆蓋同一份，不要改。
+#define AppGuid "BE915530-EB05-4723-8486-D27F510796C5"
 
 [Setup]
-; AppId 決定「這是同一個程式」：重裝、升級會覆蓋同一份，不要改。
-AppId={{BE915530-EB05-4723-8486-D27F510796C5}
+AppId={{{#AppGuid}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -56,7 +57,8 @@ FinishedHeadingLabel=柚伴裝好了
 FinishedLabel=水豚已經準備好搬進你的桌面了。對牠按右鍵可以打開設定。
 
 [Tasks]
-Name: "autostart"; Description: "開機時自動啟動柚伴"
+; 只在第一次裝時問：之後在設定裡開關的才算數，升級（包括自動更新）不能把使用者關掉的又打開。
+Name: "autostart"; Description: "開機時自動啟動柚伴"; Check: not IsUpgrade
 Name: "desktopicon"; Description: "在桌面建立捷徑"; Flags: unchecked
 
 [Files]
@@ -71,12 +73,24 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; Va
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "啟動柚伴"; Flags: nowait postinstall skipifsilent
+; 柚伴自動更新時帶 /relaunch=1 安靜地跑安裝程式（crates/petcore/src/updater.rs 的 SETUP_ARGS）：裝完把牠開回來。
+Filename: "{app}\{#AppExe}"; Parameters: "--after-update"; Flags: nowait; Check: IsUpdateRelaunch
 
 [UninstallRun]
 ; 先請執行中的柚伴自己結束，檔案才刪得掉。
 Filename: "{app}\{#AppExe}"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitYouban"
 
 [Code]
+function IsUpgrade: Boolean;
+begin
+  Result := RegKeyExists(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{' + '{#AppGuid}' + '}_is1');
+end;
+
+function IsUpdateRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;
+
 // 開機自動啟動可能是安裝時勾的，也可能是之後在設定裡打開的：解除安裝時一律清掉，不留一筆指向已刪檔案的啟動項目。
 // 設定、提醒、陪伴天數（%APPDATA%\youban-desktop-pet）刻意留著，重裝回來還在。
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

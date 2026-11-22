@@ -2,8 +2,12 @@
 //! 通知主執行緒；主執行緒冒一張卡問使用者「現在更新」還是「下次啟動時」。
 //! 現在更新 = 換檔、開新的核心、自己結束（約一秒，桌寵回到原位）；下次啟動時 = 下次核心一啟動就先換。
 //!
-//! 換檔的做法：Windows 不能覆寫執行中的 exe，但可以把它改名。所以先把舊的 exe 改成 `.old`，
+//! 免安裝版（zip）換檔的做法：Windows 不能覆寫執行中的 exe，但可以把它改名。所以先把舊的 exe 改成 `.old`，
 //! 把新檔複製進來，下次啟動再把 `.old` 刪掉。新核心帶 `--after-update` 啟動，會等舊的結束才接手。
+//!
+//! 安裝版（安裝資料夾裡有 Inno Setup 的解除安裝程式）改下載新版的安裝程式、在背景安靜地跑：
+//! 直接換檔的話「應用程式」清單的版本號不會變，新版多出的檔案解除安裝時也刪不掉。
+//! 安裝程式裝完會自己把柚伴開回來（`installer/youban.iss` 的 `IsUpdateRelaunch`）。
 
 use std::fs;
 use std::io::{self, Read};
@@ -30,6 +34,14 @@ const STAGED_DIR: &str = "staged";
 /// Release 附件的檔名開頭；`scripts/package.ps1` 打包出來的就是這個名字。
 const ASSET_PREFIX: &str = "youban-desktop-pet-";
 const ASSET_EXT: &str = ".zip";
+const SETUP_ASSET_PREFIX: &str = "youban-desktop-pet-setup-";
+const SETUP_ASSET_EXT: &str = ".exe";
+/// 有這支 = 用安裝程式裝的。
+const UNINSTALLER: &str = "unins000.exe";
+/// 下載下來的安裝程式在 staged 裡的名字。
+const SETUP_FILE: &str = "setup.exe";
+/// 不顯示畫面、不問問題；`/relaunch=1` 讓安裝程式裝完把柚伴開回來。
+const SETUP_ARGS: [&str; 4] = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1"];
 const OLD_EXT: &str = "old";
 /// 解好的新版旁邊記一下版本號（放在 staged 外面，換檔時不會被複製進安裝資料夾）。
 const VERSION_FILE: &str = "staged-version";
@@ -57,10 +69,15 @@ pub fn staged_version(dir: &Path) -> Option<String> {
     fs::read_to_string(dir.join(VERSION_FILE)).ok().map(|s| s.trim().trim_start_matches('v').to_owned())
 }
 
-pub fn spawn(dir: PathBuf, notify: HWND) {
+fn installed(install_dir: &Path) -> bool {
+    install_dir.join(UNINSTALLER).is_file()
+}
+
+pub fn spawn(dir: PathBuf, install_dir: &Path, notify: HWND) {
     let target = notify.0 as isize;
+    let setup = installed(install_dir);
     let spawned = thread::Builder::new().name("updater".into()).spawn(move || {
-        match check_and_stage(&dir) {
+        match check_and_stage(&dir, setup) {
             Ok(Some(version)) => {
                 log!("update {version} staged");
                 unsafe {
@@ -83,11 +100,27 @@ pub fn spawn(dir: PathBuf, notify: HWND) {
 pub fn staged(dir: &Path) -> Option<PathBuf> {
     let p = dir.join(STAGED_DIR);
     let newer_than_me = staged_version(dir).is_some_and(|v| newer(&v, env!("CARGO_PKG_VERSION")));
-    (p.join(CORE_EXE).is_file() && newer_than_me).then_some(p)
+    ((p.join(CORE_EXE).is_file() || p.join(SETUP_FILE).is_file()) && newer_than_me).then_some(p)
 }
 
-/// 換檔，再開新的核心（帶 `--after-update`）。成功的話呼叫端要自己結束。
+/// 已經裝上（或比目前舊）的暫存刪掉：安裝版的安裝程式跑完會留在 staged 裡。
+/// 剛更新完時安裝程式可能還沒結束、刪不掉，下次啟動再刪。
+pub fn discard_stale(dir: &Path) {
+    if staged(dir).is_none() {
+        let _ = fs::remove_dir_all(dir.join(STAGED_DIR));
+        let _ = fs::remove_file(dir.join(VERSION_FILE));
+    }
+}
+
+/// 換上新版，再讓新的核心接手。成功的話呼叫端要自己結束。
+/// 安裝版：開新版的安裝程式（它會等這支結束再換檔，裝完自己把柚伴開回來）。
+/// 免安裝版：換檔，再開新的核心（帶 `--after-update`）。
 pub fn apply_and_restart(staged: &Path, install_dir: &Path) -> io::Result<()> {
+    let setup = staged.join(SETUP_FILE);
+    if setup.is_file() {
+        std::process::Command::new(setup).args(SETUP_ARGS).spawn()?;
+        return Ok(());
+    }
     apply(staged, install_dir)?;
     std::process::Command::new(install_dir.join(CORE_EXE)).arg(AFTER_UPDATE_FLAG).spawn()?;
     Ok(())
@@ -98,7 +131,7 @@ fn agent() -> ureq::Agent {
     ureq::Agent::config_builder().timeout_global(Some(HTTP_TIMEOUT)).tls_config(tls).user_agent("youban-desktop-pet-updater").build().into()
 }
 
-fn check_and_stage(dir: &Path) -> Result<Option<String>, Box<dyn std::error::Error>> {
+fn check_and_stage(dir: &Path, setup: bool) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let agent = agent();
     let url = std::env::var(URL_ENV).unwrap_or_else(|_| LATEST_URL.to_owned());
     let latest: serde_json::Value = serde_json::from_str(&agent.get(&url).call()?.body_mut().read_to_string()?)?;
@@ -106,13 +139,7 @@ fn check_and_stage(dir: &Path) -> Result<Option<String>, Box<dyn std::error::Err
     if !newer(tag, env!("CARGO_PKG_VERSION")) {
         return Ok(None);
     }
-    let asset = latest["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|a| a["name"].as_str().is_some_and(|n| n.starts_with(ASSET_PREFIX) && n.ends_with(ASSET_EXT)))
-        .and_then(|a| a["browser_download_url"].as_str())
-        .ok_or("release has no zip")?;
+    let asset = asset_url(&latest, setup).ok_or("release has no package for this install")?;
     let mut bytes = Vec::new();
     agent.get(asset).call()?.body_mut().as_reader().take(MAX_DOWNLOAD_BYTES).read_to_end(&mut bytes)?;
     let staged = dir.join(STAGED_DIR);
@@ -120,13 +147,23 @@ fn check_and_stage(dir: &Path) -> Result<Option<String>, Box<dyn std::error::Err
         fs::remove_dir_all(&staged)?;
     }
     fs::create_dir_all(&staged)?;
-    zip::ZipArchive::new(io::Cursor::new(bytes))?.extract(&staged)?;
-    if !staged.join(CORE_EXE).is_file() {
+    if setup {
+        fs::write(staged.join(SETUP_FILE), &bytes)?;
+    } else {
+        zip::ZipArchive::new(io::Cursor::new(bytes))?.extract(&staged)?;
+    }
+    if !setup && !staged.join(CORE_EXE).is_file() {
         fs::remove_dir_all(&staged)?;
         return Err(format!("zip has no {CORE_EXE}").into());
     }
     write_atomic(&dir.join(VERSION_FILE), tag.as_bytes())?;
     Ok(Some(tag.to_owned()))
+}
+
+/// Release 附件裡該下載哪一個：安裝版拿安裝程式，免安裝版拿 zip。
+fn asset_url(latest: &serde_json::Value, setup: bool) -> Option<&str> {
+    let (prefix, ext) = if setup { (SETUP_ASSET_PREFIX, SETUP_ASSET_EXT) } else { (ASSET_PREFIX, ASSET_EXT) };
+    latest["assets"].as_array()?.iter().find(|a| a["name"].as_str().is_some_and(|n| n.starts_with(prefix) && n.ends_with(ext)))?["browser_download_url"].as_str()
 }
 
 /// 把解好的新版複製進安裝資料夾。執行中的 exe 先改名成 `.old` 讓位；中途失敗就把改名的換回來。
@@ -183,6 +220,18 @@ mod tests {
         assert!(newer("0.10.0", "0.9.0"), "10 > 9, not text order");
         assert!(!newer("v0.1.0", "0.1.0"));
         assert!(!newer("v0.0.9", "0.1.0"));
+    }
+
+    #[test]
+    fn installed_copy_updates_with_the_installer() {
+        let latest = serde_json::json!({ "assets": [
+            { "name": "youban-desktop-pet-setup-0.3.0.exe", "browser_download_url": "setup" },
+            { "name": "youban-desktop-pet-setup-0.3.0.exe.sha256", "browser_download_url": "setup-hash" },
+            { "name": "youban-desktop-pet-0.3.0.zip", "browser_download_url": "zip" },
+            { "name": "youban-desktop-pet-0.3.0.zip.sha256", "browser_download_url": "zip-hash" },
+        ]});
+        assert_eq!(asset_url(&latest, true), Some("setup"));
+        assert_eq!(asset_url(&latest, false), Some("zip"));
     }
 
     #[test]

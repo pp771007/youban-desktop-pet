@@ -277,6 +277,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let config = load_config(&paths::config_file());
     if let Some(dir) = paths::install_dir() {
         updater::cleanup(&dir);
+        updater::discard_stale(&paths::update_dir());
         // 上次按了「下次啟動時」：一啟動就先換，換好讓新的核心接手。
         if config.auto_update && soak_secs.is_none() && updater::enabled_for(&dir) {
             if let Some(staged) = updater::staged(&paths::update_dir()) {
@@ -1308,7 +1309,7 @@ impl App {
             if updater::staged(&dir).is_some() {
                 self.update_ready = true;
             } else if updater::due(&dir) {
-                updater::spawn(dir, self.hwnd);
+                updater::spawn(dir, &install, self.hwnd);
             }
         }
         if !self.update_ready || self.update_offered {
