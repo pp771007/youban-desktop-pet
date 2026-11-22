@@ -34,7 +34,7 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 
 - `installer/youban.iss` 與 `ChineseTraditional.isl` 要存成 **UTF-8 with BOM**，不然 Inno Setup 讀中文會變亂碼。左側大圖、右上小圖（`wizard-*.bmp`、`small-*.bmp`）每種螢幕縮放各一張，換圖時整組重做。
 - 本機要做安裝程式：Inno Setup 免安裝解到暫存資料夾、`$env:ISCC` 指過去（見 `docs/DEVELOPMENT.md`），用完刪掉。實測安裝畫面不用搶使用者的滑鼠：找 `TWizardForm` 視窗裡 class 是 `TNewButton` 的按鈕，對它 `PostMessage` 空白鍵按下／放開（`BM_CLICK` 在視窗不在前景時會失效），每頁用 `PrintWindow` 截圖；解除安裝用 `unins000.exe /VERYSILENT /SUPPRESSMSGBOXES`。
-- **改了更新或安裝程式，兩種版本都要實際更新一次**：做兩個版號的包，`python -m http.server` 放一份假的 `latest.json`（格式照 GitHub 的 `releases/latest`），`YOUBAN_DESKTOP_PET_UPDATE_URL` 指過去再啟動，刪掉 `%LOCALAPPDATA%\youban-desktop-pet\update\last-check` 讓它馬上查。下載好之後用 `cardAction done` 按「現在更新」；卡片要過幾秒才出來，太早送會被忽略，要重送到 log 出現 `update applied`。安裝版要看三件事：「應用程式」清單的版本號有跟著變；資料夾裡只有 `unins000`，出現 `unins001` 就是 AppId 變了，被當成另一個程式；開機啟動沒被打開。
+- **改了更新或安裝程式，兩種版本都要實際更新一次**：做兩個版號的包，`python -m http.server` 放一份假的 `latest.json`（格式照 GitHub 的 `releases/latest`），`YOUBAN_DESKTOP_PET_UPDATE_URL` 指過去再啟動，刪掉 `%LOCALAPPDATA%\youban-desktop-pet\update\last-check` 讓它馬上查。下載好之後用 `cardAction done` 按「現在更新」；卡片要過幾秒才出來，太早送會被忽略，要重送到 log 出現 `update applied`。安裝版要看三件事：「應用程式」清單的版本號有跟著變；資料夾裡只有 `unins000`，出現 `unins001` 就是 AppId 變了，被當成另一個程式；開機啟動沒被打開。安裝版背景更新的安裝紀錄在 `%LOCALAPPDATA%\youban-desktop-pet\update\setup.log`，更新後柚伴沒回來就先看它。
 
 ## 圖片素材
 

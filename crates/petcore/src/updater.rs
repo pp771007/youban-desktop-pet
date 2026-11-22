@@ -40,8 +40,11 @@ const SETUP_ASSET_EXT: &str = ".exe";
 const UNINSTALLER: &str = "unins000.exe";
 /// 下載下來的安裝程式在 staged 裡的名字。
 const SETUP_FILE: &str = "setup.exe";
-/// 不顯示畫面、不問問題；`/relaunch=1` 讓安裝程式裝完把柚伴開回來。
-const SETUP_ARGS: [&str; 4] = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1"];
+/// 不顯示畫面、不問問題；`/relaunch=1` 讓安裝程式裝完把柚伴開回來；
+/// `!desktopicon`：使用者刪掉的桌面捷徑不要每次更新又建回來（VS Code 的背景更新也這樣帶）。
+const SETUP_ARGS: [&str; 5] = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1", "/MERGETASKS=!desktopicon"];
+/// 背景安裝的紀錄（放在 update 資料夾）：裝失敗、柚伴沒回來時查原因用。
+const SETUP_LOG: &str = "setup.log";
 const OLD_EXT: &str = "old";
 /// 解好的新版旁邊記一下版本號（放在 staged 外面，換檔時不會被複製進安裝資料夾）。
 const VERSION_FILE: &str = "staged-version";
@@ -118,7 +121,8 @@ pub fn discard_stale(dir: &Path) {
 pub fn apply_and_restart(staged: &Path, install_dir: &Path) -> io::Result<()> {
     let setup = staged.join(SETUP_FILE);
     if setup.is_file() {
-        std::process::Command::new(setup).args(SETUP_ARGS).spawn()?;
+        let log = staged.parent().unwrap_or(staged).join(SETUP_LOG);
+        std::process::Command::new(setup).args(SETUP_ARGS).arg(format!("/LOG={}", log.display())).spawn()?;
         return Ok(());
     }
     apply(staged, install_dir)?;
