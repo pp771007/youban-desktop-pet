@@ -49,8 +49,6 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 
 3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
 
-自動更新下載的是 zip（兩種版本都一樣）：新的檔案直接蓋進安裝資料夾。
-
 想先確認建置沒壞：Actions 頁手動 Run workflow，只測試和打包（zip 留在執行紀錄），不發 Release。
 本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。不想裝進系統的話，Inno Setup 的安裝檔可以 `/PORTABLE=1 /CURRENTUSER /DIR=<資料夾>` 解到任何地方，再把 `$env:ISCC` 指到裡面的 `ISCC.exe`。
 在 Git Bash 裡跑會叫到 GNU tar 而失敗，請從 PowerShell 跑。
