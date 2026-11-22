@@ -15,7 +15,7 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -38,14 +38,23 @@ jobs:
         run: ./scripts/package.ps1
 
       - name: 留一份 zip 在執行紀錄
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: zip
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.sha256
 
       - name: 發 Release
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" (Get-Item dist/*.zip).FullName --title "柚伴 ${{ github.ref_name }}" --notes-from-tag
+        run: |
+          # 說明 = tag 訊息 ＋ SHA-256 驗證碼與驗證方法（玩家下載後可以自己比對）
+          $zip = Get-Item dist/*.zip
+          $hash = (Get-Content "$($zip.FullName).sha256" -Raw).Split(' ')[0]
+          $notes = (git tag -l --format='%(contents)' "${{ github.ref_name }}") -join "`n"
+          $notes += "`n`n### 檔案驗證`n`nSHA-256：``$hash```n`n下載後在 PowerShell 執行 ``Get-FileHash $($zip.Name)``，算出來的值跟上面一樣就是完整、沒被改過的檔案。`n"
+          [System.IO.File]::WriteAllText("$PWD/notes.md", $notes)
+          gh release create "${{ github.ref_name }}" $zip.FullName "$($zip.FullName).sha256" --title "柚伴 ${{ github.ref_name }}" --notes-file notes.md

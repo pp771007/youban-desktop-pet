@@ -47,7 +47,7 @@ target\debug\petsettings.exe      # 設定（也可以從桌寵右鍵選單開�
    git push origin v0.2.0
    ```
 
-3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release 掛上 `youban-desktop-pet-<版本>.zip`。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
+3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release，掛上 `youban-desktop-pet-<版本>.zip` 與它的 `.sha256`，說明最後自動附上 SHA-256 驗證碼。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
 
 想先確認建置沒壞：Actions 頁手動 Run workflow，只測試和打包（zip 留在執行紀錄），不發 Release。
 本機打包：`powershell -File scripts\package.ps1`（產生 `dist\youban-desktop-pet-<版本>.zip`）。
