@@ -35,6 +35,9 @@ SetupIconFile=..\crates\petcore\assets\app.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 WizardStyle=modern
+; 左側大圖與右上小圖，每種螢幕縮放各一張（Inno 自己挑最接近的，不會糊）
+WizardImageFile=wizard-164.bmp,wizard-192.bmp,wizard-246.bmp,wizard-273.bmp,wizard-328.bmp,wizard-355.bmp,wizard-410.bmp
+WizardSmallImageFile=small-55.bmp,small-64.bmp,small-83.bmp,small-92.bmp,small-110.bmp,small-119.bmp,small-138.bmp
 Compression=lzma2/max
 SolidCompression=yes
 ; 裝新版時柚伴正在跑：自動請它關掉，裝完不自動重開（最後一頁有「啟動柚伴」可以勾）。
@@ -43,6 +46,12 @@ RestartApplications=no
 
 [Languages]
 Name: "zh"; MessagesFile: "ChineseTraditional.isl"
+
+[Messages]
+WelcomeLabel1=歡迎來到柚伴
+WelcomeLabel2=接下來會把柚伴 {#AppVersion} 裝到你的電腦上。%n%n一隻住在桌面上的小水豚：在工作列上散步、陪你上班、提醒你休息。%n%n不需要系統管理員權限，大約幾秒鐘就好。
+FinishedHeadingLabel=柚伴裝好了
+FinishedLabel=水豚已經準備好搬進你的桌面了。對牠按右鍵可以打開設定。
 
 [Tasks]
 Name: "autostart"; Description: "開機時自動啟動柚伴"
