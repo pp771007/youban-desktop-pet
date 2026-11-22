@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>柚伴設定</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="shell">
+    <nav class="sidebar" aria-label="設定分類">
+      <div class="brand">
+        <div class="brand-avatar"><img id="brand-pet" alt=""></div>
+        <div class="brand-text">
+          <div class="brand-name" id="brand-name">柚伴</div>
+          <div class="brand-status" id="brand-status"><span class="dot"></span><span>陪你中</span></div>
+        </div>
+      </div>
+      <button class="nav-item" data-page="reminders"><span class="icon" style="--i:url(icons/bell.svg)"></span>提醒</button>
+      <button class="nav-item" data-page="pets"><span class="icon" style="--i:url(icons/paw-print.svg)"></span>桌寵</button>
+      <button class="nav-item" data-page="windows"><span class="icon" style="--i:url(icons/app-window.svg)"></span>視窗歸位</button>
+      <button class="nav-item" data-page="general"><span class="icon" style="--i:url(icons/settings.svg)"></span>一般</button>
+    </nav>
+    <main class="content">
+      <div class="banner" id="core-banner" hidden>
+        <span class="icon" style="--i:url(icons/power.svg)"></span>
+        <span class="banner-text">柚伴沒有在執行</span>
+        <button class="btn btn-secondary btn-small" id="start-core">啟動柚伴</button>
+      </div>
+      <div id="page"></div>
+    </main>
+  </div>
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="drawer" id="drawer" aria-hidden="true"></aside>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script src="actions.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

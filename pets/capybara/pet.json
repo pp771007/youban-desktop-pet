@@ -1,0 +1,13 @@
+{
+  "spec": 1,
+  "name": "水豚",
+  "states": {
+    "drag": { "heightRatio": 1.0 },
+    "land": { "heightRatio": 0.56 },
+    "sleep": { "heightRatio": 0.77 },
+    "sit": { "heightRatio": 0.93 },
+    "doze": { "heightRatio": 0.89 },
+    "yawn": { "heightRatio": 0.96 },
+    "wake": { "heightRatio": 0.8 }
+  }
+}

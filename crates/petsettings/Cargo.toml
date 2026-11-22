@@ -1,0 +1,26 @@
+[package]
+name = "petsettings"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+petkit = { path = "../petkit" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tauri = { version = "2", features = [] }
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_DataExchange",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+]

@@ -1,0 +1,890 @@
+'use strict';
+
+// 設定程式前端：只讀寫設定檔與送指令，所有規則（假日、排程）都在 Rust 那邊算。
+
+const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
+
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']; // ISO：1 = 星期一
+const REPEAT_KINDS = [['once', '單次'], ['daily', '每天'], ['weekly', '每週'], ['monthly', '每月'], ['workdays', '工作日'], ['interval', '定時']];
+const HOLIDAY_POLICIES = [['normal', '照常'], ['skip', '跳過'], ['nextWorkday', '順延'], ['prevWorkday', '提前']];
+const MONTHLY_KINDS = [['day', '第幾號'], ['lastDay', '月底'], ['nthWeekday', '第幾個星期幾']];
+const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後一個'];
+const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
+const NEVER_SLEEP_SECS = 365 * 24 * 3600;
+const SLEEP_CHOICES = [[60, '1 分'], [180, '3 分'], [300, '5 分'], [600, '10 分'], [1800, '30 分'], [NEVER_SLEEP_SECS, '不睡']];
+const SIZE_LABELS = ['小', '中', '大'];
+const ACTIVITY_CHOICES = [['lively', '活潑'], ['normal', '普通'], ['calm', '安靜']];
+const ROAM_CHOICES = [['screen', '整個螢幕'], ['nearby', '只在附近']];
+const TALK_CHOICES = [['often', '常講'], ['sometimes', '偶爾'], ['never', '不講']];
+const DAY_KINDS = [['holiday', '視同放假'], ['workday', '視同上班']];
+/** 動作速度：以規範預設為基準的倍率。 */
+const SPEEDS = [['slow', '慢', 0.6], ['normal', '普通', 1], ['fast', '快', 1.5]];
+const DEFAULT_VARIANT = 'default';
+const PLAYER_TICK_MS = 50;
+const TOAST_MS = 2200;
+const CORE_POLL_MS = 3000;
+const CONFIRM_MS = 3000;
+const PREVIEW_DEBOUNCE_MS = 150;
+const LAYOUT_REFRESH_MS = 600;
+const DEFAULT_PAGE = 'reminders';
+/** 功能開關：設定檔 features 的欄位 → 名稱與圖示。 */
+const FEATURES = [['reminders', '提醒', 'bell'], ['windowRestore', '視窗歸位', 'app-window']];
+
+const state = {
+  page: DEFAULT_PAGE,
+  config: null,
+  file: { reminders: [], dayOverrides: {} },
+  nextTimes: {},
+  pets: [],
+  sizes: [],
+  version: '',
+  coreRunning: false,
+  windows: [],
+  autostart: null,
+  autostartError: '',
+};
+
+// ---------- 小工具 ----------
+
+function h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === 'style') el.style.cssText = v;
+    else if (k === 'value') el.value = v;
+    else if (k === 'checked') el.checked = v;
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const c of children.flat()) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  return el;
+}
+
+const icon = (name) => h('span', { class: 'icon', style: `--i:url(icons/${name}.svg)` });
+
+function segmented(options, current, onPick) {
+  return h('div', { class: 'segmented', role: 'group' },
+    options.map(([value, label]) => h('button', { type: 'button', 'aria-pressed': String(value === current), onclick: () => onPick(value) }, label)));
+}
+
+function toast(text) {
+  const el = document.getElementById('toast');
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => { el.hidden = true; }, TOAST_MS);
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const parseDate = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const isoWeekday = (d) => ((d.getDay() + 6) % 7) + 1;
+const shortDate = (s) => { const d = parseDate(s); return `${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[isoWeekday(d) - 1]}）`; };
+
+/** "2026-03-02T09:00:00" → 今天 09:00 / 明天 09:00 / 3/4（三）09:00 */
+function friendlyWhen(at) {
+  const [date, time] = at.split('T');
+  const hm = time.slice(0, 5);
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (date === isoDate(today)) return `今天 ${hm}`;
+  if (date === isoDate(tomorrow)) return `明天 ${hm}`;
+  return `${shortDate(date)} ${hm}`;
+}
+
+function repeatSummary(r) {
+  const rep = r.repeat;
+  switch (rep.kind) {
+    case 'once': return `單次 · ${shortDate(r.startDate)}`;
+    case 'daily': return '每天';
+    case 'weekly': return `每週${rep.days.slice().sort().map((d) => WEEKDAYS[d - 1]).join('、')}`;
+    case 'monthly': {
+      const rule = rep.rule;
+      if (rule.kind === 'day') return `每月 ${rule.day} 號`;
+      if (rule.kind === 'lastDay') return '每月月底';
+      return `每月${NTH_LABELS[rule.nth - 1]}星期${WEEKDAYS[rule.weekday - 1]}`;
+    }
+    case 'workdays': return '工作日';
+    case 'interval': return `每 ${rep.everyMinutes} 分鐘 · 到 ${rep.until}${rep.workdaysOnly ? ' · 上班日' : ''}`;
+    default: return '';
+  }
+}
+
+/** 自己就照上班日走的規則，沒有「遇到假日」這個選項。 */
+const usesHolidayPolicy = (r) => !(r.repeat.kind === 'workdays' || (r.repeat.kind === 'interval' && r.repeat.workdaysOnly));
+const holidayLabel = (p) => (HOLIDAY_POLICIES.find(([v]) => v === p) || [])[1];
+
+// ---------- 主題（design/tokens.json → CSS 變數） ----------
+
+function applyTokens(tokens) {
+  const kebab = (s) => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  const palette = (p) => Object.entries(p).map(([k, v]) => `--color-${kebab(k)}:${v};`).join('');
+  const flat = [];
+  const walk = (obj, prefix) => {
+    for (const [k, v] of Object.entries(obj)) {
+      const name = `${prefix}-${kebab(k)}`;
+      if (Array.isArray(v)) flat.push(`${name}:${v.join(',')};`);
+      else if (typeof v === 'object') walk(v, name);
+      else flat.push(`${name}:${v};`);
+    }
+  };
+  for (const [section, value] of Object.entries(tokens)) if (section !== 'color') walk(value, `--${section}`);
+  const css = `:root{${palette(tokens.color.light)}${flat.join('')}}`
+    + `@media (prefers-color-scheme: dark){:root{${palette(tokens.color.dark)}}}`;
+  document.head.append(h('style', {}, css));
+}
+
+// ---------- 資料 ----------
+
+async function loadReminders() {
+  state.file = await invoke('load_reminders');
+  state.file.dayOverrides = state.file.dayOverrides || {};
+  await refreshNextTimes();
+}
+
+async function refreshNextTimes() {
+  const entries = await Promise.all(state.file.reminders.map(async (r) => {
+    const items = await invoke('preview', { reminder: r, overrides: state.file.dayOverrides });
+    const fire = items.find((i) => i.kind === 'fire');
+    return [r.id, fire ? fire.at : null];
+  }));
+  state.nextTimes = Object.fromEntries(entries);
+}
+
+async function saveReminders() {
+  await invoke('save_reminders', { file: state.file });
+  await refreshNextTimes();
+}
+
+async function saveConfig() {
+  await invoke('save_config', { config: state.config });
+}
+
+/** 設定列：左邊標題（可帶圖示與一行小字），右邊控制項。 */
+function settingRow(title, control, desc) {
+  return h('div', { class: 'setting' },
+    h('div', { class: 'setting-main' }, h('div', { class: 'setting-title' }, title), desc ? h('div', { class: 'setting-desc' }, desc) : null),
+    control);
+}
+
+/** 表單欄位：標籤永遠在上面（不拿 placeholder 當標籤）。 */
+function field(label, control, id) {
+  return h('div', { class: 'field' }, h('label', { for: id }, label), control);
+}
+
+/** 直接改設定檔某個欄位的開關。 */
+function configSwitch(key, label) {
+  return h('label', { class: 'switch' },
+    h('input', { type: 'checkbox', checked: state.config[key], 'aria-label': label, onchange: async (e) => { state.config[key] = e.target.checked; await saveConfig(); render(); } }),
+    h('span'));
+}
+
+async function setFeature(key, on) {
+  state.config.features[key] = on;
+  await saveConfig();
+  render();
+}
+
+/** 功能關著時，那一頁只留標題和一個「開啟」。 */
+function featureOff(page, key) {
+  if (state.config.features[key]) return false;
+  const [, name] = FEATURES.find(([k]) => k === key);
+  page.append(h('div', { class: 'page-head' }, h('h1', {}, name)));
+  page.append(h('div', { class: 'card empty' },
+    h('img', { src: currentPetImage(), alt: '' }),
+    h('div', { class: 'empty-title' }, `${name}已關閉`),
+    h('button', { class: 'btn btn-primary', onclick: () => setFeature(key, true) }, icon('power'), `開啟${name}`)));
+  return true;
+}
+
+// ---------- 頁面：提醒 ----------
+
+function renderReminders(page) {
+  if (featureOff(page, 'reminders')) return;
+  const sorted = state.file.reminders.slice().sort((a, b) => {
+    const ta = state.nextTimes[a.id] || '9999', tb = state.nextTimes[b.id] || '9999';
+    return (a.enabled === b.enabled ? 0 : a.enabled ? -1 : 1) || ta.localeCompare(tb);
+  });
+  page.append(h('div', { class: 'page-head' },
+    h('h1', {}, '提醒'),
+    h('button', { class: 'btn btn-primary', onclick: () => openEditor(null) }, icon('plus'), '新增提醒')));
+
+  if (!sorted.length) {
+    page.append(h('div', { class: 'card empty' },
+      h('img', { src: currentPetImage(), alt: '' }),
+      h('div', { class: 'empty-title' }, '還沒有提醒'),
+      h('button', { class: 'btn btn-primary', onclick: () => openEditor(null) }, icon('plus'), '新增提醒')));
+  } else {
+    page.append(h('div', { class: 'card list' }, sorted.map(reminderRow)));
+  }
+  page.append(h('section', { class: 'section' },
+    h('h2', {}, '提醒方式'),
+    h('div', { class: 'card' },
+      settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
+      settingRow('提醒卡', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是提醒卡的樣子' } }) }, icon('play'), '看看樣子')))));
+  page.append(renderSpecialDays());
+}
+
+function reminderRow(r) {
+  const next = state.nextTimes[r.id];
+  const toggle = h('label', { class: 'switch', onclick: (e) => e.stopPropagation(), title: r.enabled ? '暫停這則提醒' : '恢復這則提醒' },
+    h('input', { type: 'checkbox', checked: r.enabled, 'aria-label': `${r.title} 啟用`, onchange: async (e) => { r.enabled = e.target.checked; await saveReminders(); render(); } }),
+    h('span'));
+  return h('div', { class: `list-row clickable${r.enabled ? '' : ' off'}`, onclick: () => openEditor(r) },
+    h('span', { class: `row-dot${r.enabled ? '' : ' muted'}` }, icon('bell')),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-when' }, r.enabled ? (next ? friendlyWhen(next) : '不會再響') : '已暫停'),
+      h('div', { class: 'row-title' }, r.title),
+      h('div', { class: 'row-meta' },
+        h('span', { class: 'tag' }, icon('clock'), repeatSummary(r)),
+        usesHolidayPolicy(r) && r.holiday !== 'normal' ? h('span', { class: 'tag tag-accent' }, icon('calendar-off'), `遇假日${holidayLabel(r.holiday)}`) : null)),
+    toggle);
+}
+
+function renderSpecialDays() {
+  const entries = Object.entries(state.file.dayOverrides).sort(([a], [b]) => a.localeCompare(b));
+  const draft = { date: isoDate(new Date()), kind: 'holiday' };
+  const kindPicker = h('div');
+  const drawKind = () => { kindPicker.replaceChildren(segmented(DAY_KINDS, draft.kind, (v) => { draft.kind = v; drawKind(); })); };
+  drawKind();
+  const dateInput = h('input', { class: 'input', type: 'date', value: draft.date, 'aria-label': '日期', onchange: (e) => { draft.date = e.target.value; } });
+  return h('section', { class: 'section' },
+    h('h2', {}, '特別日子'),
+    h('div', { class: 'card list' },
+      entries.map(([date, kind]) => h('div', { class: 'list-row' },
+        h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, shortDate(date))),
+        h('span', { class: `tag${kind === 'holiday' ? ' tag-accent' : ''}` }, (DAY_KINDS.find(([v]) => v === kind) || [])[1]),
+        h('button', { class: 'btn btn-ghost btn-small', 'aria-label': `移除 ${shortDate(date)}`, onclick: async () => { delete state.file.dayOverrides[date]; await saveReminders(); render(); } }, icon('x')))),
+      h('div', { class: 'list-row' },
+        h('div', { class: 'row' }, dateInput, kindPicker),
+        h('div', { style: 'flex:1' }),
+        h('button', { class: 'btn btn-secondary btn-small', onclick: async () => {
+          if (!draft.date) return;
+          state.file.dayOverrides[draft.date] = draft.kind;
+          await saveReminders();
+          toast('已加入');
+          render();
+        } }, icon('plus'), '加入'))));
+}
+
+// ---------- 提醒編輯面板 ----------
+
+function newReminder() {
+  const now = new Date();
+  return {
+    id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()),
+    title: '',
+    enabled: true,
+    time: `${pad2((now.getHours() + 1) % 24)}:00`,
+    repeat: { kind: 'daily' },
+    holiday: 'normal',
+    startDate: isoDate(now),
+  };
+}
+
+function repeatDefaults(kind, r) {
+  const today = parseDate(r.startDate);
+  switch (kind) {
+    case 'weekly': return { kind, days: [isoWeekday(today)] };
+    case 'monthly': return { kind, rule: { kind: 'day', day: today.getDate() } };
+    case 'interval': return { kind, everyMinutes: 60, until: '18:00', workdaysOnly: true };
+    default: return { kind };
+  }
+}
+
+let editor = null;
+
+function openEditor(existing) {
+  editor = { draft: structuredClone(existing || newReminder()), isNew: !existing, preview: [], confirmDelete: false };
+  document.getElementById('drawer-backdrop').hidden = false;
+  const drawer = document.getElementById('drawer');
+  drawer.setAttribute('aria-hidden', 'false');
+  drawEditor();
+  requestAnimationFrame(() => drawer.classList.add('open'));
+  updatePreview();
+  setTimeout(() => drawer.querySelector('#title')?.focus(), 50);
+}
+
+function closeEditor() {
+  const drawer = document.getElementById('drawer');
+  drawer.classList.remove('open');
+  drawer.setAttribute('aria-hidden', 'true');
+  document.getElementById('drawer-backdrop').hidden = true;
+  editor = null;
+}
+
+function updatePreview() {
+  clearTimeout(updatePreview.timer);
+  updatePreview.timer = setTimeout(async () => {
+    if (!editor) return;
+    editor.preview = await invoke('preview', { reminder: editor.draft, overrides: state.file.dayOverrides });
+    drawPreview();
+  }, PREVIEW_DEBOUNCE_MS);
+}
+
+function changed() {
+  drawEditor();
+  updatePreview();
+}
+
+function editorValid(r) {
+  return r.title.trim() && r.time && !(r.repeat.kind === 'weekly' && !r.repeat.days.length);
+}
+
+function drawEditor() {
+  const r = editor.draft;
+  const drawer = document.getElementById('drawer');
+
+  const repeatExtra = (() => {
+    const rep = r.repeat;
+    if (rep.kind === 'once') {
+      return field('日期', h('input', { id: 'once-date', class: 'input', type: 'date', value: r.startDate, onchange: (e) => { r.startDate = e.target.value; changed(); } }), 'once-date');
+    }
+    if (rep.kind === 'weekly') {
+      return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '星期'),
+        h('div', { class: 'chips' }, WEEKDAYS.map((label, i) => {
+          const day = i + 1;
+          const on = rep.days.includes(day);
+          return h('button', { type: 'button', class: 'chip', 'aria-pressed': String(on), 'aria-label': `星期${label}`, onclick: () => {
+            rep.days = on ? rep.days.filter((d) => d !== day) : [...rep.days, day].sort();
+            changed();
+          } }, label);
+        })));
+    }
+    if (rep.kind === 'monthly') {
+      const rule = rep.rule;
+      const daySelect = h('select', { class: 'select', 'aria-label': '幾號', onchange: (e) => { rule.day = Number(e.target.value); changed(); } },
+        Array.from({ length: 31 }, (_, i) => h('option', { value: i + 1, selected: rule.day === i + 1 }, `${i + 1} 號`)));
+      const nthSelect = h('select', { class: 'select', 'aria-label': '第幾個', onchange: (e) => { rule.nth = Number(e.target.value); changed(); } },
+        NTH_LABELS.map((label, i) => h('option', { value: i + 1, selected: rule.nth === i + 1 }, label)));
+      const wdSelect = h('select', { class: 'select', 'aria-label': '星期幾', onchange: (e) => { rule.weekday = Number(e.target.value); changed(); } },
+        WEEKDAYS.map((label, i) => h('option', { value: i + 1, selected: rule.weekday === i + 1 }, `星期${label}`)));
+      return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '哪一天'),
+        segmented(MONTHLY_KINDS, rule.kind, (k) => {
+          const today = parseDate(r.startDate);
+          rep.rule = k === 'day' ? { kind: k, day: today.getDate() } : k === 'lastDay' ? { kind: k } : { kind: k, nth: Math.min(5, Math.ceil(today.getDate() / 7)), weekday: isoWeekday(today) };
+          changed();
+        }),
+        rule.kind === 'day' ? h('div', { class: 'row' }, daySelect) : null,
+        rule.kind === 'nthWeekday' ? h('div', { class: 'row' }, nthSelect, wdSelect) : null);
+    }
+    if (rep.kind === 'interval') {
+      return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '間隔'),
+        h('div', { class: 'row' },
+          '每',
+          h('select', { class: 'select', 'aria-label': '每幾分鐘', onchange: (e) => { rep.everyMinutes = Number(e.target.value); changed(); } },
+            INTERVAL_CHOICES.map((m) => h('option', { value: m, selected: rep.everyMinutes === m }, `${m} 分鐘`))),
+          '到',
+          h('input', { class: 'input input-time', type: 'time', value: rep.until, 'aria-label': '到幾點', onchange: (e) => { rep.until = e.target.value; changed(); } })),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rep.workdaysOnly, onchange: (e) => { rep.workdaysOnly = e.target.checked; changed(); } }), '只在上班日'));
+    }
+    return null;
+  })();
+
+  const deleteBtn = editor.isNew ? null : h('button', {
+    class: `btn btn-danger${editor.confirmDelete ? ' confirming' : ''}`,
+    onclick: async () => {
+      if (!editor.confirmDelete) {
+        editor.confirmDelete = true;
+        drawEditor();
+        clearTimeout(drawEditor.confirmTimer);
+        drawEditor.confirmTimer = setTimeout(() => { if (editor) { editor.confirmDelete = false; drawEditor(); } }, CONFIRM_MS);
+        return;
+      }
+      state.file.reminders = state.file.reminders.filter((x) => x.id !== r.id);
+      await saveReminders();
+      closeEditor();
+      toast('已刪除');
+      render();
+    },
+  }, icon('trash-2'), editor.confirmDelete ? '確定刪除' : '刪除');
+
+  drawer.replaceChildren(
+    h('div', { class: 'drawer-head' },
+      h('h2', {}, editor.isNew ? '新增提醒' : '編輯提醒'),
+      h('button', { class: 'btn btn-ghost btn-small', 'aria-label': '關閉', onclick: closeEditor }, icon('x'))),
+    h('div', { class: 'drawer-body' },
+      field('提醒內容', h('input', { id: 'title', class: 'input', placeholder: '例：喝水、繳卡費', value: r.title, maxlength: 60,
+        oninput: (e) => { r.title = e.target.value; document.getElementById('save-btn').disabled = !editorValid(r); } }), 'title'),
+      field('時間', h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, onchange: (e) => { r.time = e.target.value; changed(); } }), 'time'),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '重複'),
+        segmented(REPEAT_KINDS, r.repeat.kind, (k) => { r.repeat = repeatDefaults(k, r); changed(); })),
+      repeatExtra,
+      usesHolidayPolicy(r) ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, '遇到假日'),
+        segmented(HOLIDAY_POLICIES, r.holiday, (p) => { r.holiday = p; changed(); })) : null,
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '接下來'), h('div', { class: 'preview', id: 'preview' }))),
+    h('div', { class: 'drawer-foot' },
+      deleteBtn,
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'btn btn-ghost', onclick: closeEditor }, '取消'),
+      h('button', { id: 'save-btn', class: 'btn btn-primary', disabled: !editorValid(r), onclick: async () => {
+        r.title = r.title.trim();
+        const i = state.file.reminders.findIndex((x) => x.id === r.id);
+        if (i >= 0) state.file.reminders[i] = r; else state.file.reminders.push(r);
+        await saveReminders();
+        closeEditor();
+        toast('已儲存');
+        render();
+      } }, icon('check'), '儲存')));
+  drawPreview();
+}
+
+function drawPreview() {
+  const box = document.getElementById('preview');
+  if (!box || !editor) return;
+  if (!editor.preview.length) {
+    box.replaceChildren(h('div', { class: 'preview-row' }, h('span', { class: 'when' }, '不會再響')));
+    return;
+  }
+  box.replaceChildren(...editor.preview.map((item) => {
+    if (item.kind === 'skipped') {
+      return h('div', { class: 'preview-row skipped' }, h('span', { class: 'when' }, shortDate(item.date)), h('span', { class: 'tag' }, item.note ? `${item.note} · 跳過` : '假日 · 跳過'));
+    }
+    return h('div', { class: 'preview-row' },
+      h('span', { class: 'when' }, friendlyWhen(item.at)),
+      item.movedFrom ? h('span', { class: 'tag tag-accent' }, `${item.note || '假日'} · 原本 ${shortDate(item.movedFrom)}`) : null);
+  }));
+}
+
+// ---------- 頁面：桌寵 ----------
+
+function currentPet() {
+  return state.pets.find((x) => x.id === state.config?.pet) || state.pets[0];
+}
+
+function currentPetImage() {
+  const p = currentPet();
+  return p ? p.image : '';
+}
+
+/** 側欄上方：現在這隻桌寵的大頭照與名字。 */
+function updateBrand() {
+  const p = currentPet();
+  document.getElementById('brand-pet').src = p ? p.image : '';
+  document.getElementById('brand-name').textContent = p ? p.name : '柚伴';
+}
+
+function renderPets(page) {
+  page.append(h('div', { class: 'page-head' },
+    h('h1', {}, '桌寵'),
+    segmented(state.sizes.map((s, i) => [s, SIZE_LABELS[i]]), state.config.sizeDip, async (s) => { state.config.sizeDip = s; await saveConfig(); render(); })));
+  page.append(h('div', { class: 'pet-grid' },
+    state.pets.map((p) => {
+      const current = p.id === state.config.pet;
+      return h('button', { class: 'pet-card', 'aria-pressed': String(current), onclick: async () => {
+        if (current) return;
+        state.config.pet = p.id;
+        await saveConfig();
+        updateBrand();
+        toast(`已換成 ${p.name}`);
+        render();
+      } },
+      current ? h('span', { class: 'badge' }, icon('check'), '使用中') : null,
+      h('span', { class: 'stage' }, h('img', { src: p.image, alt: '' })),
+      h('span', { class: 'pet-name' }, p.name),
+      p.days ? h('span', { class: 'days' }, icon('heart'), `陪你 ${p.days} 天`) : null);
+    }).map((card, i) => h('div', { class: 'pet-cell' }, card,
+      state.pets[i].editable ? h('button', { class: 'btn btn-secondary btn-small pet-edit', onclick: () => openPetEdit(state.pets[i].id) }, icon('play'), '編輯動作') : null)),
+    h('div', { class: 'pet-cell' },
+      h('button', { class: 'pet-card add', onclick: openNewPet }, h('span', { class: 'add-plus' }, icon('plus')), h('span', { class: 'pet-name' }, '新增桌寵')))));
+  page.append(h('div', { class: 'pets-more' },
+    h('button', { class: 'btn btn-ghost btn-small', onclick: () => invoke('open_pets_dir') }, icon('folder-open'), '打開桌寵資料夾')));
+  page.append(renderBehavior());
+}
+
+/** 讀使用者選的（或拖進來的）圖，交給後端整理。 */
+function readImage(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) { reject(new Error('請選一張圖片')); return; }
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** 一塊可以點、也可以把圖拖進來的區域；`multiple` = 一次可以給好幾張，`onFiles` 收到的是陣列。 */
+function imageDrop(cls, content, onFiles, multiple = false) {
+  const input = h('input', { type: 'file', accept: 'image/*', hidden: true, multiple, onchange: (e) => { if (e.target.files.length) onFiles([...e.target.files]); } });
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  return h('label', {
+    class: cls,
+    ondragover: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.currentTarget.classList.add('dragging'); },
+    ondragleave: (e) => e.currentTarget.classList.remove('dragging'),
+    ondrop: (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.currentTarget.classList.remove('dragging');
+      const files = [...e.dataTransfer.files];
+      if (files.length) onFiles(multiple ? files : files.slice(0, 1));
+    },
+  }, input, ...content);
+}
+
+// ---------- 小動畫：照實際速度一直播 ----------
+
+let players = [];
+const playerStart = performance.now();
+
+/** 一個會自己播的小圖；只有一張就停在那張。 */
+function player(frames, fps, cls) {
+  const img = h('img', { class: cls, src: frames[0] || '', alt: '' });
+  if (frames.length > 1) players.push({ img, frames, fps });
+  return img;
+}
+
+function tickPlayers() {
+  // 畫面重畫後舊的小圖已經不在頁面上，順手丟掉，清單不會越積越長。
+  players = players.filter((p) => p.img.isConnected);
+  const t = (performance.now() - playerStart) / 1000;
+  for (const p of players) {
+    const src = p.frames[Math.floor(t * p.fps) % p.frames.length];
+    if (p.img.getAttribute('src') !== src) p.img.src = src;
+  }
+}
+
+function openDrawer(build) {
+  editor = { pet: true };
+  document.getElementById('drawer-backdrop').hidden = false;
+  const drawer = document.getElementById('drawer');
+  drawer.setAttribute('aria-hidden', 'false');
+  build(drawer);
+  requestAnimationFrame(() => drawer.classList.add('open'));
+}
+
+async function reloadPets() {
+  state.pets = await invoke('list_pets');
+  updateBrand();
+}
+
+function openNewPet() {
+  const draft = { data: null, preview: null, name: '', busy: false };
+  openDrawer((drawer) => {
+    const draw = () => {
+      const ready = draft.preview && draft.name.trim() && !draft.busy;
+      const pick = async ([file]) => {
+        draft.busy = true;
+        draw();
+        try {
+          draft.data = await readImage(file);
+          draft.preview = await invoke('import_preview', { data: draft.data });
+        } catch (err) {
+          toast(String(err.message || err));
+        }
+        draft.busy = false;
+        draw();
+        drawer.querySelector('#pet-name')?.focus();
+      };
+      drawer.replaceChildren(
+        h('div', { class: 'drawer-head' },
+          h('h2', {}, '新增桌寵'),
+          h('button', { class: 'btn btn-ghost btn-small', 'aria-label': '關閉', onclick: closeEditor }, icon('x'))),
+        h('div', { class: 'drawer-body' },
+          draft.preview
+            ? h('div', { class: 'new-pet-preview' },
+              h('span', { class: 'stage big' }, Object.assign(player(draft.preview, 4), { alt: '整理好的桌寵' })),
+              draft.preview.length > 1 ? h('div', { class: 'piece-strip' }, draft.preview.map((src) => h('img', { src, alt: '' }))) : null,
+              imageDrop('btn btn-secondary btn-small', [icon('folder-open'), '換一張'], pick))
+            : imageDrop(`drop-zone${draft.busy ? ' busy' : ''}`, [
+              h('span', { class: 'drop-icon' }, icon('plus')),
+              h('span', { class: 'drop-title' }, draft.busy ? '整理中…' : '把圖拖進來，或點這裡選一張'),
+            ], pick),
+          draft.preview ? field('名字', h('input', { id: 'pet-name', class: 'input', placeholder: '例：小白', maxlength: 20, value: draft.name,
+            oninput: (e) => { draft.name = e.target.value; drawer.querySelector('#create-pet').disabled = !(draft.preview && draft.name.trim()); } }), 'pet-name') : null),
+        h('div', { class: 'drawer-foot' },
+          h('span', { class: 'spacer' }),
+          h('button', { class: 'btn btn-ghost', onclick: closeEditor }, '取消'),
+          h('button', { id: 'create-pet', class: 'btn btn-primary', disabled: !ready, onclick: async () => {
+            try {
+              const id = await invoke('create_pet', { name: draft.name.trim(), data: draft.data });
+              state.config.pet = id;
+              await saveConfig();
+              await reloadPets();
+              closeEditor();
+              toast(`已換成 ${draft.name.trim()}`);
+              await openPetEdit(id);
+            } catch (err) {
+              toast(String(err));
+            }
+          } }, icon('check'), '完成')));
+    };
+    draw();
+  });
+}
+
+// ---------- 頁面：動作編輯 ----------
+
+async function openPetEdit(id) {
+  const states = Object.keys(ACTIONS);
+  const [actions, examples] = await Promise.all([
+    invoke('pet_actions', { id }),
+    Promise.all(states.map((s) => invoke('example_frames', { state: s }))),
+  ]);
+  state.edit = { id, actions, examples: Object.fromEntries(states.map((s, i) => [s, examples[i]])), prompt: null, busy: null, confirmDelete: false };
+  state.page = 'pet-edit';
+  render();
+  document.getElementById('page').parentElement.scrollTop = 0;
+}
+
+/** 改完圖：更新畫面；正在用這隻的話叫桌寵重新載入，馬上在桌面上看到。 */
+async function applyActions(promise, s) {
+  const e = state.edit;
+  try {
+    e.actions = await promise;
+    if (state.config.pet === e.id && state.coreRunning) await invoke('send_core', { command: { cmd: 'switchPet', id: e.id } });
+    if (s === 'idle') await reloadPets();
+  } catch (err) {
+    toast(String(err.message || err));
+  }
+  e.busy = null;
+  render();
+}
+
+function renderPetEdit(page) {
+  const e = state.edit;
+  const pet = state.pets.find((p) => p.id === e.id);
+  if (!pet) { state.page = 'pets'; renderPets(page); return; }
+  page.append(h('div', { class: 'page-head' },
+    h('div', { class: 'row' },
+      h('button', { class: 'btn btn-ghost btn-small', onclick: () => go('pets') }, icon('chevron-left'), '桌寵'),
+      h('h1', {}, pet.name)),
+    h('button', { class: `btn btn-danger btn-small${e.confirmDelete ? ' confirming' : ''}`, onclick: async () => {
+      if (!e.confirmDelete) {
+        e.confirmDelete = true;
+        render();
+        setTimeout(() => { if (state.edit === e) { e.confirmDelete = false; render(); } }, CONFIRM_MS);
+        return;
+      }
+      await invoke('delete_pet', { id: pet.id });
+      if (state.config.pet === pet.id) {
+        state.config.pet = state.pets.find((p) => p.id !== pet.id)?.id || state.config.pet;
+        await saveConfig();
+      }
+      await reloadPets();
+      toast(`已刪除 ${pet.name}`);
+      go('pets');
+    } }, icon('trash-2'), e.confirmDelete ? '確定刪除' : '刪除這隻')));
+  for (const group of ACTION_GROUPS) {
+    page.append(h('section', { class: 'section' },
+      h('h2', {}, group.title),
+      h('div', { class: 'card action-list' }, group.items.map(actionRow))));
+  }
+}
+
+function actionRow(s) {
+  const e = state.edit;
+  const a = ACTIONS[s];
+  const fps = e.actions.fps[s];
+  const base = e.actions.defaultFps[s];
+  const groups = e.actions.groups.filter((g) => g.state === s);
+  if (!groups.length) groups.push({ state: s, variant: DEFAULT_VARIANT, frames: [] });
+  const example = e.examples[s] || [];
+  const hasAnimation = groups.some((g) => g.frames.length > 1);
+  const speed = Math.abs(fps - base) < 0.01 ? 'normal' : fps < base ? 'slow' : 'fast';
+  const nextVariant = String(groups.length + 1);
+  return h('div', { class: 'action', id: `action-${s}` },
+    h('div', { class: 'action-head' },
+      h('div', { class: 'action-name' }, h('div', { class: 'action-title' }, a.label), h('div', { class: 'action-hint' }, a.hint)),
+      hasAnimation ? h('div', { class: 'action-speed' }, segmented(SPEEDS.map(([k, label]) => [k, label]), speed, (k) => {
+        const mul = SPEEDS.find(([key]) => key === k)[2];
+        applyActions(invoke('set_action_speed', { id: e.id, state: s, fps: k === 'normal' ? null : Math.round(base * mul * 10) / 10 }));
+      })) : null,
+      h('button', { class: `btn btn-ghost btn-small${e.prompt === s ? ' active' : ''}`, onclick: () => { e.prompt = e.prompt === s ? null : s; render(); } }, icon('copy'), '給 AI 的提示詞')),
+    e.prompt === s ? promptPanel(s, example) : null,
+    groups.map((g, gi) => actionGroup(s, g, gi, groups.length, fps, example)),
+    s === 'idle' ? imageDrop('btn btn-ghost btn-small add-group', [icon('plus'), '再加一組待機'], (files) => addFrames(s, nextVariant, files), true) : null);
+}
+
+function actionGroup(s, g, gi, count, fps, example) {
+  const e = state.edit;
+  const busy = e.busy === `${s}:${g.variant}`;
+  const thumbs = g.frames.map((src, i) => h('div', {
+    class: 'thumb',
+    draggable: 'true',
+    title: `第 ${i + 1} 張`,
+    ondragstart: (ev) => ev.dataTransfer.setData('text/x-frame', `${g.variant}:${i}`),
+    ondragover: (ev) => { if ([...ev.dataTransfer.types].includes('text/x-frame')) { ev.preventDefault(); ev.currentTarget.classList.add('drop-before'); } },
+    ondragleave: (ev) => ev.currentTarget.classList.remove('drop-before'),
+    ondrop: (ev) => {
+      const [variant, from] = ev.dataTransfer.getData('text/x-frame').split(':');
+      if (variant !== g.variant) return;
+      ev.preventDefault();
+      if (Number(from) !== i) applyActions(invoke('move_frame', { id: e.id, state: s, variant: g.variant, from: Number(from), to: i }), s);
+    },
+  },
+  h('span', { class: 'thumb-no' }, i + 1),
+  h('img', { src, alt: '' }),
+  h('button', { class: 'thumb-remove', 'aria-label': `刪掉第 ${i + 1} 張`, onclick: () => applyActions(invoke('remove_frame', { id: e.id, state: s, variant: g.variant, index: i }), s) }, icon('x'))));
+  return h('div', { class: 'action-group' },
+    h('div', { class: 'compare' },
+      // 範例只放在第一組旁邊；其他組留同寬的空位，你的圖才會對齊。
+      gi === 0
+        ? h('div', { class: 'compare-cell' }, example.length ? player(example, fps, 'compare-img') : h('span', { class: 'compare-empty' }), h('span', { class: 'compare-label' }, '範例'))
+        : h('div', { class: 'compare-cell spacer' }),
+      h('div', { class: `compare-cell mine${g.frames.length ? '' : ' empty'}` },
+        g.frames.length ? player(g.frames, fps, 'compare-img') : h('span', { class: 'compare-empty' }, icon('plus')),
+        h('span', { class: 'compare-label' }, count > 1 ? `第 ${gi + 1} 組` : '你的'))),
+    h('div', { class: 'strip' },
+      thumbs,
+      imageDrop(`thumb add${busy ? ' busy' : ''}`, [icon('plus'), h('span', {}, busy ? '整理中…' : '加圖')], (files) => addFrames(s, g.variant, files), true)));
+}
+
+async function addFrames(s, variant, files) {
+  const e = state.edit;
+  e.busy = `${s}:${variant}`;
+  render();
+  try {
+    const images = await Promise.all(files.map(readImage));
+    await applyActions(invoke('add_frames', { id: e.id, state: s, variant, images }), s);
+  } catch (err) {
+    e.busy = null;
+    toast(String(err.message || err));
+    render();
+  }
+}
+
+function promptPanel(s, example) {
+  const text = actionPrompt(s);
+  return h('div', { class: 'prompt-panel' },
+    h('pre', { class: 'prompt-text' }, text),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn btn-primary btn-small', onclick: async () => { await navigator.clipboard.writeText(text); toast('已複製提示詞'); } }, icon('copy'), '複製提示詞'),
+      example.length ? h('button', { class: 'btn btn-secondary btn-small', onclick: () => invoke('save_example', { state: s, label: ACTIONS[s].label }).then(() => toast('範例圖已存到「下載」')).catch((err) => toast(String(err))) }, icon('download'), '下載範例圖') : null));
+}
+
+function renderBehavior() {
+  const set = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
+  return h('section', { class: 'section' },
+    h('h2', {}, '行為'),
+    h('div', { class: 'card' },
+      settingRow('活潑程度', segmented(ACTIVITY_CHOICES, state.config.activity, (v) => set('activity', v))),
+      settingRow('活動範圍', segmented(ROAM_CHOICES, state.config.roam, (v) => set('roam', v))),
+      settingRow('講話', segmented(TALK_CHOICES, state.config.talk, (v) => set('talk', v))),
+      settingRow('沒碰電腦多久就睡覺', segmented(SLEEP_CHOICES, state.config.sleepAfterSecs, (v) => set('sleepAfterSecs', v))),
+      settingRow('站到視窗上', configSwitch('standOnWindows', '站到視窗上')),
+      settingRow('全螢幕時躲起來', configSwitch('hideInFullscreen', '全螢幕時躲起來'))));
+}
+
+// ---------- 頁面：視窗歸位 ----------
+
+async function refreshWindows() {
+  state.windows = await invoke('window_layout');
+}
+
+function renderWindows(page) {
+  if (featureOff(page, 'windowRestore')) return;
+  const act = async (cmd, done) => {
+    await invoke('send_core', { command: { cmd } });
+    toast(done);
+    setTimeout(async () => { await refreshWindows(); render(); }, LAYOUT_REFRESH_MS);
+  };
+  page.append(h('div', { class: 'page-head' },
+    h('h1', {}, '視窗歸位'),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning, onclick: () => act('restoreLayout', '已恢復') }, icon('rotate-ccw'), '恢復位置'),
+      h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => act('saveLayout', '已記住目前位置') }, icon('save'), '記住目前位置'))));
+  if (!state.windows.length) {
+    page.append(h('div', { class: 'card empty' },
+      h('img', { src: currentPetImage(), alt: '' }),
+      h('div', { class: 'empty-title' }, '還沒有記住任何視窗')));
+    return;
+  }
+  page.append(h('div', { class: 'card list' }, state.windows.map((w) => h('div', { class: 'list-row' },
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title' }, w.title),
+      h('div', { class: 'row-meta' }, w.exe)),
+    h('span', { class: 'tag' }, `${w.width} × ${w.height}`)))));
+}
+
+// ---------- 頁面：一般 ----------
+
+function renderGeneral(page) {
+  page.append(h('div', { class: 'page-head' }, h('h1', {}, '一般')));
+  const autostart = h('label', { class: 'switch' },
+    h('input', { type: 'checkbox', checked: !!state.autostart, disabled: state.autostart === null, 'aria-label': '開機自動啟動', onchange: async (e) => {
+      const on = e.target.checked;
+      state.autostartError = '';
+      try {
+        await invoke('set_autostart', { on });
+        state.autostart = on;
+        toast(on ? '已設定開機自動啟動' : '已取消開機自動啟動');
+      } catch (err) {
+        state.autostartError = String(err);
+      }
+      state.autostart = await invoke('autostart_status').catch(() => state.autostart);
+      render();
+    } }),
+    h('span'));
+  page.append(h('div', { class: 'card' },
+    h('div', { class: 'setting' },
+      h('div', { class: 'setting-main' },
+        h('div', { class: 'setting-title' }, '開機自動啟動'),
+        state.autostartError ? h('div', { class: 'setting-error' }, state.autostartError) : null),
+      autostart),
+    settingRow('自動更新', configSwitch('autoUpdate', '自動更新'), `目前版本 ${state.version}`)));
+  page.append(h('section', { class: 'section' },
+    h('h2', {}, '功能'),
+    h('div', { class: 'card' }, FEATURES.map(([key, name, glyph]) => h('div', { class: 'setting' },
+      h('div', { class: 'setting-main' }, h('div', { class: 'setting-title' }, icon(glyph), name)),
+      h('label', { class: 'switch' },
+        h('input', { type: 'checkbox', checked: state.config.features[key], 'aria-label': name, onchange: (e) => setFeature(key, e.target.checked) }),
+        h('span')))))));
+}
+
+// ---------- 骨架 ----------
+
+const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWindows, general: renderGeneral, 'pet-edit': renderPetEdit };
+/** 不在側欄上的頁面算在哪一個分類底下。 */
+const NAV_PARENT = { 'pet-edit': 'pets' };
+
+function render() {
+  const nav = NAV_PARENT[state.page] || state.page;
+  for (const b of document.querySelectorAll('.nav-item')) {
+    if (b.dataset.page === nav) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  }
+  const page = document.getElementById('page');
+  page.replaceChildren();
+  PAGES[state.page](page);
+}
+
+async function go(name) {
+  state.page = PAGES[name] && !NAV_PARENT[name] ? name : DEFAULT_PAGE;
+  if (state.page === 'windows') await refreshWindows();
+  if (state.page === 'general' && state.autostart === null) state.autostart = await invoke('autostart_status').catch(() => false);
+  render();
+}
+
+async function pollCore() {
+  const running = await invoke('core_running');
+  document.getElementById('core-banner').hidden = running;
+  document.getElementById('brand-status').hidden = !running;
+  if (running !== state.coreRunning) {
+    state.coreRunning = running;
+    render();
+  }
+}
+
+async function main() {
+  applyTokens(await invoke('tokens'));
+  const [config, constants, pets] = await Promise.all([invoke('load_config'), invoke('constants'), invoke('list_pets')]);
+  state.config = config;
+  state.sizes = constants.sizes;
+  state.version = constants.version;
+  state.pets = pets;
+  await loadReminders();
+  updateBrand();
+  for (const b of document.querySelectorAll('.nav-item')) b.addEventListener('click', () => go(b.dataset.page));
+  document.getElementById('drawer-backdrop').addEventListener('click', closeEditor);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && editor) closeEditor(); });
+  document.getElementById('start-core').addEventListener('click', async () => { await invoke('start_core'); setTimeout(pollCore, 800); });
+  await pollCore();
+  await go((await invoke('initial_page')) || DEFAULT_PAGE);
+  setInterval(pollCore, CORE_POLL_MS);
+  setInterval(tickPlayers, PLAYER_TICK_MS);
+}
+
+main();
