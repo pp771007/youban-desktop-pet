@@ -30,6 +30,11 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 - 實機端對端：`Youban.exe --send '{"cmd":"..."}'` 送測試指令（`say`、`toy`、`drop`、`dumpStatus`…，名稱在 `petkit::ipc`），`dumpStatus` 寫到 `%LOCALAPPDATA%\youban-desktop-pet\status.json`。`--send` 從 Bash 下；Windows PowerShell 5.1 會吃掉 JSON 的雙引號。
 - **使用者不在電腦前時，桌寵會睡著、也不講話**（看滑鼠鍵盤多久沒動）。這時要實測行為，就暫時把 `config.json` 的 `sleepAfterSecs` 調大，測完還原；或用測試指令直接觸發。需要一個能移動又不搶焦點的測試視窗：PowerShell 開 WinForms，`ShowWindow(h, 4)`＋`SetWindowPos(..., SWP_NOACTIVATE)`。
 
+## 安裝程式
+
+- `installer/youban.iss` 與 `ChineseTraditional.isl` 要存成 **UTF-8 with BOM**，不然 Inno Setup 讀中文會變亂碼。左側大圖、右上小圖（`wizard-*.bmp`、`small-*.bmp`）每種螢幕縮放各一張，換圖時整組重做。
+- 本機沒有 Inno Setup 時，安裝程式只能在 GitHub Actions 做（手動 Run workflow，zip 和安裝程式都留在執行紀錄）。實測安裝畫面不用搶使用者的滑鼠：找 `TWizardForm` 視窗裡 class 是 `TNewButton` 的按鈕，對它 `PostMessage` 空白鍵按下／放開（`BM_CLICK` 在視窗不在前景時會失效），每頁用 `PrintWindow` 截圖；解除安裝用 `unins000.exe /VERYSILENT /SUPPRESSMSGBOXES`。
+
 ## 圖片素材
 
 - `crates/petcore/assets/` 的圖用 `include_bytes!` 編進執行檔，不用另外打包。
