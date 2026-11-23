@@ -742,8 +742,10 @@ impl Pet {
                 }
                 self.facing_left = vx < 0.0 || (vx == 0.0 && self.facing_left);
                 // 往下掉時穿過某個平台的高度 → 落在上面（往上飛時不會被擋）。
-                let platform = (vy > 0.0).then(|| env.platforms.iter().filter(|p| p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right).map(|p| p.y).min_by(f32::total_cmp)).flatten();
-                if let Some(top) = platform.or((self.y >= env.ground_y).then_some(env.ground_y)) {
+                let platform = (vy > 0.0).then(|| env.platforms.iter().filter(|p| p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right).min_by(|a, b| a.y.total_cmp(&b.y))).flatten();
+                if let Some(top) = platform.map(|p| p.y).or((self.y >= env.ground_y).then_some(env.ground_y)) {
+                    // 落在哪就站在哪：起飛前站的視窗還在原地的話，不換掉會被 `stand` 拉回去。
+                    self.riding = platform.map(|p| (p.window, p.window_left));
                     self.y = top;
                     self.emote(Emote::Dust);
                     self.set_mode(Mode::Land, now);
@@ -1629,6 +1631,25 @@ mod tests {
             }
         }
         assert!(fell, "walked off the edge and fell to the floor");
+    }
+
+    #[test]
+    fn thrown_from_one_window_onto_another_stays_there() {
+        let mut env = env();
+        env.platforms = vec![
+            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0 },
+            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0 },
+        ];
+        let mut now = 0.0;
+        let mut pet = Pet::new(500.0, 700.0, now, 6);
+        run(&mut pet, &mut now, 0.1, &env);
+        assert_eq!(pet.riding_window(), Some(1));
+        pet.input(Input::PointerDown { x: 500.0, y: 650.0 }, now, &env);
+        pet.input(Input::PointerMove { x: 500.0, y: 300.0 }, now, &env);
+        pet.input(Input::PointerUp, now, &env);
+        run(&mut pet, &mut now, 2.0, &env);
+        assert_eq!(pet.y, 400.0, "stays on the upper window instead of snapping back to the one it was picked from");
+        assert_eq!(pet.riding_window(), Some(2));
     }
 
     #[test]
