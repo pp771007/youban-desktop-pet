@@ -26,6 +26,7 @@ const TEMPLATES = [
   { label: '看遠方', title: '看看遠方，讓眼睛休息', everyMinutes: 30 },
 ];
 const TEMPLATE_HOURS = ['09:00', '18:00'];
+const PET_NAME_MAX = 20;
 const NEVER_SLEEP_SECS = 365 * 24 * 3600;
 const SLEEP_CHOICES = [[60, '1 分'], [180, '3 分'], [300, '5 分'], [600, '10 分'], [1800, '30 分'], [NEVER_SLEEP_SECS, '不睡']];
 const SIZE_LABELS = ['小', '中', '大'];
@@ -681,7 +682,7 @@ function openNewPet() {
               h('span', { class: 'drop-icon' }, icon('plus')),
               h('span', { class: 'drop-title' }, draft.busy ? '整理中…' : '把圖拖進來，或點這裡選一張'),
             ], pick),
-          draft.preview ? field('名字', h('input', { id: 'pet-name', class: 'input', placeholder: '例：小白', maxlength: 20, value: draft.name,
+          draft.preview ? field('名字', h('input', { id: 'pet-name', class: 'input', placeholder: '例：小白', maxlength: PET_NAME_MAX, value: draft.name,
             oninput: (e) => { draft.name = e.target.value; drawer.querySelector('#create-pet').disabled = !(draft.preview && draft.name.trim()); } }), 'pet-name') : null),
         h('div', { class: 'drawer-foot' },
           h('span', { class: 'spacer' }),
@@ -748,10 +749,9 @@ function renderPetEdit(page) {
         toast(`刪不掉：${err}`);
         return;
       }
-      if (state.config.pet === pet.id) {
-        state.config.pet = state.pets.find((p) => p.id !== pet.id)?.id || state.config.pet;
-        await saveConfig();
-      }
+      if (state.config.pet === pet.id) state.config.pet = state.pets.find((p) => p.id !== pet.id)?.id || state.config.pet;
+      if (state.config.petNames) delete state.config.petNames[pet.id];
+      await saveConfig();
       await reloadPets();
       toast(`已刪除 ${pet.name}`);
       go('pets');
@@ -880,11 +880,28 @@ function areaRows() {
   return [];
 }
 
+/** 現在這隻的名字；清空就回到桌寵包自己的名字（顯示成 placeholder）。 */
+function petNameInput() {
+  const p = currentPet();
+  return h('input', { class: 'input input-name', 'aria-label': '名字', maxlength: PET_NAME_MAX, placeholder: p.species, value: state.config.petNames?.[p.id] || '',
+    onchange: async (e) => {
+      const names = { ...state.config.petNames };
+      const name = e.target.value.trim();
+      if (name) names[p.id] = name;
+      else delete names[p.id];
+      state.config.petNames = names;
+      await saveConfig();
+      await reloadPets();
+      render();
+    } });
+}
+
 function renderBehavior() {
   const set = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
   return h('section', { class: 'section' },
     h('h2', {}, '行為'),
     h('div', { class: 'card' },
+      settingRow('名字', petNameInput()),
       settingRow('活潑程度', segmented(ACTIVITY_CHOICES, state.config.activity, (v) => set('activity', v))),
       settingRow('活動範圍', segmented(ROAM_CHOICES, state.config.roam, (v) => set('roam', v))),
       ...areaRows(),

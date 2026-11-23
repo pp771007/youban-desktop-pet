@@ -232,6 +232,7 @@ button, input, select { font: inherit; color: inherit; }
 .input::placeholder { color: var(--color-text-disabled); }
 .input-time { width: 140px; }
 .input-number { width: 88px; }
+.input-name { width: 200px; }
 
 .row { display: flex; align-items: center; gap: calc(var(--space-2) * 1px); flex-wrap: wrap; }
 

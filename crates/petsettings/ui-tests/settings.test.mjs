@@ -63,7 +63,7 @@ function mockBackend(tokens) {
       }
       return [{ kind: 'fire', at: '2027-03-02T09:00:00', movedFrom: null, note: null }, { kind: 'fire', at: '2027-03-03T09:00:00', movedFrom: '2027-02-28', note: null }];
     },
-    list_pets: () => structuredClone(db.pets),
+    list_pets: () => db.pets.map((p) => ({ ...structuredClone(p), species: p.name, name: db.config.petNames?.[p.id]?.trim() || p.name })),
     import_preview: ({ data }) => { if (!data.startsWith('data:image/')) throw '讀不懂這張圖'; return [png, png, png, png]; },
     create_pet: ({ name }) => { db.pets.push({ id: 'my-1', name, image: png, editable: true, days: 0 }); return 'my-1'; },
     pet_actions: () => structuredClone(db.actions),
@@ -220,6 +220,18 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).click();
     check(await page.evaluate(() => window.__mock.config.pet) === 'capybara-side', 'switching pet writes config');
     check((await page.locator('.pet-card', { hasText: '水豚' }).first().innerText()).includes('陪你 12 天'), 'pet card shows days together');
+    // 取名字：寫進設定，卡片與側欄跟著換；清空就回到桌寵包自己的名字
+    const nameBox = () => page.getByRole('textbox', { name: '名字' });
+    check(await nameBox().getAttribute('placeholder') === '水豚（側面）' && await nameBox().inputValue() === '', 'name box shows the pet kind until named');
+    await nameBox().fill('  圓圓 ');
+    await nameBox().press('Enter');
+    await page.locator('.pet-card', { hasText: '圓圓' }).waitFor();
+    check(await page.evaluate(() => window.__mock.config.petNames?.['capybara-side']) === '圓圓' && await page.locator('#brand-name').innerText() === '圓圓', 'naming the pet writes config and shows the name');
+    if (shotDir) await page.locator('.section', { hasText: '活潑程度' }).screenshot({ path: path.join(shotDir, `settings-pet-name-${scheme}.png`) });
+    await nameBox().fill('');
+    await nameBox().press('Enter');
+    await page.locator('.pet-card', { hasText: '水豚（側面）' }).waitFor();
+    check(await page.evaluate(() => !('capybara-side' in (window.__mock.config.petNames || {}))), 'clearing the name goes back to the pet kind');
     await page.getByRole('button', { name: '大' }).click();
     check(await page.evaluate(() => window.__mock.config.sizeDip) === 176, 'size choice writes config');
     await page.getByRole('button', { name: '安靜' }).click();

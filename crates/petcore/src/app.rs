@@ -530,7 +530,7 @@ struct PetChoice {
     picture: PathBuf,
 }
 
-fn list_pets(pets_dir: &Path) -> Vec<PetChoice> {
+fn list_pets(pets_dir: &Path, config: &Config) -> Vec<PetChoice> {
     let mut out: Vec<PetChoice> = std::fs::read_dir(pets_dir)
         .into_iter()
         .flatten()
@@ -539,7 +539,7 @@ fn list_pets(pets_dir: &Path) -> Vec<PetChoice> {
             let id = e.file_name().to_str()?.to_owned();
             let p = pack::load(&e.path()).ok()?;
             let picture = p.states.get(states::IDLE)?.variants.first()?.frames.first()?.clone();
-            Some(PetChoice { id, name: p.name, picture })
+            Some(PetChoice { name: config.pet_name(&id, &p.name).to_owned(), id, picture })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -1182,7 +1182,7 @@ impl App {
 
     fn open_menu(&mut self) -> Result<()> {
         self.menu = None;
-        let pets = list_pets(&self.pets_dir);
+        let pets = list_pets(&self.pets_dir, &self.config);
         let entries = self.menu_entries(&pets);
         self.menu_pets = pets;
         let (x, y) = cursor();
@@ -1774,7 +1774,7 @@ impl App {
         let s = self.dpi_scale();
         match action {
             Action::SwitchPet => {
-                let pets = list_pets(&self.pets_dir);
+                let pets = list_pets(&self.pets_dir, &self.config);
                 if let Some(pet) = pets.iter().find(|p| p.id != self.pack.id) {
                     self.begin_switch(pet.id.clone(), false);
                 }

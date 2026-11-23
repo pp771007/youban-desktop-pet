@@ -2,6 +2,7 @@
 //! 缺的欄位一律用預設值，舊版設定檔照樣讀得進來。
 //! 核心程式自己的執行狀態（桌寵位置等）不放這裡，免得兩支程式搶著寫同一個檔。
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -26,6 +27,9 @@ pub const DEFAULT_SLEEP_AFTER_SECS: u64 = 300;
 #[serde(default, rename_all = "camelCase")]
 pub struct Config {
     pub pet: String,
+    /// 使用者幫每隻桌寵取的名字（桌寵 id → 名字）；沒取的用桌寵包自己的名字。放這裡不放 `pet.json`：
+    /// 內建桌寵的資料夾更新時會整個換掉。
+    pub pet_names: BTreeMap<String, String>,
     pub size_dip: u32,
     pub sleep_after_secs: u64,
     pub activity: Activity,
@@ -157,6 +161,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             pet: DEFAULT_PET.to_owned(),
+            pet_names: BTreeMap::new(),
             size_dip: DEFAULT_SIZE_DIP,
             sleep_after_secs: DEFAULT_SLEEP_AFTER_SECS,
             activity: Activity::default(),
@@ -194,6 +199,11 @@ impl Config {
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
         write_atomic(path, &serde_json::to_vec_pretty(self).map_err(io::Error::other)?)
+    }
+
+    /// 這隻桌寵叫什麼：使用者取的名字，沒取就是桌寵包的名字（`species`，例如「水豚」）。
+    pub fn pet_name<'a>(&'a self, id: &str, species: &'a str) -> &'a str {
+        self.pet_names.get(id).map(|n| n.trim()).filter(|n| !n.is_empty()).unwrap_or(species)
     }
 }
 

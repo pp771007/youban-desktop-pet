@@ -42,7 +42,10 @@ struct Init {
 #[derive(Serialize)]
 struct PetInfo {
     id: String,
+    /// 使用者取的名字，沒取就跟 `species` 一樣。
     name: String,
+    /// 桌寵包自己的名字（水豚、貓咪…）：名字欄空著時顯示的預設值。
+    species: String,
     image: String,
     editable: bool,
     /// 陪伴天數（核心寫的 `companion.json`，這裡只讀）。
@@ -138,6 +141,7 @@ fn preview(reminder: Reminder, overrides: BTreeMap<NaiveDate, DayKind>) -> Vec<P
 fn list_pets() -> Vec<PetInfo> {
     let Some(dir) = paths::pets_dir() else { return Vec::new() };
     let companions = CompanionFile::load(&paths::companion_file()).unwrap_or_default();
+    let config = Config::load(&paths::config_file()).unwrap_or_default();
     let mut out: Vec<PetInfo> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
@@ -147,7 +151,7 @@ fn list_pets() -> Vec<PetInfo> {
             let p = pack::load(&e.path()).ok()?;
             let image = pet_file_url(&dir, &p.states[states::IDLE].variants[0].frames[0])?;
             let days = companions.days(&id);
-            Some(PetInfo { id, name: p.name, image, editable: p.editable, days })
+            Some(PetInfo { name: config.pet_name(&id, &p.name).to_owned(), species: p.name, id, image, editable: p.editable, days })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
