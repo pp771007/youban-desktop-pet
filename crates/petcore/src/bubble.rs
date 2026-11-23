@@ -16,7 +16,7 @@ use crate::log;
 use crate::render::{Canvas, Gfx, TRANSPARENT};
 use crate::theme::{self, Palette, Rgba};
 
-const CARD_WIDTH_DIP: f32 = 300.0;
+pub const CARD_WIDTH_DIP: f32 = 300.0;
 /// 左上角圓形圖示底的直徑，與裡面圖示的大小。
 const TILE_DIP: f32 = 40.0;
 const GLYPH_DIP: f32 = 22.0;
@@ -567,6 +567,8 @@ pub struct Bubble {
     painter: CardPainter,
     card: Option<Card>,
     shown_at: f64,
+    /// 上一次畫的時候，卡片出現了多久（毫秒）。
+    painted_age_ms: f32,
     hover: Option<usize>,
     pressed: Option<usize>,
     dirty: bool,
@@ -584,6 +586,7 @@ impl Bubble {
             painter: CardPainter::new(gfx)?,
             card: None,
             shown_at: 0.0,
+            painted_age_ms: f32::MAX,
             hover: None,
             pressed: None,
             dirty: false,
@@ -615,6 +618,7 @@ impl Bubble {
     pub fn show(&mut self, card: Card, now: f64, animate: bool) {
         if animate {
             self.shown_at = now;
+            self.painted_age_ms = 0.0;
         }
         self.card = Some(card);
         self.hover = None;
@@ -636,7 +640,9 @@ impl Bubble {
         let Some(card) = self.card.clone() else { return Ok(()) };
         let s = dpi_scale;
         let age_ms = ((now - self.shown_at) * 1000.0) as f32;
-        let animating = age_ms < theme::MOTION_MEDIUM;
+        // 更新得很慢的時候（桌寵躲起來，一秒只更新兩次）出場動畫可能整段被跳過：
+        // 動畫結束後一定再畫一次最後那一格，不然會停在剛出現、幾乎全透明的那格。
+        let animating = age_ms < theme::MOTION_MEDIUM || self.painted_age_ms < theme::MOTION_MEDIUM;
         // 先用正中間排一次拿到寬度，再依螢幕邊緣決定尾巴要偏哪邊。
         if self.dirty || s != self.scale {
             self.painter.layout(&card, s, 0.5)?;
@@ -665,6 +671,7 @@ impl Bubble {
         let opacity = theme::ease(theme::MOTION_EASE_OUT, (age_ms / theme::MOTION_FAST).clamp(0.0, 1.0)) * self.fade;
         self.painter.paint(palette, s, self.hover, self.pressed, scale)?;
         self.painter.canvas.present(self.hwnd, origin, opacity)?;
+        self.painted_age_ms = age_ms;
         if self.last_origin.x == i32::MIN || self.dirty {
             unsafe {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);

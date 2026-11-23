@@ -31,7 +31,7 @@ use crate::glow::{GlowPainter, GlowStyle};
 use crate::area_editor::{AreaEditor, AreaInput, AreaKind, Outcome};
 use crate::chatter::{self, Chatter, Say};
 use crate::platforms;
-use crate::bubble::{Bubble, Card, CardAction, Pointer};
+use crate::bubble::{self, Bubble, Card, CardAction, Pointer};
 use crate::effects::Effects;
 use crate::holiday_sync::{self, WM_HOLIDAYS_UPDATED};
 use crate::updater::{self, WM_UPDATE_READY};
@@ -1310,6 +1310,8 @@ impl App {
         self.drive_soak(now)?;
         if self.update_hidden(now) {
             if self.config.remind_in_fullscreen {
+                // 全螢幕程式自己也可能是最上層：卡片要定時放回它上面，不然跳了也看不到。
+                self.keep_topmost(now);
                 self.update_cards(now)?;
             }
             return Ok(());
@@ -1701,7 +1703,9 @@ impl App {
         let head = if self.hidden {
             // 桌寵躲起來了（全螢幕時照樣跳提醒）：卡片放在螢幕右下角，跟系統通知同一個地方。
             let inset = HIDDEN_CARD_INSET_DIP * self.dpi_scale();
-            Vector2 { X: work.right as f32 - inset, Y: work.bottom as f32 - inset }
+            // 卡片以這個點置中：往左退半張卡，右邊才會跟下緣一樣留出距離。
+            let half_card = bubble::CARD_WIDTH_DIP * self.dpi_scale() / 2.0;
+            Vector2 { X: work.right as f32 - inset - half_card, Y: work.bottom as f32 - inset }
         } else {
             Vector2 { X: self.pet.x, Y: self.pet.y - self.sprites.base_height }
         };
