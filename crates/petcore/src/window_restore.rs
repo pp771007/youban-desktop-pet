@@ -18,6 +18,7 @@ use windows::core::{BOOL, PWSTR};
 use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent};
+use crate::platforms::is_click_through;
 
 /// 螢幕接上時 WM_DISPLAYCHANGE 會在約 1 秒內連發，Windows 也會在那之後約 1 秒內停止搬視窗；
 /// 太早恢復會被 Windows 再搬一次（session-window-manager 實測）。
@@ -119,13 +120,16 @@ pub struct WindowRestore {
 impl WindowRestore {
     pub fn new(path: PathBuf) -> Self {
         let mut layout: Layout = load_json(&path).unwrap_or_default();
-        // 核心重啟後：代碼還在、而且還是同一支程式的視窗才留。
-        layout.windows.retain(|hwnd, e| window_exe(HWND(*hwnd as _)).is_some_and(|exe| exe == e.exe));
+        // 核心重啟後：代碼還在、而且還是同一支程式的視窗才留（之前誤記的透明圖層也在這裡清掉）。
+        let before = layout.windows.len();
+        layout.windows.retain(|hwnd, e| window_exe(HWND(*hwnd as _)).is_some_and(|exe| exe == e.exe) && !is_click_through(HWND(*hwnd as _)));
+        let dropped = layout.windows.len() != before;
         let mut m = Self { path, layout, display_changed: None, last_auto: Instant::now() };
         if m.layout.windows.is_empty() {
             m.save_all();
-        } else {
-            m.record_new();
+        } else if m.record_new().is_empty() && dropped {
+            // 設定的視窗清單讀的是檔案：拿掉的那幾筆要寫回去，不然清單上還看得到。
+            m.persist();
         }
         m
     }
@@ -304,7 +308,7 @@ fn window_exe(hwnd: HWND) -> Option<String> {
     }
 }
 
-/// 目前所有該記的視窗：看得見、沒縮小、有標題、不是系統程式、不是桌寵自己。
+/// 目前所有該記的視窗：看得見、沒縮小、有標題、不是系統程式、不是桌寵自己、不是點得穿的透明圖層。
 fn snapshot() -> Vec<(i64, Entry)> {
     unsafe extern "system" fn collect(hwnd: HWND, data: LPARAM) -> BOOL {
         let out = unsafe { &mut *(data.0 as *mut Vec<HWND>) };
@@ -319,7 +323,7 @@ fn snapshot() -> Vec<(i64, Entry)> {
     let mut out = Vec::new();
     for hwnd in hwnds {
         unsafe {
-            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || is_click_through(hwnd) {
                 continue;
             }
             let mut pid = 0;

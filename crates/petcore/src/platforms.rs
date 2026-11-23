@@ -20,8 +20,7 @@ struct Shown {
     rect: RECT,
     /// 有標題、不是工具視窗、沒有最大化：可以站上去。
     standable: bool,
-    /// 滑鼠點得穿的透明圖層（`WS_EX_LAYERED | WS_EX_TRANSPARENT`）：不能站，也不算擋住底下的視窗。
-    /// 觸控鍵盤（TabTip）的手寫圖層就是一個蓋滿整個螢幕的這種視窗，當成擋住的話所有視窗頂端都站不了。
+    /// `is_click_through`：不能站，也不算擋住底下的視窗（當成擋住的話，蓋滿螢幕的那種會讓所有視窗頂端都站不了）。
     see_through: bool,
 }
 
@@ -32,6 +31,13 @@ pub fn user_is_busy() -> bool {
         Ok(state) => matches!(state, QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE),
         Err(_) => false,
     }
+}
+
+/// 滑鼠點得穿的透明圖層（`WS_EX_LAYERED | WS_EX_TRANSPARENT`）：不是使用者在用的視窗，也不會擋住底下的東西。
+/// 觸控鍵盤（TabTip）的手寫圖層就是一個蓋滿整個螢幕的這種視窗。視窗歸位也用這條排除。
+pub fn is_click_through(hwnd: HWND) -> bool {
+    let click_through = WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0;
+    unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & click_through == click_through }
 }
 
 fn frame_bounds(hwnd: HWND) -> Option<RECT> {
@@ -73,8 +79,7 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
             let Some(rect) = frame_bounds(hwnd) else { continue };
             let standable = !IsZoomed(hwnd).as_bool() && ex & WS_EX_TOOLWINDOW.0 == 0 && GetWindowTextLengthW(hwnd) > 0;
-            let click_through = WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0;
-            shown.push(Shown { id: hwnd.0 as isize, rect, standable, see_through: ex & click_through == click_through });
+            shown.push(Shown { id: hwnd.0 as isize, rect, standable, see_through: is_click_through(hwnd) });
         }
     }
     platforms_of(&shown, work, min_width, pet_height)
