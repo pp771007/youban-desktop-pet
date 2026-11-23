@@ -33,6 +33,8 @@ pub struct Config {
     pub reminder_sound: bool,
     /// 每天看一次有沒有新版，有就自動下載、找空檔換上。
     pub auto_update: bool,
+    /// 視窗歸位自動記下新開的視窗時，桌寵說一聲。
+    pub announce_new_windows: bool,
     pub features: Features,
 }
 
@@ -96,6 +98,7 @@ impl Default for Config {
             hide_in_fullscreen: true,
             reminder_sound: true,
             auto_update: true,
+            announce_new_windows: true,
             features: Features::default(),
         }
     }

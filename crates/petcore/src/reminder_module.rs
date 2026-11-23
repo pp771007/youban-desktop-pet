@@ -220,6 +220,7 @@ impl Module for ReminderModule {
 mod tests {
     use super::*;
     use crate::modules::Request;
+    use petkit::config::Config;
     use chrono::{NaiveDate, NaiveTime};
     use petkit::reminders::{HolidayPolicy, Repeat};
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -253,7 +254,7 @@ mod tests {
 
     fn tick(m: &mut ReminderModule, now: NaiveDateTime) -> Vec<Request> {
         let mut out = Vec::new();
-        m.tick(&mut Ctx { now, out: &mut out });
+        m.tick(&mut Ctx { now, config: &Config::default(), out: &mut out });
         out
     }
 
@@ -281,7 +282,7 @@ mod tests {
         tick(&mut m, dt(2, 8, 59));
         tick(&mut m, dt(2, 9, 0));
         let mut out = Vec::new();
-        m.on_event(&ModuleEvent::Card { key: "a", action: CardAction::Snooze(15) }, &mut Ctx { now: dt(2, 9, 0), out: &mut out });
+        m.on_event(&ModuleEvent::Card { key: "a", action: CardAction::Snooze(15) }, &mut Ctx { now: dt(2, 9, 0), config: &Config::default(), out: &mut out });
         assert!(cards(&tick(&mut m, dt(2, 9, 14))).is_empty());
         assert_eq!(cards(&tick(&mut m, dt(2, 9, 15))).len(), 1);
     }

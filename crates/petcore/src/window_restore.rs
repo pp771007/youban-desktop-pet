@@ -23,6 +23,8 @@ use crate::modules::{Ctx, Module, ModuleEvent};
 const DISPLAY_SETTLE: Duration = Duration::from_secs(3);
 /// 多久掃一次新開的視窗。
 const AUTO_RECORD_EVERY: Duration = Duration::from_secs(60);
+/// 桌寵說「記住了某某」時，視窗標題最多念幾個字（瀏覽器的標題常常一長串）。
+const ANNOUNCE_TITLE_MAX_CHARS: usize = 12;
 const MENU_SAVE: u32 = 1;
 const MENU_RESTORE: u32 = 2;
 use petkit::ipc::{CMD_RESTORE_LAYOUT as CMD_RESTORE, CMD_SAVE_LAYOUT as CMD_SAVE};
@@ -53,6 +55,19 @@ pub struct Layout {
 }
 
 /// 這個視窗要不要排除（純判斷，方便測試）。
+/// 自動記下新視窗之後桌寵說的話：一個就念標題，好幾個就講數量。
+pub fn announce_text(titles: &[String]) -> Option<String> {
+    match titles {
+        [] => None,
+        [title] => {
+            let short: String = title.chars().take(ANNOUNCE_TITLE_MAX_CHARS).collect();
+            let ellipsis = if title.chars().count() > ANNOUNCE_TITLE_MAX_CHARS { "…" } else { "" };
+            Some(format!("記住「{short}{ellipsis}」的位置了"))
+        }
+        _ => Some(format!("記住 {} 個新視窗的位置了", titles.len())),
+    }
+}
+
 pub fn should_exclude(exe_lower: &str, title: &str) -> bool {
     let name = exe_lower.rsplit('\\').next().unwrap_or(exe_lower);
     if name == EXPLORER {
@@ -103,16 +118,16 @@ impl WindowRestore {
         self.layout.windows.len()
     }
 
-    /// 只補記新開的視窗（記下之後再拖動不會更新，要按「儲存視窗位置」）。
-    fn record_new(&mut self) -> usize {
-        let mut added = 0;
+    /// 只補記新開的視窗（記下之後再拖動不會更新，要按「儲存視窗位置」）。回傳新記下的視窗標題。
+    fn record_new(&mut self) -> Vec<String> {
+        let mut added = Vec::new();
         for (hwnd, entry) in snapshot() {
             if let std::collections::btree_map::Entry::Vacant(v) = self.layout.windows.entry(hwnd) {
+                added.push(entry.title.clone());
                 v.insert(entry);
-                added += 1;
             }
         }
-        if added > 0 {
+        if !added.is_empty() {
             self.persist();
         }
         added
@@ -183,7 +198,12 @@ impl Module for WindowRestore {
         }
         if self.last_auto.elapsed() >= AUTO_RECORD_EVERY {
             self.last_auto = Instant::now();
-            self.record_new();
+            let added = self.record_new();
+            if ctx.config.announce_new_windows
+                && let Some(text) = announce_text(&added)
+            {
+                ctx.say(text);
+            }
         }
     }
 
@@ -296,5 +316,13 @@ mod tests {
         assert!(should_exclude("c:\\program files\\windowsapps\\microsoft.windowscalculator\\calc.exe", "小算盤"));
         assert!(!should_exclude("c:\\program files\\google\\chrome\\application\\chrome.exe", "Google"));
         assert!(!should_exclude("", "不知道是誰"), "unknown exe is kept, like the original");
+    }
+
+    #[test]
+    fn announces_one_window_by_title_and_several_by_count() {
+        assert_eq!(announce_text(&[]), None);
+        assert_eq!(announce_text(&["記事本".into()]).as_deref(), Some("記住「記事本」的位置了"));
+        assert_eq!(announce_text(&["新分頁 - Google Chrome".into()]).as_deref(), Some("記住「新分頁 - Google…」的位置了"));
+        assert_eq!(announce_text(&["a".into(), "b".into(), "c".into()]).as_deref(), Some("記住 3 個新視窗的位置了"));
     }
 }

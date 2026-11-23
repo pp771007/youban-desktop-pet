@@ -791,13 +791,15 @@ function renderWindows(page) {
     page.append(h('div', { class: 'card empty' },
       h('img', { src: currentPetImage(), alt: '' }),
       h('div', { class: 'empty-title' }, '還沒有記住任何視窗')));
-    return;
+  } else {
+    page.append(h('div', { class: 'card list' }, state.windows.map((w) => h('div', { class: 'list-row' },
+      h('div', { class: 'row-main' },
+        h('div', { class: 'row-title' }, w.title),
+        h('div', { class: 'row-meta' }, w.exe)),
+      h('span', { class: 'tag' }, `${w.width} × ${w.height}`)))));
   }
-  page.append(h('div', { class: 'card list' }, state.windows.map((w) => h('div', { class: 'list-row' },
-    h('div', { class: 'row-main' },
-      h('div', { class: 'row-title' }, w.title),
-      h('div', { class: 'row-meta' }, w.exe)),
-    h('span', { class: 'tag' }, `${w.width} × ${w.height}`)))));
+  page.append(h('div', { class: 'section' }, h('div', { class: 'card' },
+    settingRow('記住新視窗時說一聲', configSwitch('announceNewWindows', '記住新視窗時說一聲')))));
 }
 
 // ---------- 頁面：一般 ----------

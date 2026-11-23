@@ -33,7 +33,7 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, autoUpdate: true, features: { reminders: true, windowRestore: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, autoUpdate: true, announceNewWindows: true, features: { reminders: true, windowRestore: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -216,6 +216,9 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.nav-item[data-page="windows"]').click();
     await page.getByRole('button', { name: '記住目前位置' }).click();
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'saveLayout')), 'save layout sends command');
+    await page.getByRole('checkbox', { name: '記住新視窗時說一聲' }).click({ force: true });
+    check(await page.evaluate(() => window.__mock.config.announceNewWindows) === false, 'new-window announcement switch writes config');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-windows-light.png') });
 
     // 一般：開機啟動失敗要顯示原因、開關回到關
     await page.locator('.nav-item[data-page="general"]').click();

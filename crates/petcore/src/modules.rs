@@ -7,6 +7,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use chrono::NaiveDateTime;
+use petkit::config::Config;
 
 use crate::bubble::{Card, CardAction};
 use crate::log;
@@ -18,10 +19,13 @@ pub enum Request {
     Card { key: String, card: Card },
     /// 收掉自己丟出去、還沒被處理的卡（例如提醒被刪掉了）。
     Withdraw { key: String },
+    /// 讓桌寵講一句（沒空講就算了：在全螢幕、有卡片、睡著時都不講）。
+    Say { text: String },
 }
 
 pub struct Ctx<'a> {
     pub now: NaiveDateTime,
+    pub config: &'a Config,
     pub out: &'a mut Vec<Request>,
 }
 
@@ -32,6 +36,10 @@ impl Ctx<'_> {
 
     pub fn info(&mut self, title: impl Into<String>, detail: Option<String>) {
         self.card("info", Card::success(title, detail));
+    }
+
+    pub fn say(&mut self, text: impl Into<String>) {
+        self.out.push(Request::Say { text: text.into() });
     }
 }
 
@@ -91,18 +99,18 @@ impl ModuleHost {
         self.modules.iter().map(|m| m.id()).collect()
     }
 
-    pub fn tick(&mut self, now: NaiveDateTime, out: &mut Vec<(&'static str, Request)>) {
-        self.each(now, out, |m, ctx| m.tick(ctx));
+    pub fn tick(&mut self, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+        self.each(now, config, out, |m, ctx| m.tick(ctx));
     }
 
     /// 送事件給全部模組。
-    pub fn broadcast(&mut self, event: &ModuleEvent, now: NaiveDateTime, out: &mut Vec<(&'static str, Request)>) {
-        self.each(now, out, |m, ctx| m.on_event(event, ctx));
+    pub fn broadcast(&mut self, event: &ModuleEvent, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+        self.each(now, config, out, |m, ctx| m.on_event(event, ctx));
     }
 
     /// 送事件給某一個模組。
-    pub fn send(&mut self, id: &str, event: &ModuleEvent, now: NaiveDateTime, out: &mut Vec<(&'static str, Request)>) {
-        self.each(now, out, |m, ctx| {
+    pub fn send(&mut self, id: &str, event: &ModuleEvent, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+        self.each(now, config, out, |m, ctx| {
             if m.id() == id {
                 m.on_event(event, ctx);
             }
@@ -120,19 +128,19 @@ impl ModuleHost {
     }
 
     /// 選單編號 → 交給對應的模組。
-    pub fn menu_clicked(&mut self, menu_id: u32, now: NaiveDateTime, out: &mut Vec<(&'static str, Request)>) {
+    pub fn menu_clicked(&mut self, menu_id: u32, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
         let Some(offset) = menu_id.checked_sub(MENU_BASE) else { return };
         let (index, local) = ((offset / MENU_STRIDE) as usize, offset % MENU_STRIDE);
         let Some(id) = self.modules.get(index).map(|m| m.id()) else { return };
-        self.send(id, &ModuleEvent::Menu(local), now, out);
+        self.send(id, &ModuleEvent::Menu(local), now, config, out);
     }
 
     /// 對每個模組做一件事；出錯的模組直接移除，並發一張通知卡。
-    fn each(&mut self, now: NaiveDateTime, out: &mut Vec<(&'static str, Request)>, mut f: impl FnMut(&mut dyn Module, &mut Ctx)) {
+    fn each(&mut self, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>, mut f: impl FnMut(&mut dyn Module, &mut Ctx)) {
         let mut failed = Vec::new();
         for (i, m) in self.modules.iter_mut().enumerate() {
             let mut requests = Vec::new();
-            let mut ctx = Ctx { now, out: &mut requests };
+            let mut ctx = Ctx { now, config, out: &mut requests };
             let result = catch_unwind(AssertUnwindSafe(|| f(m.as_mut(), &mut ctx)));
             let id = m.id();
             out.extend(requests.into_iter().map(|r| (id, r)));
@@ -210,17 +218,18 @@ mod tests {
     fn panicking_module_is_removed_and_others_keep_running() {
         let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
         let mut host = ModuleHost::new(vec![Box::new(Boom), Box::new(Fine(0))]);
+        let config = Config::default();
         let mut out = Vec::new();
-        host.tick(now, &mut out);
+        host.tick(now, &config, &mut out);
         assert!(out.iter().any(|(id, _)| *id == "fine"));
         assert!(out.iter().any(|(id, r)| *id == "core" && matches!(r, Request::Card { card: Card::Info { title, .. }, .. } if title.contains("會壞的功能"))));
         out.clear();
-        host.tick(now, &mut out);
+        host.tick(now, &config, &mut out);
         assert_eq!(out.len(), 1, "boom is gone, fine still ticks");
         let menu = host.menu();
         assert_eq!(menu.len(), 1);
         out.clear();
-        host.menu_clicked(menu[0].0, now, &mut out);
+        host.menu_clicked(menu[0].0, now, &config, &mut out);
         assert!(matches!(&out[0].1, Request::Card { card: Card::Info { title, .. }, .. } if title == "menu"));
     }
 }

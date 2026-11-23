@@ -110,6 +110,8 @@ const PRESENT_IDLE_SECS: f32 = 60.0;
 /// 第一天、紀念日的話：開機後至少等這麼久（先讓牠打完招呼），泡泡顯示久一點。
 const MILESTONE_AFTER_SECS: f64 = 10.0;
 const MILESTONE_SAY_SECS: f32 = 6.0;
+/// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
+const MODULE_SAY_SECS: f32 = 4.0;
 
 /// `windows` crate 把它放在 Controls 功能底下（為了一個常數不值得開那整包）。
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -777,7 +779,7 @@ impl App {
 
     fn broadcast(&mut self, event: &ModuleEvent) {
         let mut out = Vec::new();
-        self.modules.broadcast(event, local_now(), &mut out);
+        self.modules.broadcast(event, local_now(), &self.config, &mut out);
         self.apply(out);
     }
 
@@ -787,6 +789,13 @@ impl App {
             match request {
                 Request::Card { key, card } => self.enqueue(owner, key, card),
                 Request::Withdraw { key } => self.cards.retain(|q| !(q.owner == owner && q.key == key)),
+                Request::Say { text } => {
+                    let now = self.now();
+                    let ctx = self.talk_ctx(now);
+                    if ctx.can_speak && !ctx.asleep {
+                        self.say(Say { text, emote: None, secs: MODULE_SAY_SECS }, now);
+                    }
+                }
             }
         }
     }
@@ -829,7 +838,7 @@ impl App {
             return;
         }
         let mut out = Vec::new();
-        self.modules.send(q.owner, &ModuleEvent::Card { key: &q.key, action }, local_now(), &mut out);
+        self.modules.send(q.owner, &ModuleEvent::Card { key: &q.key, action }, local_now(), &self.config, &mut out);
         self.apply(out);
     }
 
@@ -970,7 +979,7 @@ impl App {
             }
             Some(id) => {
                 let mut out = Vec::new();
-                self.modules.menu_clicked(id, local_now(), &mut out);
+                self.modules.menu_clicked(id, local_now(), &self.config, &mut out);
                 self.apply(out);
             }
             None => {}
@@ -1262,7 +1271,7 @@ impl App {
     /// 每秒一次：功能模組、設定檔變動、辦公日曆下載。
     fn slow_tick(&mut self, now: f64) {
         let mut out = Vec::new();
-        self.modules.tick(local_now(), &mut out);
+        self.modules.tick(local_now(), &self.config, &mut out);
         self.apply(out);
 
         let ctx = self.talk_ctx(now);
