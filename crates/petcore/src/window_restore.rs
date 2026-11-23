@@ -27,7 +27,7 @@ const AUTO_RECORD_EVERY: Duration = Duration::from_secs(60);
 const ANNOUNCE_TITLE_MAX_CHARS: usize = 12;
 const MENU_SAVE: u32 = 1;
 const MENU_RESTORE: u32 = 2;
-use petkit::ipc::{CMD_RESTORE_LAYOUT as CMD_RESTORE, CMD_SAVE_LAYOUT as CMD_SAVE};
+use petkit::ipc::{CMD_EDIT_WINDOW as CMD_EDIT, CMD_RESTORE_LAYOUT as CMD_RESTORE, CMD_SAVE_LAYOUT as CMD_SAVE};
 /// 系統資料夾下的程式不記（設定、開始選單這類），終端機例外。
 const SYSTEM_DIRS: [&str; 4] = ["c:\\windows\\system32\\", "c:\\windows\\systemapps\\", "c:\\windows\\immersivecontrolpanel\\", "c:\\program files\\windowsapps\\"];
 const TERMINALS: [&str; 7] = ["conhost.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe", "windowsterminal.exe", "openconsole.exe"];
@@ -77,6 +77,35 @@ pub fn should_exclude(exe_lower: &str, title: &str) -> bool {
         return false;
     }
     SYSTEM_DIRS.iter().any(|d| exe_lower.starts_with(d))
+}
+
+enum Placed {
+    Done,
+    /// 系統管理員身分開的視窗，柚伴不是系統管理員就搬不動。
+    Denied,
+    Failed,
+}
+
+/// 把視窗搬到記下的位置（最大化、最小化的先還原）。
+fn place(hwnd: HWND, e: &Entry) -> Placed {
+    unsafe {
+        if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let mut r = RECT::default();
+        let _ = GetWindowRect(hwnd, &mut r);
+        if (r.left, r.top, r.right - r.left, r.bottom - r.top) == (e.left, e.top, e.width, e.height) {
+            return Placed::Done;
+        }
+        match SetWindowPos(hwnd, None, e.left, e.top, e.width, e.height, SWP_NOZORDER | SWP_NOACTIVATE) {
+            Ok(()) => Placed::Done,
+            Err(_) if GetLastError() == ERROR_ACCESS_DENIED => Placed::Denied,
+            Err(err) => {
+                log!("move '{}' failed: {err}", e.title);
+                Placed::Failed
+            }
+        }
+    }
 }
 
 pub struct WindowRestore {
@@ -138,26 +167,36 @@ impl WindowRestore {
         self.layout.windows.retain(|hwnd, _| unsafe { IsWindow(Some(HWND(*hwnd as _))) }.as_bool());
         let (mut restored, mut denied) = (0, 0);
         for (hwnd, e) in &self.layout.windows {
-            let hwnd = HWND(*hwnd as _);
-            unsafe {
-                if IsIconic(hwnd).as_bool() || IsZoomed(hwnd).as_bool() {
-                    let _ = ShowWindow(hwnd, SW_RESTORE);
-                }
-                let mut r = RECT::default();
-                let _ = GetWindowRect(hwnd, &mut r);
-                if (r.left, r.top, r.right - r.left, r.bottom - r.top) == (e.left, e.top, e.width, e.height) {
-                    restored += 1;
-                    continue;
-                }
-                match SetWindowPos(hwnd, None, e.left, e.top, e.width, e.height, SWP_NOZORDER | SWP_NOACTIVATE) {
-                    Ok(()) => restored += 1,
-                    Err(_) if GetLastError() == ERROR_ACCESS_DENIED => denied += 1,
-                    Err(err) => log!("restore '{}' failed: {err}", e.title),
-                }
+            match place(HWND(*hwnd as _), e) {
+                Placed::Done => restored += 1,
+                Placed::Denied => denied += 1,
+                Placed::Failed => {}
             }
         }
         self.persist();
         (restored, denied)
+    }
+
+    /// 設定裡改了某個視窗的位置：記下來，也馬上把它搬過去。視窗已經關掉的話就把那筆拿掉。
+    fn edit(&mut self, v: &serde_json::Value, ctx: &mut Ctx) {
+        let int = |k: &str| v[k].as_i64().and_then(|n| i32::try_from(n).ok());
+        let (Some(id), Some(left), Some(top), Some(width), Some(height)) = (v["id"].as_i64(), int("left"), int("top"), int("width"), int("height")) else { return };
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        let hwnd = HWND(id as _);
+        if !unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+            if self.layout.windows.remove(&id).is_some() {
+                self.persist();
+            }
+            return;
+        }
+        let Some(e) = self.layout.windows.get_mut(&id) else { return };
+        (e.left, e.top, e.width, e.height) = (left, top, width, height);
+        if let Placed::Denied = place(hwnd, e) {
+            ctx.info("這個視窗太重了，我搬不動耶",Some("要用系統管理員身分開柚伴才行".into()));
+        }
+        self.persist();
     }
 
     fn report_restore(&mut self, ctx: &mut Ctx) {
@@ -217,6 +256,7 @@ impl Module for WindowRestore {
             ModuleEvent::Command(v) => match v["cmd"].as_str() {
                 Some(CMD_SAVE) => self.report_save(ctx),
                 Some(CMD_RESTORE) => self.report_restore(ctx),
+                Some(CMD_EDIT) => self.edit(v, ctx),
                 _ => {}
             },
             _ => {}

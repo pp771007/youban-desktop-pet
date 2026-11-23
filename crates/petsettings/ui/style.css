@@ -588,6 +588,8 @@ button, input, select { font: inherit; color: inherit; }
 .drawer-body { flex: 1; overflow-y: auto; padding: calc(var(--space-3) * 1px) calc(var(--space-5) * 1px); }
 .drawer-foot { display: flex; align-items: center; gap: calc(var(--space-2) * 1px); padding: calc(var(--space-4) * 1px) calc(var(--space-5) * 1px); border-top: var(--outline) dashed var(--color-border); background: var(--color-surface-sunken); }
 .drawer-foot .spacer { flex: 1; }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--space-3) * 1px); }
+.window-edit-name { margin-bottom: calc(var(--space-4) * 1px); overflow-wrap: anywhere; }
 
 .preview { display: flex; flex-direction: column; gap: 4px; }
 .preview-row { display: flex; align-items: center; gap: calc(var(--space-3) * 1px); height: 38px; padding: 0 calc(var(--space-4) * 1px); border-radius: calc(var(--radius-full) * 1px); font-variant-numeric: tabular-nums; }

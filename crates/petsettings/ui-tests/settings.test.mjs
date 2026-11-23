@@ -80,7 +80,7 @@ function mockBackend(tokens) {
     example_frames: () => [png, png],
     save_example: ({ state }) => { db.calls.push({ cmd: 'save_example', state }); },
     delete_pet: ({ id }) => { db.pets = db.pets.filter((p) => p.id !== id); },
-    window_layout: () => [{ title: '記事本', exe: 'notepad.exe', width: 800, height: 600 }],
+    window_layout: () => [{ id: 4242, title: '記事本', exe: 'notepad.exe', left: 100, top: 50, width: 800, height: 600 }],
     core_running: () => db.running,
     send_core: ({ command }) => {
       db.calls.push(command);
@@ -244,6 +244,19 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('checkbox', { name: '記住新視窗時說一聲' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.announceNewWindows) === false, 'new-window announcement switch writes config');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-windows-light.png') });
+
+    // 點一個視窗直接打數字改位置；寬高空著不能套用
+    await page.locator('.list-row', { hasText: '記事本' }).click();
+    await page.locator('#win-left:focus').waitFor();
+    await page.locator('#win-height').fill('');
+    check(await page.getByRole('button', { name: '套用' }).isDisabled(), 'empty window size cannot be applied');
+    await page.locator('#win-height').fill('720');
+    await page.locator('#win-left').fill('-8');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-window-edit-light.png') });
+    await page.getByRole('button', { name: '套用' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'editWindow' && c.id === 4242 && c.left === -8 && c.top === 50 && c.width === 800 && c.height === 720)), 'editing a window sends its new position');
+    // 抽屜滑出去之前還蓋在右半邊，下面的 force click 會點到它。
+    await page.waitForFunction(() => document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
 
     // 一般：開機啟動失敗要顯示原因、開關回到關
     await page.locator('.nav-item[data-page="general"]').click();

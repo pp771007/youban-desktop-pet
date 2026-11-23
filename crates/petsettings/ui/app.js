@@ -834,14 +834,42 @@ function renderWindows(page) {
       h('img', { src: currentPetImage(), alt: '' }),
       h('div', { class: 'empty-title' }, '還沒有記住任何視窗')));
   } else {
-    page.append(h('div', { class: 'card list' }, state.windows.map((w) => h('div', { class: 'list-row' },
+    page.append(h('div', { class: 'card list' }, state.windows.map((w) => h('div', { class: 'list-row clickable', onclick: () => openWindowEdit(w) },
       h('div', { class: 'row-main' },
         h('div', { class: 'row-title' }, w.title),
         h('div', { class: 'row-meta' }, w.exe)),
-      h('span', { class: 'tag' }, `${w.width} × ${w.height}`)))));
+      h('span', { class: 'tag' }, `${w.left}, ${w.top}　${w.width} × ${w.height}`)))));
   }
   page.append(h('div', { class: 'section' }, h('div', { class: 'card' },
     settingRow('記住新視窗時說一聲', configSwitch('announceNewWindows', '記住新視窗時說一聲')))));
+}
+
+/** 直接打數字改一個視窗記下的位置，套用時馬上把視窗搬過去。 */
+function openWindowEdit(w) {
+  const draft = { left: w.left, top: w.top, width: w.width, height: w.height };
+  const valid = () => Object.values(draft).every(Number.isInteger) && draft.width > 0 && draft.height > 0;
+  openDrawer((drawer) => {
+    const num = (key, label, min) => field(label, h('input', { id: `win-${key}`, class: 'input', type: 'number', step: 1, min, value: draft[key],
+      oninput: (e) => { draft[key] = e.target.valueAsNumber; drawer.querySelector('#apply-window').disabled = !valid() || !state.coreRunning; } }), `win-${key}`);
+    drawer.replaceChildren(
+      h('div', { class: 'drawer-head' },
+        h('h2', {}, '編輯位置'),
+        h('button', { class: 'btn btn-ghost btn-small', 'aria-label': '關閉', onclick: closeEditor }, icon('x'))),
+      h('div', { class: 'drawer-body' },
+        h('div', { class: 'window-edit-name' }, h('div', { class: 'row-title' }, w.title), h('div', { class: 'row-meta' }, w.exe)),
+        h('div', { class: 'field-pair' }, num('left', 'X'), num('top', 'Y')),
+        h('div', { class: 'field-pair' }, num('width', '寬', 1), num('height', '高', 1))),
+      h('div', { class: 'drawer-foot' },
+        h('span', { class: 'spacer' }),
+        h('button', { class: 'btn btn-ghost', onclick: closeEditor }, '取消'),
+        h('button', { id: 'apply-window', class: 'btn btn-primary', disabled: !state.coreRunning, onclick: async () => {
+          await invoke('send_core', { command: { cmd: 'editWindow', id: w.id, ...draft } });
+          closeEditor();
+          toast('已套用');
+          setTimeout(async () => { await refreshWindows(); if (state.page === 'windows') render(); }, LAYOUT_REFRESH_MS);
+        } }, icon('check'), '套用')));
+    setTimeout(() => drawer.querySelector('#win-left')?.focus(), 50);
+  });
 }
 
 // ---------- 頁面：一般 ----------

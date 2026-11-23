@@ -73,8 +73,11 @@ const MS_PER_SEC: f32 = 1000.0;
 
 #[derive(Serialize)]
 struct WindowInfo {
+    id: i64,
     title: String,
     exe: String,
+    left: i32,
+    top: i32,
     width: i32,
     height: i32,
 }
@@ -316,9 +319,13 @@ fn window_layout() -> Vec<WindowInfo> {
         .as_object()
         .into_iter()
         .flatten()
-        .map(|(_, e)| WindowInfo {
+        .filter_map(|(id, e)| Some((id.parse().ok()?, e)))
+        .map(|(id, e)| WindowInfo {
+            id,
             title: e["title"].as_str().unwrap_or_default().to_owned(),
             exe: e["exe"].as_str().unwrap_or_default().rsplit('\\').next().unwrap_or_default().to_owned(),
+            left: e["left"].as_i64().unwrap_or(0) as i32,
+            top: e["top"].as_i64().unwrap_or(0) as i32,
             width: e["width"].as_i64().unwrap_or(0) as i32,
             height: e["height"].as_i64().unwrap_or(0) as i32,
         })

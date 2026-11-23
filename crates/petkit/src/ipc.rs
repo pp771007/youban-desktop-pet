@@ -5,6 +5,8 @@ pub const PET_WINDOW_CLASS: &str = "YoubanDesktopPet.Pet";
 
 pub const CMD_SAVE_LAYOUT: &str = "saveLayout";
 pub const CMD_RESTORE_LAYOUT: &str = "restoreLayout";
+/// 改一個視窗記下的位置並馬上搬過去 `{"id", "left", "top", "width", "height"}`（`id` 是視窗代碼）。
+pub const CMD_EDIT_WINDOW: &str = "editWindow";
 pub const CMD_TEST_REMINDER: &str = "testReminder";
 pub const CMD_SWITCH_PET: &str = "switchPet";
 pub const CMD_OPEN_SETTINGS: &str = "openSettings";
