@@ -191,6 +191,7 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'drawArea' && c.kind === 'forbidden')), 'adding a forbidden area asks the core to draw one');
     // 滑鼠移到那一列：請核心在桌面上框出來；移開就收掉
     await page.locator('.setting', { hasText: '禁止範圍 1' }).hover();
+    if (shotDir) await page.locator('.setting', { hasText: '禁止範圍 1' }).screenshot({ path: path.join(shotDir, 'settings-area-hover-light.png') });
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'previewArea' && c.kind === 'forbidden' && c.area?.left === 100 && c.area?.bottom === 1040)), 'hovering a forbidden area previews it on the desktop');
     await page.getByRole('heading', { name: '行為' }).hover();
     check(await page.evaluate(() => { const c = window.__mock.calls.at(-1); return c.cmd === 'previewArea' && !c.area; }), 'leaving the row hides the preview');

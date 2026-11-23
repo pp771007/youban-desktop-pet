@@ -788,7 +788,11 @@ function areaRows() {
   const size = (a) => h('span', { class: 'tag' }, `${a.right - a.left} × ${a.bottom - a.top}`);
   const drawButton = (kind, glyph, label) => h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => draw(kind) }, icon(glyph), label);
   // 滑鼠移到某個範圍那一列：桌面上框出那塊範圍，移開就收掉。
+  // 標題前的小方塊長得跟桌面上的框一樣，滑過時整列染同一個顏色（`.area-row`）。
+  const swatch = () => h('span', { class: 'area-swatch' });
   const preview = (row, kind, area) => {
+    row.classList.add('area-row', `area-${kind}`);
+    row.querySelector('.setting-title').prepend(swatch());
     row.addEventListener('mouseenter', () => previewArea(kind, area));
     row.addEventListener('mouseleave', () => previewArea());
     return row;
