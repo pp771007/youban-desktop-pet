@@ -20,6 +20,9 @@ struct Shown {
     rect: RECT,
     /// 有標題、不是工具視窗、沒有最大化：可以站上去。
     standable: bool,
+    /// 滑鼠點得穿的透明圖層（`WS_EX_LAYERED | WS_EX_TRANSPARENT`）：不能站，也不算擋住底下的視窗。
+    /// 觸控鍵盤（TabTip）的手寫圖層就是一個蓋滿整個螢幕的這種視窗，當成擋住的話所有視窗頂端都站不了。
+    see_through: bool,
 }
 
 /// Windows 自己判斷「現在不該打擾使用者」：全螢幕程式、D3D 全螢幕遊戲、簡報模式。
@@ -70,7 +73,8 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
             let Some(rect) = frame_bounds(hwnd) else { continue };
             let standable = !IsZoomed(hwnd).as_bool() && ex & WS_EX_TOOLWINDOW.0 == 0 && GetWindowTextLengthW(hwnd) > 0;
-            shown.push(Shown { id: hwnd.0 as isize, rect, standable });
+            let click_through = WS_EX_LAYERED.0 | WS_EX_TRANSPARENT.0;
+            shown.push(Shown { id: hwnd.0 as isize, rect, standable, see_through: ex & click_through == click_through });
         }
     }
     platforms_of(&shown, work, min_width, pet_height)
@@ -81,7 +85,7 @@ fn platforms_of(shown: &[Shown], work: RECT, min_width: f32, pet_height: f32) ->
     let min_thickness = (pet_height * OCCLUDER_MIN_THICKNESS_HEIGHTS) as i32;
     let mut above: Vec<RECT> = Vec::new();
     let mut out = Vec::new();
-    for w in shown {
+    for w in shown.iter().filter(|w| !w.see_through) {
         let r = w.rect;
         if w.standable && r.top as f32 > work.top as f32 + pet_height && r.top < work.bottom {
             let mut segments = vec![(r.left.max(work.left) as f32, r.right.min(work.right) as f32)];
@@ -141,16 +145,26 @@ mod tests {
         let work = rect(0, 0, 3840, 2112);
         // LINE：主視窗上面貼一條 11 像素的陰影視窗（排在主視窗前面）。
         let shown = [
-            Shown { id: 1, rect: rect(2793, 1050, 3789, 1061), standable: false },
-            Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true },
+            Shown { id: 1, rect: rect(2793, 1050, 3789, 1061), standable: false, see_through: false },
+            Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false },
         ];
         let p = platforms_of(&shown, work, 100.0, 256.0);
         assert_eq!(p.len(), 1, "{p:?}");
         assert_eq!((p[0].left, p[0].right, p[0].y, p[0].sides), (2793.0, 3789.0, 1061.0, (true, true)));
         // 真的蓋在上面的視窗照樣擋住那一段。
-        let shown = [Shown { id: 3, rect: rect(3000, 900, 3400, 1500), standable: true }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true }];
+        let shown = [Shown { id: 3, rect: rect(3000, 900, 3400, 1500), standable: true, see_through: false }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false }];
         let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| (p.left, p.right)).collect();
         assert_eq!(p, vec![(2793.0, 3000.0), (3400.0, 3789.0)]);
+    }
+
+    #[test]
+    fn click_through_overlay_covering_the_screen_does_not_hide_window_tops() {
+        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let work = rect(0, 0, 3840, 2112);
+        // 觸控鍵盤的手寫圖層：最上層、蓋滿整個螢幕、滑鼠點得穿。
+        let shown = [Shown { id: 1, rect: rect(0, 0, 3840, 2160), standable: false, see_through: true }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false }];
+        let p = platforms_of(&shown, work, 100.0, 256.0);
+        assert_eq!(p.iter().map(|p| (p.window, p.left, p.right)).collect::<Vec<_>>(), vec![(2, 2793.0, 3789.0)]);
     }
 
     #[test]
