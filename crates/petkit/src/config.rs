@@ -203,7 +203,12 @@ impl Config {
 
     /// 這隻桌寵叫什麼：使用者取的名字，沒取就是桌寵包的名字（`species`，例如「水豚」）。
     pub fn pet_name<'a>(&'a self, id: &str, species: &'a str) -> &'a str {
-        self.pet_names.get(id).map(|n| n.trim()).filter(|n| !n.is_empty()).unwrap_or(species)
+        self.given_name(id).unwrap_or(species)
+    }
+
+    /// 使用者幫這隻桌寵取的名字；沒取過是 `None`。
+    pub fn given_name(&self, id: &str) -> Option<&str> {
+        self.pet_names.get(id).map(|n| n.trim()).filter(|n| !n.is_empty())
     }
 }
 

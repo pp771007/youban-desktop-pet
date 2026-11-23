@@ -82,6 +82,26 @@ const IDLE_CHAT: &[&str] = &[
     "謝謝你每天陪我",
     "不管多忙，我都在這裡",
 ];
+/// 取了名字才會講、用名字自稱的閒聊；`{name}` 換成名字。
+const NAMED_IDLE_CHAT: &[&str] = &["{name}肚子有點餓了～", "{name}想被摸摸頭～", "{name}今天也會乖乖陪你喔", "嘿嘿，{name}在這裡喔～", "{name}最喜歡你了～"];
+const NAME_SLOT: &str = "{name}";
+/// 閒聊時改用名字自稱的機率：偶爾才講才可愛，太常會膩。
+const NAMED_CHAT_CHANCE: f32 = 0.25;
+
+/// 剛被取好名字時說的話。
+pub fn named_line(name: &str) -> String {
+    format!("我叫{name}囉～謝謝你幫我取名字！")
+}
+
+/// 陪伴天數紀念日說的話（第一天是初次見面）；取了名字就報上名字。
+pub fn milestone_line(days: u32, name: Option<&str>) -> String {
+    match (days, name) {
+        (1, None) => "初次見面，請多指教！".to_owned(),
+        (1, Some(n)) => format!("我是{n}，初次見面，請多指教～"),
+        (_, None) => format!("我們一起過了 {days} 天了！謝謝你一直陪著我"),
+        (_, Some(n)) => format!("{n}陪你 {days} 天了！謝謝你一直陪著我～"),
+    }
+}
 
 /// 每天一次、在某段時間內講的話。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +167,8 @@ pub struct Ctx {
     /// 現在方便講話：沒有提醒卡、沒躲起來、沒在換桌寵。
     pub can_speak: bool,
     pub asleep: bool,
+    /// 使用者幫牠取的名字（沒取是 `None`）。
+    pub name: Option<String>,
 }
 
 pub struct Chatter {
@@ -249,6 +271,12 @@ impl Chatter {
             None => self.next_idle = Some(now + self.rand_range(range) as f64),
             Some(at) if now >= at => {
                 self.next_idle = Some(now + self.rand_range(range) as f64);
+                if let Some(name) = ctx.name.as_deref()
+                    && self.rand01() < NAMED_CHAT_CHANCE
+                {
+                    let say = self.say(NAMED_IDLE_CHAT, None, now);
+                    return Some(Say { text: say.text.replace(NAME_SLOT, name), ..say });
+                }
                 return Some(self.say(IDLE_CHAT, None, now));
             }
             Some(_) => {}
@@ -344,7 +372,7 @@ mod tests {
 
     /// 2026-11-23 是星期一。
     fn ctx(now: f64, clock: NaiveDateTime) -> Ctx {
-        Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false }
+        Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false, name: None }
     }
 
     /// 從 `now` 開始每秒 tick 一次，跑 `secs` 秒（時鐘跟著走），收集講過的話。
@@ -453,6 +481,28 @@ mod tests {
         assert!(said.last().is_some_and(|s| POKED.contains(&s.text.as_str())), "fifth poke complains, got {said:?}");
         assert!(said.iter().all(|s| s.reply), "reacting to a poke is a reply: it still speaks while focusing");
         assert_eq!(c.on(Happening::Thrown { speed_dip: 300.0 }, &ctx(300.0, clock)), None, "a gentle drop is not a throw");
+    }
+
+    #[test]
+    fn calls_itself_by_its_name_now_and_then_only_once_named() {
+        let day = Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap());
+        // 晚上七點到十點半：沒有時間點的話，只剩閒聊。
+        let chat = |name: Option<&str>| {
+            let (mut now, mut clock) = (0.0, at(2026, 11, 23, 19, 0));
+            let mut c = Chatter::new(now, 7, day);
+            run(&mut c, &mut now, &mut clock, 3 * 3600 + 30 * 60, |x| {
+                x.talk = Talk::Often;
+                x.name = name.map(str::to_owned);
+            })
+        };
+        let named = chat(Some("圓圓"));
+        let with_name = named.iter().filter(|s| s.contains("圓圓")).count();
+        assert!(with_name > 0 && with_name < named.len(), "sometimes, not always: {named:?}");
+        assert!(named.iter().all(|s| !s.contains(NAME_SLOT)), "{named:?}");
+        let unnamed = chat(None);
+        assert!(unnamed.iter().all(|s| IDLE_CHAT.contains(&s.as_str())), "{unnamed:?}");
+        assert_eq!(milestone_line(100, Some("圓圓")), "圓圓陪你 100 天了！謝謝你一直陪著我～");
+        assert_eq!(milestone_line(100, None), "我們一起過了 100 天了！謝謝你一直陪著我");
     }
 
     #[test]

@@ -137,6 +137,8 @@ const PRESENT_IDLE_SECS: f32 = 60.0;
 /// 第一天、紀念日的話：開機後至少等這麼久（先讓牠打完招呼），泡泡顯示久一點。
 const MILESTONE_AFTER_SECS: f64 = 10.0;
 const MILESTONE_SAY_SECS: f32 = 6.0;
+/// 剛被取名字時那句話顯示幾秒。
+const NAMED_SAY_SECS: f32 = 5.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
 const MODULE_SAY_SECS: f32 = 4.0;
 /// 會自己消失的提醒卡留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
@@ -1151,7 +1153,7 @@ impl App {
 
     /// 右鍵選單：桌寵自己的一組，再來每個開著的功能一組（標題是功能名稱），最後是設定與結束。
     fn menu_entries(&self, pets: &[PetChoice]) -> Vec<Entry> {
-        let mut entries = vec![Entry::Header("桌寵".into())];
+        let mut entries = vec![Entry::Header(self.config.given_name(&self.pack.id).unwrap_or("桌寵").into())];
         let days = self.companions.days(&self.pack.id);
         if days > 0 {
             entries.push(Item::entry(MENU_DAYS, format!("陪你第 {days} 天"), Icon::Heart));
@@ -1661,7 +1663,14 @@ impl App {
             self.say(say, now);
         }
         let session = self.modules.session(local_now());
-        self.tray.set_tip(session.map(|s| format!("{} · {}中，還剩 {} 分", petkit::APP_NAME, if s.focusing { "專注" } else { "休息" }, s.minutes_left)));
+        let who = match self.config.given_name(&self.pack.id) {
+            Some(name) => format!("{name}（{}）", petkit::APP_NAME),
+            None => petkit::APP_NAME.to_owned(),
+        };
+        self.tray.set_tip(match session {
+            Some(s) => format!("{who} · {}中，還剩 {} 分", if s.focusing { "專注" } else { "休息" }, s.minutes_left),
+            None => who,
+        });
         // 休息提醒放在設定的「提醒」頁，跟著提醒功能一起開關；專注（含中間的休息）進行中先暫停，不跟番茄鐘搶著叫人休息。
         if self.config.features.reminders
             && self.config.rest_reminder
@@ -1688,7 +1697,7 @@ impl App {
         let s = stamp(&config_path);
         if s != self.config_stamp {
             self.config_stamp = s;
-            self.config_changed(load_config(&config_path));
+            self.config_changed(load_config(&config_path), now);
         }
 
         if self.config.features.reminders && now - self.last_holiday_check >= HOLIDAY_CHECK_SECS {
@@ -1796,8 +1805,19 @@ impl App {
         Ok(())
     }
 
-    fn config_changed(&mut self, new: Config) {
+    fn config_changed(&mut self, new: Config, now: f64) {
         let old = std::mem::replace(&mut self.config, new);
+        // 剛幫現在這隻取了（新）名字：開心一下、報上名字。清掉名字不用講。
+        let id = &self.pack.id;
+        if old.pet == self.config.pet
+            && let Some(name) = self.config.given_name(id).filter(|n| old.given_name(id) != Some(*n))
+        {
+            let text = chatter::named_line(name);
+            self.pet.cheer(now);
+            if self.config.talk != Talk::Never {
+                self.say(Say { text, emote: Some(Emote::Hearts), secs: NAMED_SAY_SECS, reply: true }, now);
+            }
+        }
         if old.features != self.config.features {
             for id in self.modules.sync(&enabled_modules(&self.config), make_module) {
                 self.cards.retain(|q| q.owner != id);
@@ -1823,6 +1843,7 @@ impl App {
             workday: self.is_workday(clock.date()),
             can_speak: !self.hidden && self.cards.is_empty() && self.transition.is_none() && self.soak.is_none(),
             asleep: self.pet.state() == states::SLEEP,
+            name: self.config.given_name(&self.pack.id).map(str::to_owned),
         }
     }
 
@@ -1865,7 +1886,7 @@ impl App {
         self.pet.cheer(now);
         self.effects.spawn(Emote::Star, now);
         if self.config.talk != Talk::Never {
-            let text = if days == 1 { "初次見面，請多指教！".to_owned() } else { format!("我們一起過了 {days} 天了！謝謝你一直陪著我") };
+            let text = chatter::milestone_line(days, self.config.given_name(&self.pack.id));
             self.say(Say { text, emote: Some(Emote::Hearts), secs: MILESTONE_SAY_SECS, reply: false }, now);
         }
     }

@@ -11,7 +11,7 @@ const TOOLTIP: &str = petkit::APP_NAME;
 pub struct Tray {
     hwnd: HWND,
     icon: HICON,
-    /// 滑鼠移到托盤圖示上的提示（平常是產品名，專注時加上還剩多久）。
+    /// 滑鼠移到托盤圖示上的提示（產品名，取了名字就加上名字；專注時再加上還剩多久）。
     tip: String,
 }
 
@@ -22,9 +22,8 @@ impl Tray {
         tray
     }
 
-    /// 換提示文字（一樣就不動）；`None` = 回到產品名。
-    pub fn set_tip(&mut self, tip: Option<String>) {
-        let tip = tip.unwrap_or_else(|| TOOLTIP.to_owned());
+    /// 換提示文字（一樣就不動）。
+    pub fn set_tip(&mut self, tip: String) {
         if tip != self.tip {
             self.tip = tip;
             unsafe {
