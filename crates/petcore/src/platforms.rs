@@ -9,6 +9,19 @@ use windows::core::BOOL;
 
 use crate::behavior::Platform;
 
+/// 比桌寵身高的這麼多倍還細的視窗不算擋住別的視窗頂端：有些程式（LINE 這類 Qt 程式）在主視窗四周
+/// 另外放一圈只有十來像素寬的視窗畫陰影，貼在頂端上面那條會把整個頂端扣光，桌寵就站不上去。
+/// 這麼細的東西本來也遮不住牠的腳。
+const OCCLUDER_MIN_THICKNESS_HEIGHTS: f32 = 0.1;
+
+/// 由上往下的一個視窗（`scan` 從系統讀出來的；拆出來是為了不碰 Windows 也能測）。
+struct Shown {
+    id: isize,
+    rect: RECT,
+    /// 有標題、不是工具視窗、沒有最大化：可以站上去。
+    standable: bool,
+}
+
 /// Windows 自己判斷「現在不該打擾使用者」：全螢幕程式、D3D 全螢幕遊戲、簡報模式。
 /// 跟 Windows 通知在這些情況下暫停的規則一致。
 pub fn user_is_busy() -> bool {
@@ -43,9 +56,7 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
         let _ = EnumWindows(Some(collect), LPARAM(&mut hwnds as *mut _ as isize));
     }
     let me = unsafe { GetCurrentProcessId() };
-    // EnumWindows 由上往下列出；上面的視窗會蓋住下面視窗的頂端。
-    let mut above: Vec<RECT> = Vec::new();
-    let mut out = Vec::new();
+    let mut shown = Vec::new();
     for hwnd in hwnds {
         unsafe {
             if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || is_cloaked(hwnd) {
@@ -57,20 +68,33 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
                 continue;
             }
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            let Some(r) = frame_bounds(hwnd) else { continue };
-            let usable = !IsZoomed(hwnd).as_bool() && ex & WS_EX_TOOLWINDOW.0 == 0 && GetWindowTextLengthW(hwnd) > 0;
-            if usable && r.top as f32 > work.top as f32 + pet_height && r.top < work.bottom {
-                let mut segments = vec![(r.left.max(work.left) as f32, r.right.min(work.right) as f32)];
-                for o in above.iter().filter(|o| o.top <= r.top && o.bottom >= r.top) {
-                    segments = subtract(segments, o.left as f32, o.right as f32);
-                }
-                let (window, window_left) = (hwnd.0 as isize, r.left as f32);
-                out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| {
-                    // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
-                    let sides = (left == r.left as f32, right == r.right as f32);
-                    Platform { left, right, y: r.top as f32, window, window_left, sides, bottom: r.bottom as f32 }
-                }));
+            let Some(rect) = frame_bounds(hwnd) else { continue };
+            let standable = !IsZoomed(hwnd).as_bool() && ex & WS_EX_TOOLWINDOW.0 == 0 && GetWindowTextLengthW(hwnd) > 0;
+            shown.push(Shown { id: hwnd.0 as isize, rect, standable });
+        }
+    }
+    platforms_of(&shown, work, min_width, pet_height)
+}
+
+/// `shown` 由上往下排（EnumWindows 的順序）：上面的視窗會蓋住下面視窗的頂端。
+fn platforms_of(shown: &[Shown], work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
+    let min_thickness = (pet_height * OCCLUDER_MIN_THICKNESS_HEIGHTS) as i32;
+    let mut above: Vec<RECT> = Vec::new();
+    let mut out = Vec::new();
+    for w in shown {
+        let r = w.rect;
+        if w.standable && r.top as f32 > work.top as f32 + pet_height && r.top < work.bottom {
+            let mut segments = vec![(r.left.max(work.left) as f32, r.right.min(work.right) as f32)];
+            for o in above.iter().filter(|o| o.top <= r.top && o.bottom >= r.top) {
+                segments = subtract(segments, o.left as f32, o.right as f32);
             }
+            out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| {
+                // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
+                let sides = (left == r.left as f32, right == r.right as f32);
+                Platform { left, right, y: r.top as f32, window: w.id, window_left: r.left as f32, sides, bottom: r.bottom as f32 }
+            }));
+        }
+        if (r.right - r.left).min(r.bottom - r.top) >= min_thickness {
             above.push(r);
         }
     }
@@ -110,6 +134,24 @@ fn subtract(segments: Vec<(f32, f32)>, lo: f32, hi: f32) -> Vec<(f32, f32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_thin_shadow_window_hugging_the_top_does_not_hide_it() {
+        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let work = rect(0, 0, 3840, 2112);
+        // LINE：主視窗上面貼一條 11 像素的陰影視窗（排在主視窗前面）。
+        let shown = [
+            Shown { id: 1, rect: rect(2793, 1050, 3789, 1061), standable: false },
+            Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true },
+        ];
+        let p = platforms_of(&shown, work, 100.0, 256.0);
+        assert_eq!(p.len(), 1, "{p:?}");
+        assert_eq!((p[0].left, p[0].right, p[0].y, p[0].sides), (2793.0, 3789.0, 1061.0, (true, true)));
+        // 真的蓋在上面的視窗照樣擋住那一段。
+        let shown = [Shown { id: 3, rect: rect(3000, 900, 3400, 1500), standable: true }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true }];
+        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| (p.left, p.right)).collect();
+        assert_eq!(p, vec![(2793.0, 3000.0), (3400.0, 3789.0)]);
+    }
 
     #[test]
     fn covered_part_of_a_window_top_is_removed() {
