@@ -440,6 +440,8 @@ function drawEditor() {
     },
   }, icon('trash-2'), editor.confirmDelete ? '確定刪除' : '刪除');
 
+  // 選了切換鈕整個抽屜會重畫：記住捲到哪，畫完捲回去，不然會跳回最上面。
+  const scrolled = drawer.querySelector('.drawer-body')?.scrollTop ?? 0;
   drawer.replaceChildren(
     h('div', { class: 'drawer-head' },
       h('h2', {}, editor.isNew ? '新增提醒' : '編輯提醒'),
@@ -478,6 +480,7 @@ function drawEditor() {
         render();
       } }, icon('check'), '儲存')));
   drawPreview();
+  drawer.querySelector('.drawer-body').scrollTop = scrolled;
 }
 
 function drawPreview() {

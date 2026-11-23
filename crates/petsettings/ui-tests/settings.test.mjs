@@ -165,6 +165,12 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '新增提醒' }).first().click();
     await page.waitForFunction(() => document.activeElement?.id === 'title');
     await page.getByRole('button', { name: '伸展', exact: true }).click();
+    // 捲到下面選切換鈕：抽屜重畫後要停在原地，不能跳回最上面
+    const scrolledTo = await page.evaluate(() => { const b = document.querySelector('.drawer-body'); b.scrollTop = b.scrollHeight; return b.scrollTop; });
+    await page.getByRole('button', { name: '要按完成' }).click();
+    await page.getByRole('button', { name: '自己消失' }).click();
+    const scrollAfter = await page.evaluate(() => document.querySelector('.drawer-body').scrollTop);
+    check(scrolledTo > 0 && scrollAfter === scrolledTo, `picking an option keeps the drawer where it was (${scrolledTo} → ${scrollAfter})`);
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-template-light.png') });
     await page.locator('#save-btn').click();
     await page.waitForSelector('.drawer:not(.open)');
