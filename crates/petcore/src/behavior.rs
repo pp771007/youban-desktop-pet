@@ -91,9 +91,16 @@ const SPIN_ON_CLICK_CHANCE: f32 = 0.4;
 const ROLL_SECS: f32 = 1.0;
 const ROLL_DIST_HEIGHTS: f32 = 1.3;
 const ROLL_LIFT: f32 = 0.25;
-/// 追滑鼠：滑鼠在這麼多個身高以內才會注意到；滑鼠高出地面這麼多個身高就搆不到了。
-const CHASE_NOTICE_HEIGHTS: f32 = 8.0;
+/// 追滑鼠：滑鼠高出地面這麼多個身高就搆不到了。
 const CHASE_MAX_ABOVE_HEIGHTS: f32 = 3.0;
+/// 逗牠：滑鼠在牠身旁（不在身上，在身上晃是摸頭）這麼多個身高以內快速左右晃，
+/// `TEASE_WINDOW_SECS` 內換方向 `TEASE_REVERSALS` 次，牠才跑過來撲。平常工作時滑鼠經過、停在附近都不算 ——
+/// 牠不會自己跑去滑鼠旁邊干擾人。
+const TEASE_NOTICE_HEIGHTS: f32 = 6.0;
+const TEASE_REVERSALS: usize = 3;
+const TEASE_WINDOW_SECS: f64 = 1.0;
+/// 每一下至少要晃這麼遠（以身高計），手抖不算。
+const TEASE_STEP_HEIGHTS: f32 = 0.05;
 const CHASE_SPEED_MUL: f32 = 2.4;
 const CHASE_SECS: f32 = 6.0;
 /// 追到離滑鼠這麼近（以身高計）就撲上去。
@@ -159,7 +166,6 @@ const SIT_CALM_MUL: f32 = 2.0;
 const NEXT_IDLE: f32 = 10.0;
 const NEXT_SPIN: f32 = 5.0;
 const NEXT_ROLL: f32 = 6.0;
-const NEXT_CHASE: f32 = 18.0;
 /// 小跳時哼歌、張望時冒問號的機率。
 const NOTE_ON_HOP_CHANCE: f32 = 0.4;
 const QUESTION_ON_LOOK_CHANCE: f32 = 0.5;
@@ -431,6 +437,10 @@ pub struct Pet {
     hover_last_x: Option<f32>,
     hover_dir: f32,
     reversals: Vec<f64>,
+    /// 逗牠：上一次算進去的滑鼠位置、方向、最近幾次換方向的時間。
+    tease_anchor_x: Option<f32>,
+    tease_dir: f32,
+    tease_reversals: Vec<f64>,
     lean: f32,
     /// 開始張望時面向哪邊（張望完要轉回來）。
     look_origin_left: bool,
@@ -476,6 +486,9 @@ impl Pet {
             hover_last_x: None,
             hover_dir: 0.0,
             reversals: Vec::new(),
+            tease_anchor_x: None,
+            tease_dir: 0.0,
+            tease_reversals: Vec::new(),
             lean: 0.0,
             look_origin_left: false,
             activity: Activity::default(),
@@ -714,6 +727,9 @@ impl Pet {
         if self.notices_item(env, now) {
             self.emote(Emote::Alert);
             self.set_mode(Mode::Fetch { since: now }, now);
+        } else if self.teased(env, now) {
+            self.emote(Emote::Alert);
+            self.set_mode(Mode::Chase { until: now + CHASE_SECS as f64 }, now);
         }
         let t = (now - self.mode_start) as f32;
         match self.mode {
@@ -1323,6 +1339,40 @@ impl Pet {
         self.lean += (target - self.lean) * 0.15;
     }
 
+    /// 有人拿滑鼠在牠旁邊快速左右晃（像拿逗貓棒）：牠正閒著、不是安靜模式就要撲過去。
+    fn teased(&mut self, env: &Env, now: f64) -> bool {
+        let h = env.pet_height;
+        let idle = env.activity != Activity::Calm && matches!(self.mode, Mode::Idle { .. } | Mode::Walk { .. } | Mode::Look | Mode::Sit { .. } | Mode::Stretch | Mode::Yawn | Mode::Hop | Mode::Talk { .. });
+        let near = env.cursor.filter(|&(cx, cy)| idle && (cx - self.x).abs() > env.pet_half_width && self.cursor_reachable((cx, cy), env, h * TEASE_NOTICE_HEIGHTS));
+        let Some((cx, _)) = near else {
+            self.tease_anchor_x = None;
+            self.tease_reversals.clear();
+            return false;
+        };
+        let anchor = self.tease_anchor_x.get_or_insert(cx);
+        let dx = cx - *anchor;
+        if dx.abs() < h * TEASE_STEP_HEIGHTS {
+            return false;
+        }
+        *anchor = cx;
+        let dir = dx.signum();
+        if self.tease_dir != 0.0 && dir != self.tease_dir {
+            self.tease_reversals.push(now);
+        }
+        self.tease_dir = dir;
+        self.tease_reversals.retain(|t| now - t <= TEASE_WINDOW_SECS);
+        if self.tease_reversals.len() < TEASE_REVERSALS {
+            return false;
+        }
+        self.tease_reversals.clear();
+        true
+    }
+
+    /// 有人把點心或球拿起來重丟：之前搆不到放棄了也不再賭氣，看到就去拿。
+    pub fn item_tossed(&mut self) {
+        self.ignore_item_until = f64::NEG_INFINITY;
+    }
+
     /// 有想要的東西、牠正閒著（不在睡覺、沒被拎著、沒在做別的事）就去拿。
     fn notices_item(&self, env: &Env, now: f64) -> bool {
         env.item.is_some_and(|i| i.wanted)
@@ -1432,9 +1482,7 @@ impl Pet {
         let moving = env.activity != Activity::Calm;
         let spin = NEXT_SPIN;
         let roll = if moving { NEXT_ROLL } else { 0.0 };
-        let chase_target = env.cursor.filter(|c| self.cursor_reachable(*c, env, env.pet_height * CHASE_NOTICE_HEIGHTS) && (c.0 - self.x).abs() > env.pet_height * POUNCE_RANGE_HEIGHTS);
-        let chase = if moving && chase_target.is_some() { NEXT_CHASE } else { 0.0 };
-        let choices = [walk, NEXT_HOP, NEXT_LOOK, NEXT_STRETCH, doze, NEXT_YAWN, sit, spin, roll, chase, NEXT_IDLE];
+        let choices = [walk, NEXT_HOP, NEXT_LOOK, NEXT_STRETCH, doze, NEXT_YAWN, sit, spin, roll, NEXT_IDLE];
         let total: f32 = choices.iter().sum();
         let mut pick = self.rand01() * total;
         let mut index = choices.len() - 1;
@@ -1477,10 +1525,6 @@ impl Pet {
             8 => {
                 let dir = if self.rand01() < 0.5 { -1.0 } else { 1.0 };
                 self.set_mode(Mode::Roll { dir }, now);
-            }
-            9 => {
-                self.emote(Emote::Alert);
-                self.set_mode(Mode::Chase { until: now + CHASE_SECS as f64 }, now);
             }
             _ => self.set_idle(now),
         }
@@ -1945,23 +1989,37 @@ mod tests {
         assert!(pet.block_at(pet.x, pet.y, &env).is_none(), "still inside at x = {}", pet.x);
     }
 
+    /// 滑鼠在 `cx` 附近左右晃（每 0.15 秒換一次邊）。
+    fn wiggle(cx: f32, now: f64) -> f32 {
+        if (now / 0.15) as i64 % 2 == 0 { cx - 40.0 } else { cx + 40.0 }
+    }
+
     #[test]
-    fn chases_a_reachable_cursor_and_pounces() {
+    fn only_comes_to_the_cursor_when_teased() {
         let mut env = env();
         env.cursor = Some((1000.0, 980.0));
-        let (mut now, mut pet) = (0.0, Pet::new(500.0, 1000.0, 0.0, 5));
-        let mut pounced = false;
-        for _ in 0..(120.0 / DT) as usize {
+        let (mut now, mut pet) = (0.0, Pet::new(700.0, 1000.0, 0.0, 5));
+        // 滑鼠停在附近工作十分鐘：不會自己跑過去。
+        for _ in 0..(600.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            pounced |= matches!(pet.mode, Mode::Pounce { .. }) && (pet.x - 1000.0).abs() < env.pet_height;
+            assert!(!matches!(pet.mode, Mode::Chase { .. } | Mode::Pounce { .. }), "came to a resting cursor at {now:.1}s");
         }
-        assert!(pounced, "ran to the cursor and pounced");
-
-        env.cursor = Some((1000.0, 300.0));
-        let mut pet = Pet::new(500.0, 1000.0, now, 5);
-        for _ in 0..(120.0 / DT) as usize {
+        // 在牠旁邊晃：跑過去撲。
+        let mut pounced = false;
+        for _ in 0..(30.0 / DT) as usize {
             now += DT as f64;
+            let x = (pet.x + 300.0).min(env.max_x - 100.0);
+            env.cursor = Some((wiggle(x, now), 980.0));
+            pet.update(now, DT, &env);
+            pounced |= matches!(pet.mode, Mode::Pounce { .. });
+        }
+        assert!(pounced, "teased → ran to the cursor and pounced");
+        // 晃在頭頂老高的地方：搆不到，不追。
+        let mut pet = Pet::new(700.0, 1000.0, now, 5);
+        for _ in 0..(30.0 / DT) as usize {
+            now += DT as f64;
+            env.cursor = Some((wiggle(1000.0, now), 300.0));
             pet.update(now, DT, &env);
             assert!(!matches!(pet.mode, Mode::Chase { .. }), "a cursor high up the screen is out of reach");
         }
@@ -2036,6 +2094,16 @@ mod tests {
         run(&mut pet, &mut now, FETCH_PATIENCE_SECS as f32 + 1.0, &env);
         assert!(!matches!(pet.mode, Mode::Fetch { .. } | Mode::Eat), "gave up");
         assert!(pet.ignore_item_until > now, "and stops trying for a while");
+        // 有人把它拿起來丟到牠旁邊：馬上又去拿。
+        pet.item_tossed();
+        env.item = Some(ItemView { x: 600.0, y: 1000.0, food: true, grounded: true, wanted: true });
+        let mut went = false;
+        for _ in 0..(3.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            went |= matches!(pet.mode, Mode::Fetch { .. } | Mode::Eat);
+        }
+        assert!(went, "went for the re-thrown food");
     }
 
     #[test]

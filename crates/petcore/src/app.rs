@@ -1529,6 +1529,9 @@ impl App {
             let (cx, cy) = cursor();
             if !slot.toy.is_held() && (cx - px).hypot(cy - py) > behavior::DRAG_THRESHOLD_DIP * s {
                 slot.toy.grab(px, py);
+                // 重丟 = 再玩一輪：本來快要淡出收掉的也留下來。
+                slot.done_at = None;
+                self.pet.item_tossed();
             }
             if slot.toy.is_held() {
                 slot.toy.drag_to(cx, cy, dt);

@@ -131,7 +131,9 @@ impl Toy {
     }
 
     /// 使用者在 `(cx, cy)` 抓起來。
+    /// 被人拿起來：重丟一次就是再玩一輪，桌寵踢過幾次歸零（踢夠了牠就不理球）。
     pub fn grab(&mut self, cx: f32, cy: f32) {
+        self.kicks = 0;
         self.held = Some((self.x - cx, self.y - cy));
         self.resting = false;
         self.vx = 0.0;
@@ -335,8 +337,10 @@ mod tests {
         let w = world(&[]);
         let mut t = Toy::new(ToyKind::ball(0.0), 500.0, 1000.0, 0.0, 0.0, 40.0);
         settle(&mut t, &w, 1.0);
+        t.kicks = 5;
         t.grab(500.0, 980.0);
         assert!(!t.grounded(), "held in the hand, not on the floor");
+        assert_eq!(t.kicks, 0, "a fresh throw is a new round of play");
         for i in 1..=10 {
             t.drag_to(500.0 + 25.0 * i as f32, 980.0 - 30.0 * i as f32, DT);
             assert!(!t.update(DT, &w), "no physics while held");
