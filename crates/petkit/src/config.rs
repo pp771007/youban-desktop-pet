@@ -8,6 +8,11 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::reminders::Style;
+
+/// 休息提醒預設連續用多久提醒一次（分鐘）。
+pub const DEFAULT_REST_EVERY_MINUTES: u32 = 50;
+
 pub const DEFAULT_PET: &str = "capybara";
 /// 中尺寸：桌寵身高 128 DIP（100% 縮放時 128 像素）。
 pub const DEFAULT_SIZE_DIP: u32 = 128;
@@ -41,6 +46,11 @@ pub struct Config {
     pub auto_update: bool,
     /// 視窗歸位自動記下新開的視窗時，桌寵說一聲。
     pub announce_new_windows: bool,
+    /// 休息提醒：連續用電腦 `rest_every_minutes` 分鐘跳一張卡（中間離開五分鐘算休息過，重新算）。
+    pub rest_reminder: bool,
+    pub rest_every_minutes: u32,
+    /// 休息提醒的卡片要按完成，還是自己消失。
+    pub rest_style: Style,
     pub features: Features,
 }
 
@@ -138,6 +148,9 @@ impl Default for Config {
             remind_in_fullscreen: false,
             auto_update: true,
             announce_new_windows: true,
+            rest_reminder: true,
+            rest_every_minutes: DEFAULT_REST_EVERY_MINUTES,
+            rest_style: Style::Auto,
             features: Features::default(),
         }
     }

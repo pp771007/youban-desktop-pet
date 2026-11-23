@@ -12,6 +12,8 @@ const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後�
 const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
 /** 時間到怎麼提醒（`petkit::reminders::Style`）。 */
 const STYLE_CHOICES = [['card', '要按完成'], ['auto', '自己消失']];
+/** 休息提醒：連續用電腦多久提醒一次（分鐘）。 */
+const REST_CHOICES = [[30, '30 分'], [45, '45 分'], [50, '50 分'], [60, '1 小時'], [90, '1.5 小時']];
 /** 新增提醒時一鍵套用：上班時間每隔一陣子提醒一下（自己消失，不用按）。`label` 是按鈕上的字，`title` 是套用後的提醒內容。 */
 const TEMPLATES = [
   { label: '喝水', title: '喝水', everyMinutes: 60 },
@@ -250,6 +252,13 @@ function renderReminders(page) {
       settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
       settingRow('全螢幕時照樣跳出來', configSwitch('remindInFullscreen', '全螢幕時照樣跳出來')),
       settingRow('提醒卡', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是提醒卡的樣子' } }) }, icon('play'), '看看樣子')))));
+  const setRest = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
+  page.append(h('section', { class: 'section' },
+    h('h2', {}, '休息提醒'),
+    h('div', { class: 'card' },
+      settingRow('連續用電腦太久提醒起來動一動', configSwitch('restReminder', '休息提醒')),
+      state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
+      state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
   page.append(renderSpecialDays());
 }
 

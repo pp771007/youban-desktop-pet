@@ -34,8 +34,7 @@ const POKE_WINDOW_SECS: f64 = 8.0;
 const POKES_TO_COMPLAIN: usize = 5;
 /// 放手時快過這個（DIP/秒）才算「被甩出去」，輕輕放下不算。
 const THROW_SPEED_DIP: f32 = 1200.0;
-/// 休息提醒：連續用電腦這麼久提醒一次；中間離開這麼久算休息過了。
-const REST_AFTER_SECS: f64 = 50.0 * 60.0;
+/// 休息提醒：中間離開這麼久算休息過了，連續使用時間重新算（多久提醒一次在設定裡）。
 const BREAK_SECS: f32 = 5.0 * 60.0;
 /// 「一天」從清晨四點算起：半夜一點還沒睡算前一天的深夜，不會再打一次招呼。
 const DAY_STARTS_HOUR: i64 = 4;
@@ -237,16 +236,6 @@ impl Chatter {
         if now - self.last_said < MIN_GAP_SECS {
             return None;
         }
-        if let Some(since) = self.active_since
-            && now - since >= REST_AFTER_SECS
-            && now - self.last_rest >= REST_AFTER_SECS
-        {
-            self.last_rest = now;
-            let minutes = ((now - since) / 60.0).round() as i64;
-            let mut say = self.say(REST, None, now);
-            say.text = say.text.replace("{m}", &minutes.to_string());
-            return Some(say);
-        }
         if let Some(rule) = MOMENTS.iter().find(|r| !self.moments_done.contains(&r.moment) && r.matches(ctx.clock, ctx.workday)) {
             self.moments_done.push(rule.moment);
             return Some(self.say(rule.lines, None, now));
@@ -274,6 +263,23 @@ impl Chatter {
         }
         self.last_react = ctx.now;
         Some(self.say(lines, emote, ctx.now))
+    }
+
+    /// 休息提醒（跟「講話」設定無關，每秒問一次）：連續用電腦滿 `every_secs` 而且離上次提醒也滿了，
+    /// 回傳卡片上那句話。人離開五分鐘就重新算（`tick` 記的連續使用時間）。
+    pub fn rest_due(&mut self, now: f64, every_secs: f64) -> Option<String> {
+        let since = self.active_since?;
+        if now - since < every_secs || now - self.last_rest < every_secs {
+            return None;
+        }
+        self.last_rest = now;
+        let minutes = ((now - since) / 60.0).round() as i64;
+        Some(self.say(REST, None, now).text.replace("{m}", &minutes.to_string()))
+    }
+
+    /// 休息提醒按了「稍後」：`minutes` 分鐘後再提醒一次。
+    pub fn snooze_rest(&mut self, now: f64, minutes: u32, every_secs: f64) {
+        self.last_rest = now - every_secs + f64::from(minutes) * 60.0;
     }
 
     fn say(&mut self, lines: &[&'static str], emote: Option<Emote>, now: f64) -> Say {
@@ -397,18 +403,39 @@ mod tests {
     }
 
     #[test]
-    fn nags_to_rest_after_long_use_and_a_break_resets_it() {
-        let (mut now, mut clock) = (0.0, at(2026, 11, 23, 13, 0));
-        let mut c = Chatter::new(now, 7, Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()));
-        let rest = |s: &String| s.contains("分鐘") || s.contains("遠方");
-        let said = run(&mut c, &mut now, &mut clock, 49 * 60, |x| x.talk = Talk::Never);
-        assert!(said.is_empty());
-        let said = run(&mut c, &mut now, &mut clock, 2 * 60, |_| {});
-        assert_eq!(said.iter().filter(|s| rest(s)).count(), 1, "rest reminder at 50 minutes, got {said:?}");
+    fn rest_reminder_after_long_use_even_when_not_talking_and_a_break_resets_it() {
+        const EVERY: f64 = 30.0 * 60.0;
+        let now = std::cell::Cell::new(0.0);
+        let mut clock = at(2026, 11, 23, 13, 0);
+        let mut c = Chatter::new(now.get(), 7, Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()));
+        // 一秒一秒跑：`tick` 記連續使用時間，`rest_due` 問要不要提醒。
+        let mut run_rest = |c: &mut Chatter, secs: u32, idle: f32| -> Vec<String> {
+            let mut out = Vec::new();
+            for _ in 0..secs {
+                now.set(now.get() + 1.0);
+                clock += Duration::seconds(1);
+                let mut x = ctx(now.get(), clock);
+                x.talk = Talk::Never;
+                x.idle_input_secs = idle;
+                c.tick(&x);
+                out.extend(c.rest_due(now.get(), EVERY));
+            }
+            out
+        };
+        assert!(run_rest(&mut c, 29 * 60, 0.0).is_empty());
+        let due = run_rest(&mut c, 2 * 60, 0.0);
+        assert_eq!(due.len(), 1, "rest reminder at 30 minutes even with talking off, got {due:?}");
+        assert!(due[0].contains("30") || due[0].contains("遠方"), "{due:?}");
 
-        run(&mut c, &mut now, &mut clock, 6 * 60, |x| x.idle_input_secs = 360.0);
-        let said = run(&mut c, &mut now, &mut clock, 40 * 60, |_| {});
-        assert!(!said.iter().any(rest), "a 6-minute break restarts the count, got {said:?}");
+        run_rest(&mut c, 6 * 60, 360.0);
+        assert!(run_rest(&mut c, 25 * 60, 0.0).is_empty(), "a 6-minute break restarts the count");
+
+        // 稍後 5 分鐘：5 分鐘後再一次。
+        let due = run_rest(&mut c, 6 * 60, 0.0);
+        assert_eq!(due.len(), 1);
+        c.snooze_rest(now.get(), 5, EVERY);
+        assert!(run_rest(&mut c, 4 * 60, 0.0).is_empty());
+        assert_eq!(run_rest(&mut c, 2 * 60, 0.0).len(), 1, "snoozed rest reminder comes back after 5 minutes");
     }
 
     #[test]

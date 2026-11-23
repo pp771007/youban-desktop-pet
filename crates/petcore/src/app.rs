@@ -11,6 +11,7 @@ use petkit::companion::{self, CompanionFile};
 use petkit::config::{Area, Config, Roam, Talk, load_json, write_atomic};
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
+use petkit::reminders::Style;
 use petkit::states;
 use petkit::update_status::UpdateStatus;
 use serde::{Deserialize, Serialize};
@@ -107,6 +108,8 @@ const MAX_CARDS: usize = 32;
 const HOLIDAY_CHECK_SECS: f64 = 3600.0;
 const UPDATE_CHECK_SECS: f64 = 3600.0;
 const UPDATE_CARD_KEY: &str = "update";
+/// 休息提醒的卡（核心自己的，按「稍後」時核心自己處理）。
+const REST_CARD_KEY: &str = "rest";
 /// 換桌寵：舊的縮小消失、新的彈出來。
 const SWITCH_OUT_SECS: f64 = 0.18;
 const SWITCH_IN_SECS: f64 = 0.36;
@@ -984,6 +987,13 @@ impl App {
         }
         let q = self.cards.pop_front().expect("front exists");
         self.shown_card = false;
+        if q.owner == "core" && q.key == REST_CARD_KEY {
+            if let CardAction::Snooze(minutes) = action {
+                let every = self.rest_every_secs();
+                self.chatter.snooze_rest(self.now(), minutes, every);
+            }
+            return;
+        }
         if q.owner == "core" && q.key == UPDATE_CARD_KEY {
             // 「下次啟動時」什麼都不用做：解好的新版留著，下次啟動就會先換上。
             if action == CardAction::Done {
@@ -1180,6 +1190,10 @@ impl App {
                 self.apply(out);
             }
         }
+    }
+
+    fn rest_every_secs(&self) -> f64 {
+        f64::from(self.config.rest_every_minutes.max(1)) * 60.0
     }
 
     /// 用 WM_CLOSE 排進訊息佇列，而不是當場 DestroyWindow：當場關掉的話，
@@ -1584,6 +1598,18 @@ impl App {
         let greeted = self.chatter.greeted_on();
         if let Some(say) = self.chatter.tick(&ctx) {
             self.say(say, now);
+        }
+        // 休息提醒放在設定的「提醒」頁，跟著提醒功能一起開關。
+        if self.config.features.reminders
+            && self.config.rest_reminder
+            && let Some(text) = self.chatter.rest_due(now, self.rest_every_secs())
+        {
+            let time = local_now().format("%H:%M").to_string();
+            let card = match self.config.rest_style {
+                Style::Card => Card::Reminder { title: text, time, snooze_open: false },
+                Style::Auto => Card::Nudge { title: text, time },
+            };
+            self.enqueue("core", REST_CARD_KEY.into(), card);
         }
         if self.chatter.greeted_on() != greeted {
             self.save_state();

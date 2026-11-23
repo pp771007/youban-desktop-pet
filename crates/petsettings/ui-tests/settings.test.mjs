@@ -33,7 +33,7 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'auto', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -128,6 +128,11 @@ for (const scheme of ['light', 'dark']) {
     check(rows[1].includes('已暫停') && rows[1].includes('遇假日提前'), 'paused reminder shows paused and holiday policy');
     await page.getByRole('checkbox', { name: '提醒音' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.reminderSound) === false, 'reminder sound switch writes config');
+    await page.getByRole('button', { name: '30 分' }).click();
+    await page.locator('.section', { hasText: '休息提醒' }).getByRole('button', { name: '要按完成' }).click();
+    check(await page.evaluate(() => { const c = window.__mock.config; return c.restEveryMinutes === 30 && c.restStyle === 'card'; }), 'rest reminder interval and card style write config');
+    await page.getByRole('checkbox', { name: '休息提醒' }).click({ force: true });
+    check(await page.evaluate(() => window.__mock.config.restReminder) === false && !(await page.getByText('連續用多久').isVisible()), 'turning the rest reminder off hides its options');
     await page.getByRole('checkbox', { name: '全螢幕時照樣跳出來' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.remindInFullscreen) === true, 'remind-in-fullscreen switch writes config');
 
