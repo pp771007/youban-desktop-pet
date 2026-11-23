@@ -104,6 +104,17 @@ button, input, select { font: inherit; color: inherit; }
 .nav-item[aria-current="page"] .icon { color: var(--color-accent); }
 /* 關著的功能：還點得進去（進去才開得起來），只是淡一點。 */
 .nav-item.off { opacity: 0.5; }
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space-2) * 1px);
+  padding: 0 calc(var(--space-4) * 1px);
+  color: var(--color-text-muted);
+  font-size: calc(var(--font-size-caption) * 1px);
+}
+.sidebar-foot img { width: 24px; height: 24px; }
+
 .nav-label {
   margin: calc(var(--space-4) * 1px) calc(var(--space-4) * 1px) calc(var(--space-1) * 1px);
   color: var(--color-text-muted);

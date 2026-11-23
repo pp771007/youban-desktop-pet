@@ -15,6 +15,7 @@ use petkit::config::{Config, load_json};
 use petkit::holidays::{self, DayKind};
 use petkit::paths;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
+use petkit::update_status::UpdateStatus;
 use petkit::{ipc, pack, pack_edit, states};
 use serde::Serialize;
 use tauri::State;
@@ -349,6 +350,19 @@ fn send_core(command: serde_json::Value) -> CmdResult<()> {
 }
 
 #[tauri::command]
+fn update_status() -> Option<UpdateStatus> {
+    UpdateStatus::load(&paths::update_status_file())
+}
+
+/// 換新版時設定程式也會被換掉：送出指令後自己先關，不要開著舊版的畫面。
+#[tauri::command]
+fn apply_update(app: tauri::AppHandle) -> CmdResult<()> {
+    send_core(serde_json::json!({ "cmd": ipc::CMD_APPLY_UPDATE }))?;
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 fn start_core() -> CmdResult<()> {
     let exe = paths::sibling_exe(paths::CORE_EXE).ok_or(format!("找不到 {}", paths::CORE_EXE))?;
     Command::new(exe).spawn().map(|_| ()).map_err(err)
@@ -417,6 +431,8 @@ fn main() {
             window_layout,
             core_running,
             send_core,
+            update_status,
+            apply_update,
             start_core,
             open_pets_dir,
             import_preview,

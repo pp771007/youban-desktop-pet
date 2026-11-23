@@ -26,6 +26,9 @@ const CORE_POLL_MS = 3000;
 const CONFIRM_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
 const LAYOUT_REFRESH_MS = 600;
+const UPDATE_POLL_MS = 500;
+/** 核心還在查或下載，要繼續等結果。 */
+const UPDATE_BUSY = ['checking', 'downloading'];
 const DEFAULT_PAGE = 'reminders';
 /** 功能開關：設定檔 features 的欄位 → 名稱與它的頁面（側邊欄「功能」那一組）。 */
 const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows']];
@@ -42,6 +45,8 @@ const state = {
   windows: [],
   autostart: null,
   autostartError: '',
+  /** 檢查更新的進度（`petkit::update_status::UpdateStatus`），沒按過「檢查更新」是 null。 */
+  update: null,
 };
 
 // ---------- 小工具 ----------
@@ -864,7 +869,42 @@ function renderGeneral(page) {
         h('div', { class: 'setting-title' }, '開機自動啟動'),
         state.autostartError ? h('div', { class: 'setting-error' }, state.autostartError) : null),
       autostart),
-    settingRow('自動更新', configSwitch('autoUpdate', '自動更新'), `目前版本 ${state.version}`)));
+    settingRow('自動更新', configSwitch('autoUpdate', '自動更新')),
+    updateRow()));
+}
+
+function updateRow() {
+  const u = state.update;
+  const busy = UPDATE_BUSY.includes(u?.state);
+  const text = {
+    checking: '檢查中…',
+    downloading: `下載新版 ${u?.version} 中…`,
+    upToDate: '已經是最新版',
+    ready: `新版 ${u?.version} 準備好了`,
+    failed: '連不上更新伺服器，請稍後再試',
+    unavailable: '開發中的版本不會更新',
+  }[u?.state];
+  const button = u?.state === 'ready'
+    ? h('button', { class: 'btn btn-primary btn-small', disabled: !state.coreRunning, onclick: () => invoke('apply_update') }, '現在更新')
+    : h('button', { class: 'btn btn-secondary btn-small', disabled: busy || !state.coreRunning, onclick: checkUpdate }, '檢查更新');
+  return h('div', { class: 'setting' },
+    h('div', { class: 'setting-main' },
+      h('div', { class: 'setting-title' }, `目前版本 ${state.version}`),
+      text ? h('div', { class: u.state === 'failed' ? 'setting-error' : 'setting-desc', role: 'status' }, text) : null),
+    button);
+}
+
+async function checkUpdate() {
+  await invoke('send_core', { command: { cmd: 'checkUpdate' } });
+  await pollUpdate();
+}
+
+/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。 */
+async function pollUpdate() {
+  clearTimeout(pollUpdate.timer);
+  state.update = await invoke('update_status');
+  if (state.page === 'general') render();
+  if (UPDATE_BUSY.includes(state.update?.state)) pollUpdate.timer = setTimeout(pollUpdate, UPDATE_POLL_MS);
 }
 
 // ---------- 骨架 ----------
@@ -890,6 +930,14 @@ async function go(name) {
   state.page = PAGES[name] && !NAV_PARENT[name] ? name : DEFAULT_PAGE;
   if (state.page === 'windows') await refreshWindows();
   if (state.page === 'general' && state.autostart === null) state.autostart = await invoke('autostart_status').catch(() => false);
+  if (state.page === 'general' && state.update === null) {
+    // 「已經是最新版」「連不上」是之前哪一次查的結果看不出來，不顯示；還在查、已經下載好的才接著顯示。
+    const u = await invoke('update_status');
+    if (u && (u.state === 'ready' || UPDATE_BUSY.includes(u.state))) {
+      state.update = u;
+      if (UPDATE_BUSY.includes(u.state)) pollUpdate();
+    }
+  }
   render();
 }
 
@@ -909,6 +957,7 @@ async function main() {
   state.config = config;
   state.sizes = constants.sizes;
   state.version = constants.version;
+  document.getElementById('app-version').textContent = constants.version;
   state.pets = pets;
   await loadReminders();
   updateBrand();

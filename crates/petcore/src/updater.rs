@@ -12,14 +12,16 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use petkit::config::write_atomic;
+use petkit::update_status::UpdateStatus;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
-use crate::log;
+use crate::{log, paths};
 
 pub const WM_UPDATE_READY: u32 = WM_APP + 4;
 /// 新核心帶這個參數啟動：等舊的結束、顯示「已更新」。
@@ -52,6 +54,8 @@ const VERSION_FILE: &str = "staged-version";
 const CORE_EXE: &str = petkit::paths::CORE_EXE;
 const MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
 
+static CHECKING: AtomicBool = AtomicBool::new(false);
+
 pub fn due(dir: &Path) -> bool {
     fs::metadata(dir.join(MARKER)).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_none_or(|age| age >= CHECK_INTERVAL)
 }
@@ -76,25 +80,47 @@ fn installed(install_dir: &Path) -> bool {
     install_dir.join(UNINSTALLER).is_file()
 }
 
+/// 已經在查（每天的定時檢查跟「檢查更新」按鈕撞在一起）就不再開一條：兩條會搶同一個暫存資料夾。
 pub fn spawn(dir: PathBuf, install_dir: &Path, notify: HWND) {
+    if CHECKING.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let target = notify.0 as isize;
     let setup = installed(install_dir);
+    report(&UpdateStatus::Checking);
     let spawned = thread::Builder::new().name("updater".into()).spawn(move || {
-        match check_and_stage(&dir, setup) {
+        let status = match check_and_stage(&dir, setup) {
             Ok(Some(version)) => {
                 log!("update {version} staged");
                 unsafe {
                     let _ = PostMessageW(Some(HWND(target as _)), WM_UPDATE_READY, WPARAM(0), LPARAM(0));
                 }
+                UpdateStatus::Ready { version: version.trim_start_matches('v').to_owned() }
             }
-            Ok(None) => log!("no update"),
+            Ok(None) => {
+                log!("no update");
+                UpdateStatus::UpToDate
+            }
             // 沒網路、GitHub 掛了就下次再試，現在的版本照樣能用。
-            Err(e) => log!("update check failed: {e}"),
-        }
+            Err(e) => {
+                log!("update check failed: {e}");
+                UpdateStatus::Failed
+            }
+        };
         let _ = write_atomic(&dir.join(MARKER), b"");
+        report(&status);
+        CHECKING.store(false, Ordering::Release);
     });
     if let Err(e) = spawned {
         log!("updater thread failed to start: {e}");
+        report(&UpdateStatus::Failed);
+        CHECKING.store(false, Ordering::Release);
+    }
+}
+
+pub fn report(status: &UpdateStatus) {
+    if let Err(e) = status.save(&paths::update_status_file()) {
+        log!("update status not saved: {e}");
     }
 }
 
@@ -112,6 +138,8 @@ pub fn discard_stale(dir: &Path) {
     if staged(dir).is_none() {
         let _ = fs::remove_dir_all(dir.join(STAGED_DIR));
         let _ = fs::remove_file(dir.join(VERSION_FILE));
+        // 「新版準備好了」已經裝上；「檢查中」是上次查到一半柚伴就結束了。
+        let _ = fs::remove_file(paths::update_status_file());
     }
 }
 
@@ -144,6 +172,7 @@ fn check_and_stage(dir: &Path, setup: bool) -> Result<Option<String>, Box<dyn st
         return Ok(None);
     }
     let asset = asset_url(&latest, setup).ok_or("release has no package for this install")?;
+    report(&UpdateStatus::Downloading { version: tag.trim_start_matches('v').to_owned() });
     let mut bytes = Vec::new();
     agent.get(asset).call()?.body_mut().as_reader().take(MAX_DOWNLOAD_BYTES).read_to_end(&mut bytes)?;
     let staged = dir.join(STAGED_DIR);

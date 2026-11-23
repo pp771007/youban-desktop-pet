@@ -25,7 +25,7 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 ## 改完怎麼驗
 
 - **改了 `crates/petsettings/ui/` 一定要重新 `cargo build -p petsettings`**：Tauri 把前端打包進執行檔，只改檔案的話實機看到的還是舊版。換了 `crates/petsettings/icons/icon.ico` 則要先 `cargo clean -p petsettings`，不然執行檔圖示不會更新。
-- 程式圖示（柚子）的原圖去背後放在三處：`docs/media/logo.png`（README）、`crates/petsettings/icons/icon.ico`、`crates/petcore/assets/app.ico`（`app.rc` 編進 Youban.exe）。托盤圖示另外用目前這隻桌寵的站姿圖。
+- 程式圖示（柚子）的原圖去背後放在四處：`docs/media/logo.png`（README）、`crates/petsettings/icons/icon.ico`、`crates/petcore/assets/app.ico`（`app.rc` 編進 Youban.exe）、`crates/petsettings/ui/logo.png`（設定側邊欄左下角，64px）。托盤圖示另外用目前這隻桌寵的站姿圖。
 - 看畫面不用動到使用者的螢幕：`Youban.exe --snapshot`（各狀態＋頭上特效）、`--snapshot-cards`（提醒卡、講話泡泡、點心與球）、`--frames`（每個動作 25fps PNG 序列）。
 - **動作要給影片看，不要給逐格拼圖**：`--frames` 的序列用 ffmpeg 疊到純色底轉 mp4，再裁到桌寵附近。
 - 實機端對端：`Youban.exe --send '{"cmd":"..."}'` 送測試指令（`say`、`toy`、`drop`、`dumpStatus`…，名稱在 `petkit::ipc`），`dumpStatus` 寫到 `%LOCALAPPDATA%\youban-desktop-pet\status.json`。`--send` 從 Bash 下；Windows PowerShell 5.1 會吃掉 JSON 的雙引號。

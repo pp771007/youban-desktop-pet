@@ -11,6 +11,10 @@ pub const CMD_OPEN_SETTINGS: &str = "openSettings";
 pub const CMD_DUMP_STATUS: &str = "dumpStatus";
 pub const CMD_CARD_ACTION: &str = "cardAction";
 pub const CMD_QUIT: &str = "quit";
+/// 不等每天的定時檢查，現在就去查新版；進度寫到 `paths::update_status_file`。
+pub const CMD_CHECK_UPDATE: &str = "checkUpdate";
+/// 換上已經下載好的新版（跟更新卡上的「現在更新」一樣）。
+pub const CMD_APPLY_UPDATE: &str = "applyUpdate";
 /// 自動測試用：把桌寵拎到 `{"x", "y"}` 放手。
 pub const CMD_DROP: &str = "drop";
 /// 自動測試用：走一次「記憶體一路往上漲」的提醒流程（存診斷檔＋冒泡）。

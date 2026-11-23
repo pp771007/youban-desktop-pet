@@ -12,6 +12,7 @@ use petkit::config::{Area, Config, Roam, Talk, load_json, write_atomic};
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
 use petkit::states;
+use petkit::update_status::UpdateStatus;
 use serde::{Deserialize, Serialize};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
@@ -984,6 +985,8 @@ impl App {
                 self.memory_alert(&memwatch::Leak { from_bytes: samples[0], to_bytes: samples[samples.len() - 1], samples });
             }
             ipc::CMD_QUIT => self.quit(),
+            ipc::CMD_CHECK_UPDATE => self.check_update_now(),
+            ipc::CMD_APPLY_UPDATE => self.update_now(),
             _ => self.broadcast(&ModuleEvent::Command(&v)),
         }
         Ok(())
@@ -1521,7 +1524,24 @@ impl App {
         }
     }
 
-    /// 使用者在「新版準備好了」卡上按了「現在更新」。
+    /// 設定裡按了「檢查更新」：不等每天的定時檢查，也不管自動更新有沒有開。
+    fn check_update_now(&mut self) {
+        let Some(install) = paths::install_dir().filter(|d| updater::enabled_for(d)) else {
+            updater::report(&UpdateStatus::Unavailable);
+            return;
+        };
+        let dir = paths::update_dir();
+        if let Some(version) = updater::staged_version(&dir).filter(|_| updater::staged(&dir).is_some()) {
+            updater::report(&UpdateStatus::Ready { version });
+            // 之前的更新卡被關掉了也再跳一次。
+            self.update_offered = false;
+            self.update_ready = true;
+            return;
+        }
+        updater::spawn(dir, &install, self.hwnd);
+    }
+
+    /// 使用者在「新版準備好了」卡上（或設定裡）按了「現在更新」。
     fn update_now(&mut self) {
         let (Some(install), Some(staged)) = (paths::install_dir(), updater::staged(&paths::update_dir())) else { return };
         match updater::apply_and_restart(&staged, &install) {

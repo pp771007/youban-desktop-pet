@@ -68,6 +68,16 @@ pub fn window_layout_file() -> PathBuf {
     local_dir().join("window-layout.json")
 }
 
+/// 自動更新的暫存（下載解好的新版、上次檢查時間）。
+pub fn update_dir() -> PathBuf {
+    local_dir().join("update")
+}
+
+/// 檢查更新的進度（`update_status::UpdateStatus`）。
+pub fn update_status_file() -> PathBuf {
+    update_dir().join("status.json")
+}
+
 /// `dumpStatus` 指令寫出的目前狀態。
 pub fn status_file() -> PathBuf {
     local_dir().join("status.json")

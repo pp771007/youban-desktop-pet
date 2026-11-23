@@ -43,6 +43,7 @@ function mockBackend(tokens) {
     },
     calls: [],
     running: true,
+    updateSteps: [],
   };
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
   db.pets = [{ id: 'capybara', name: '水豚', image: png, editable: false, days: 12 }, { id: 'capybara-side', name: '水豚（側面）', image: png, editable: false, days: 0 }];
@@ -81,7 +82,13 @@ function mockBackend(tokens) {
     delete_pet: ({ id }) => { db.pets = db.pets.filter((p) => p.id !== id); },
     window_layout: () => [{ title: '記事本', exe: 'notepad.exe', width: 800, height: 600 }],
     core_running: () => db.running,
-    send_core: ({ command }) => { db.calls.push(command); },
+    send_core: ({ command }) => {
+      db.calls.push(command);
+      // 核心查新版：每讀一次進度往前走一步，停在最後一個。
+      if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
+    },
+    update_status: () => (db.updateSteps.length > 1 ? db.updateSteps.shift() : db.updateSteps[0] ?? null),
+    apply_update: () => { db.calls.push({ cmd: 'apply_update' }); },
     start_core: () => { db.running = true; },
     open_pets_dir: () => { db.calls.push({ cmd: 'open_pets_dir' }); },
     autostart_status: () => false,
@@ -248,6 +255,15 @@ for (const scheme of ['light', 'dark']) {
 
     await page.getByRole('checkbox', { name: '自動更新' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.autoUpdate) === false && await page.getByText('目前版本 0.1.0').isVisible(), 'auto update switch writes config and shows version');
+    check((await page.locator('.sidebar-foot').innerText()).includes('0.1.0'), 'sidebar shows the version');
+
+    // 檢查更新：查到新版、下載好 → 按鈕變成「現在更新」，按下去叫核心換新版
+    await page.getByRole('button', { name: '檢查更新' }).click();
+    await page.getByRole('button', { name: '現在更新' }).waitFor();
+    check(await page.getByText('新版 0.2.0 準備好了').isVisible(), 'check for updates shows the downloaded version');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-update-ready-light.png') });
+    await page.getByRole('button', { name: '現在更新' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'apply_update')), 'update now asks the core to apply it');
 
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-general-light.png') });
 
