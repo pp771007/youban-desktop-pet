@@ -9,6 +9,7 @@ use std::time::{Instant, SystemTime};
 
 use petkit::companion::{self, CompanionFile};
 use petkit::config::{Activity, Area, Config, Countdown as CountdownMode, Roam, Talk, load_json, write_atomic};
+use petkit::focus_status::FocusStatus;
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
 use petkit::reminders::Style;
@@ -322,6 +323,8 @@ struct App {
     menu_pets: Vec<PetChoice>,
     /// 設定程式裡滑鼠停在某個範圍上：桌面上框出來給人看。
     area_preview: Option<AreaPreview>,
+    /// 上次寫給設定程式的專注狀態；外層 `None` = 還沒寫過（剛啟動要先清掉上一次留下的檔）。
+    focus_written: Option<Option<FocusStatus>>,
 }
 
 pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
@@ -426,6 +429,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         area_editor: None,
         menu: None,
         menu_pets: Vec::new(),
+        focus_written: None,
         area_preview: None,
     };
     app.resize_window()?;
@@ -967,6 +971,25 @@ impl App {
                 }
             }
         }
+        self.write_focus_status();
+    }
+
+    /// 專注開始、換段、停止時寫一份給設定程式（設定的專注頁顯示「停止專注」用）。
+    /// 每次模組有動靜都會經過 `apply`，在這裡比對就不會漏掉哪個入口。
+    fn write_focus_status(&mut self) {
+        let status = self.modules.session(local_now()).map(|s| FocusStatus { focusing: s.focusing, until: s.until });
+        if self.focus_written == Some(status) {
+            return;
+        }
+        let path = paths::focus_status_file();
+        let written = match status {
+            Some(s) => s.save(&path),
+            None => FocusStatus::clear(&path),
+        };
+        if let Err(e) = written {
+            log!("focus status: {e}");
+        }
+        self.focus_written = Some(status);
     }
 
     fn enqueue(&mut self, owner: &'static str, key: String, card: Card) {
@@ -1141,7 +1164,7 @@ impl App {
         entries.push(Entry::Item(Item { id: MENU_SWITCH_PET, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: choices }));
         entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
         entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
-        for group in self.modules.menu(local_now()) {
+        for group in self.modules.menu(local_now(), &self.config) {
             let mut items: Vec<Entry> = group.items.into_iter().map(|(id, label, icon)| Item::entry(id, label, icon)).collect();
             if group.module == reminder_module::ID {
                 items.insert(0, Item::entry(MENU_ADD_REMINDER, "新增提醒…", Icon::Bell));

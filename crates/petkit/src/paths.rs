@@ -78,6 +78,11 @@ pub fn update_status_file() -> PathBuf {
     update_dir().join("status.json")
 }
 
+/// 專注進行到哪（`focus_status::FocusStatus`）。
+pub fn focus_status_file() -> PathBuf {
+    local_dir().join("focus.json")
+}
+
 /// `dumpStatus` 指令寫出的目前狀態。
 pub fn status_file() -> PathBuf {
     local_dir().join("status.json")

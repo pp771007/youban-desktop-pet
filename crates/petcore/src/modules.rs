@@ -65,7 +65,7 @@ pub trait Module {
     fn tick(&mut self, _ctx: &mut Ctx) {}
     fn on_event(&mut self, _event: &ModuleEvent, _ctx: &mut Ctx) {}
     /// 這個模組要放進右鍵選單的項目：(模組自己的編號, 文字, 圖示)。選單上會放在 `name` 這個小標題底下。
-    fn menu(&self, _now: NaiveDateTime) -> Vec<(u32, String, Icon)> {
+    fn menu(&self, _now: NaiveDateTime, _config: &Config) -> Vec<(u32, String, Icon)> {
         Vec::new()
     }
     /// 正在進行的專注／休息（只有專注模組會有）：核心依它讓桌寵安靜、暫停休息提醒、顯示倒數。
@@ -82,6 +82,8 @@ pub struct Session {
     pub secs_left: i64,
     /// 無條件進位的分鐘（還剩 30 秒算 1 分）。
     pub minutes_left: i64,
+    /// 這一段在什麼時候結束（寫給設定程式看的 `FocusStatus` 用）。
+    pub until: NaiveDateTime,
 }
 
 /// 右鍵選單上一個模組的那一組。
@@ -141,14 +143,14 @@ impl ModuleHost {
     }
 
     /// 每個模組一組（沒有項目的也給，呼叫端可能要往裡面加）。
-    pub fn menu(&self, now: NaiveDateTime) -> Vec<MenuGroup> {
+    pub fn menu(&self, now: NaiveDateTime, config: &Config) -> Vec<MenuGroup> {
         self.modules
             .iter()
             .enumerate()
             .map(|(i, m)| MenuGroup {
                 module: m.id(),
                 name: m.name(),
-                items: m.menu(now).into_iter().map(|(local, label, icon)| (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)).collect(),
+                items: m.menu(now, config).into_iter().map(|(local, label, icon)| (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)).collect(),
             })
             .collect()
     }
@@ -215,7 +217,7 @@ mod tests {
             self.0 += 1;
             ctx.info("tick", None);
         }
-        fn menu(&self, _now: NaiveDateTime) -> Vec<(u32, String, Icon)> {
+        fn menu(&self, _now: NaiveDateTime, _config: &Config) -> Vec<(u32, String, Icon)> {
             vec![(3, "做事".into(), Icon::Check)]
         }
         fn on_event(&mut self, event: &ModuleEvent, ctx: &mut Ctx) {
@@ -237,10 +239,10 @@ mod tests {
         let mut host = ModuleHost::new(Vec::new());
         assert!(host.sync(&["fine"], make).is_empty());
         assert_eq!(host.ids(), ["fine"]);
-        assert_eq!(host.menu(now()).len(), 1);
+        assert_eq!(host.menu(now(), &Config::default()).len(), 1);
         assert_eq!(host.sync(&[], make), ["fine"], "turned off → reported so its cards can be withdrawn");
         assert!(host.ids().is_empty());
-        assert!(host.menu(now()).is_empty(), "a turned-off module leaves nothing in the menu");
+        assert!(host.menu(now(), &Config::default()).is_empty(), "a turned-off module leaves nothing in the menu");
         host.sync(&["fine"], make);
         assert_eq!(host.ids(), ["fine"]);
     }
@@ -257,7 +259,7 @@ mod tests {
         out.clear();
         host.tick(now, &config, &mut out);
         assert_eq!(out.len(), 1, "boom is gone, fine still ticks");
-        let menu = host.menu(now);
+        let menu = host.menu(now, &config);
         assert_eq!(menu.len(), 1);
         out.clear();
         host.menu_clicked(menu[0].items[0].0, now, &config, &mut out);

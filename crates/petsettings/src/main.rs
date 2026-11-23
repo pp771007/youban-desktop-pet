@@ -12,6 +12,7 @@ use base64::Engine;
 use chrono::NaiveDate;
 use petkit::companion::CompanionFile;
 use petkit::config::{Config, load_json};
+use petkit::focus_status::FocusStatus;
 use petkit::holidays::{self, DayKind};
 use petkit::paths;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
@@ -404,6 +405,15 @@ fn send_core(command: serde_json::Value) -> CmdResult<()> {
     Ok(())
 }
 
+/// 正在專注／休息時，「停止專注」按鈕的文字（跟右鍵選單同一句）；沒在專注是 `None`。
+/// 柚伴沒在跑就不算（當掉時留下的檔還寫著沒結束的時間）。
+#[tauri::command]
+fn focus_stop_label() -> Option<String> {
+    let now = chrono::Local::now().naive_local();
+    let status = FocusStatus::load(&paths::focus_status_file(), now).filter(|_| core_running())?;
+    Some(status.stop_label(now))
+}
+
 #[tauri::command]
 fn update_status() -> Option<UpdateStatus> {
     UpdateStatus::load(&paths::update_status_file())
@@ -486,6 +496,7 @@ fn main() {
             window_layout,
             core_running,
             send_core,
+            focus_stop_label,
             update_status,
             apply_update,
             start_core,

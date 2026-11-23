@@ -57,6 +57,8 @@ const state = {
   sizes: [],
   version: '',
   coreRunning: false,
+  /** 專注／休息中「停止專注」按鈕的文字，沒在專注是 null。 */
+  focusStopLabel: null,
   windows: [],
   autostart: null,
   autostartError: '',
@@ -961,7 +963,7 @@ function renderFocus(page) {
   const set = async (key, value) => { c[key] = value; await saveConfig(); render(); };
   page.append(h('div', { class: 'page-head' },
     featureTitle('focus'),
-    h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'focusStart' } }) }, icon('tomato'), '開始專注')));
+    focusButton()));
   page.append(h('div', { class: 'card' },
     settingRow('專注', segmented(FOCUS_CHOICES, c.focusMinutes, (v) => set('focusMinutes', v))),
     settingRow('短休息', segmented(SHORT_BREAK_CHOICES, c.shortBreakMinutes, (v) => set('shortBreakMinutes', v))),
@@ -969,6 +971,22 @@ function renderFocus(page) {
     settingRow('休息完自動開始下一輪', configSwitch('focusAutoContinue', '休息完自動開始下一輪')),
     settingRow('卡片', segmented(STYLE_CHOICES, c.focusStyle, (v) => set('focusStyle', v))),
     settingRow('倒數', segmented(COUNTDOWN_CHOICES, c.focusCountdown, (v) => set('focusCountdown', v)))));
+}
+
+/** 沒在專注是「開始專注」，專注／休息中跟右鍵選單一樣是「停止專注（還剩幾分）」。 */
+function focusButton() {
+  const send = async (cmd) => { await invoke('send_core', { command: { cmd } }); await refreshFocus(); };
+  return state.focusStopLabel
+    ? h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning, onclick: () => send('focusStop') }, icon('x'), state.focusStopLabel)
+    : h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => send('focusStart') }, icon('tomato'), '開始專注');
+}
+
+/** 核心處理完指令才回來（`SendMessage`），送完馬上讀就是新的狀態。 */
+async function refreshFocus() {
+  const label = await invoke('focus_stop_label');
+  if (label === state.focusStopLabel) return;
+  state.focusStopLabel = label;
+  if (state.page === 'focus') render();
 }
 
 // ---------- 頁面：一般 ----------
@@ -1076,6 +1094,7 @@ async function pollCore() {
     state.coreRunning = running;
     render();
   }
+  await refreshFocus();
 }
 
 async function main() {

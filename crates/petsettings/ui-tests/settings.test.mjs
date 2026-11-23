@@ -86,7 +86,10 @@ function mockBackend(tokens) {
       db.calls.push(command);
       // 核心查新版：每讀一次進度往前走一步，停在最後一個。
       if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
+      if (command.cmd === 'focusStart') db.focusStopLabel = '停止專注（還剩 25 分）';
+      if (command.cmd === 'focusStop') db.focusStopLabel = null;
     },
+    focus_stop_label: () => db.focusStopLabel ?? null,
     update_status: () => (db.updateSteps.length > 1 ? db.updateSteps.shift() : db.updateSteps[0] ?? null),
     apply_update: () => { db.calls.push({ cmd: 'apply_update' }); },
     start_core: () => { db.running = true; },
@@ -296,6 +299,10 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.nav-item[data-page="focus"]').click();
     await page.getByRole('button', { name: '開始專注' }).click();
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'focusStart')), 'start focus sends command');
+    // 專注中：按鈕跟右鍵選單一樣變成「停止專注（還剩幾分）」
+    await page.getByRole('button', { name: '停止專注（還剩 25 分）' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'focusStop')), 'stop focus sends command');
+    await page.getByRole('button', { name: '開始專注' }).waitFor();
     await page.getByRole('button', { name: '45 分' }).click();
     await page.getByRole('button', { name: '滑鼠移過去才顯示' }).click();
     check(await page.evaluate(() => { const c = window.__mock.config; return c.focusMinutes === 45 && c.focusCountdown === 'hover'; }), 'focus length and countdown mode write config');

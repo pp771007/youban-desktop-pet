@@ -7,6 +7,7 @@ pub const APP_NAME: &str = "柚伴";
 
 pub mod companion;
 pub mod config;
+pub mod focus_status;
 pub mod holidays;
 pub mod ipc;
 pub mod manifest;

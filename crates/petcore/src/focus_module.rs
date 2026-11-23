@@ -3,6 +3,7 @@
 
 use chrono::{Duration, NaiveDateTime};
 use petkit::config::Config;
+use petkit::focus_status::{FocusStatus, start_label};
 use petkit::ipc::{CMD_FOCUS_START, CMD_FOCUS_STOP};
 use petkit::reminders::Style;
 
@@ -66,6 +67,14 @@ impl FocusModule {
         self.phase = Phase::Idle;
         self.before = Phase::Idle;
         ctx.out.push(crate::modules::Request::Withdraw { key: CARD_KEY.into() });
+    }
+
+    fn status(&self) -> Option<FocusStatus> {
+        match self.phase {
+            Phase::Idle => None,
+            Phase::Focus { until, .. } => Some(FocusStatus { focusing: true, until }),
+            Phase::Break { until, .. } => Some(FocusStatus { focusing: false, until }),
+        }
     }
 
     fn card(ctx: &mut Ctx, title: String) {
@@ -135,21 +144,16 @@ impl Module for FocusModule {
         }
     }
 
-    fn menu(&self, now: NaiveDateTime) -> Vec<(u32, String, Icon)> {
-        match self.session(now) {
-            None => vec![(MENU_START, "開始專注".into(), Icon::Clock)],
-            Some(s) => vec![(MENU_STOP, format!("停止專注（{}還剩 {} 分）", if s.focusing { "" } else { "休息" }, s.minutes_left), Icon::Stop)],
+    fn menu(&self, now: NaiveDateTime, config: &Config) -> Vec<(u32, String, Icon)> {
+        match self.status() {
+            None => vec![(MENU_START, start_label(config.focus_minutes), Icon::Clock)],
+            Some(s) => vec![(MENU_STOP, s.stop_label(now), Icon::Stop)],
         }
     }
 
     fn session(&self, now: NaiveDateTime) -> Option<Session> {
-        let (until, focusing) = match self.phase {
-            Phase::Idle => return None,
-            Phase::Focus { until, .. } => (until, true),
-            Phase::Break { until, .. } => (until, false),
-        };
-        let secs = (until - now).num_seconds().max(0);
-        Some(Session { focusing, secs_left: secs, minutes_left: (secs + 59) / 60 })
+        let s = self.status()?;
+        Some(Session { focusing: s.focusing, secs_left: s.secs_left(now), minutes_left: s.minutes_left(now), until: s.until })
     }
 }
 

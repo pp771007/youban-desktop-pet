@@ -265,7 +265,7 @@ impl Module for WindowRestore {
     }
 
     /// 跟設定程式那一頁的按鈕同名。
-    fn menu(&self, _now: chrono::NaiveDateTime) -> Vec<(u32, String, Icon)> {
+    fn menu(&self, _now: chrono::NaiveDateTime, _config: &petkit::config::Config) -> Vec<(u32, String, Icon)> {
         vec![(MENU_SAVE, "記住目前位置".into(), Icon::Save), (MENU_RESTORE, "恢復位置".into(), Icon::RotateCcw)]
     }
 }
