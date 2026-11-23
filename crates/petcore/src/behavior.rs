@@ -154,6 +154,27 @@ const PET_MIN_STEP_PX: f32 = 2.0;
 const LOOK_AT_CURSOR_HEIGHTS: f32 = 2.5;
 const LEAN_DEG: f32 = 3.0;
 
+/// 走到視窗邊緣、前面有別的視窗頂端（距離都以身寬、高度以身高計）：
+/// 縫比 `STEP_OVER_GAP_WIDTHS` 窄（而且兩邊差不多高）直接走過去，身體跨得過去；
+/// `LEAP_REACH_WIDTHS` 以內跳過去 —— 對面高出 `LEAP_UP_HEIGHTS` 以內跳到頂上，更高就跳過去抓住側邊爬上去；
+/// 再遠但在 `LEAP_LOOK_WIDTHS` 以內，停下來看看；其中只差一點的（`LEAP_TRY_WIDTHS` 以內）偶爾（`LEAP_TRY_FAR_CHANCE`）硬跳，
+/// 跳出去差 `LEAP_MISS_HALF_WIDTHS` 搆到對面邊緣、掉下去；
+/// 更遠的不理它，照樣走下邊緣掉到底下（這是牠從視窗下來的方式）。
+const STEP_OVER_GAP_WIDTHS: f32 = 0.25;
+const LEAP_REACH_WIDTHS: f32 = 1.5;
+const LEAP_TRY_WIDTHS: f32 = 2.0;
+const LEAP_LOOK_WIDTHS: f32 = 3.0;
+const LEAP_UP_HEIGHTS: f32 = 0.5;
+const LEAP_TRY_FAR_CHANCE: f32 = 0.3;
+const LEAP_MISS_HALF_WIDTHS: f32 = 0.4;
+/// 跳躍弧線的最高點：比起跳點、落點中比較高的那個再高這麼多（身高）。
+const LEAP_APEX_HEIGHTS: f32 = 0.35;
+/// 落點離對面邊緣往內多少（半個身寬的幾倍）：整個身體落在上面。
+const LEAP_LAND_INSET_HALF_WIDTHS: f32 = 1.0;
+/// 起跳前蹲多久（預備動作）。
+const LEAP_CROUCH_SECS: f32 = 0.18;
+const LEAP_CROUCH_SQUASH: f32 = 0.12;
+
 const FPS_ACTIVE: u32 = 60;
 const FPS_IDLE: u32 = 30;
 const FPS_SLEEP: u32 = 15;
@@ -415,6 +436,30 @@ enum Mode {
     /// 去拿桌面上的點心或球。
     Fetch { since: f64 },
     Eat,
+    /// 站在視窗邊緣蹲低，接著跳出去（`Leap` 決定跳到哪）。
+    Crouch { leap: Leap },
+}
+
+/// 一次跳躍：落到 `(x, y)`（腳底），弧線最高點在 `apex_y`。
+/// 有 `grab` 的是跳去抓對面視窗的側邊：`x` 是側邊、最高點就在那裡碰到側邊，然後往上爬。
+/// `miss`：硬跳，`(x, y)` 在對面邊緣前面一點點的空中，會掉下去。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Leap {
+    x: f32,
+    y: f32,
+    apex_y: f32,
+    grab: Option<Grab>,
+    miss: bool,
+}
+
+/// 跳過去要抓住的視窗側邊（`side` 同 `Mode::ClimbOver`：視窗在牠的哪一邊）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Grab {
+    x: f32,
+    side: f32,
+    top: f32,
+    bottom: f32,
+    across: f32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -487,6 +532,10 @@ pub struct Pet {
     dizzy_pending: bool,
     /// 最近一次撞上看不見的牆：(牆線 x, 撞到的高度, 時間)。
     bump: Option<(Glow, f64)>,
+    /// 正在空中、要抓住的視窗側邊（跳過去抓側邊時才有）。
+    grab: Option<Grab>,
+    /// 硬跳沒跳到：掉過這個高度（對面的頂端）時冒汗。
+    miss_y: Option<f32>,
     rng: u64,
 }
 
@@ -526,6 +575,8 @@ impl Pet {
             throws: Vec::new(),
             dizzy_pending: false,
             bump: None,
+            grab: None,
+            miss_y: None,
             rng: seed | 1,
         };
         pet.set_idle(now);
@@ -561,6 +612,7 @@ impl Pet {
             Mode::Fetch { .. } => states::WALK,
             Mode::Eat => states::EAT,
             Mode::Dizzy { .. } => states::DIZZY,
+            Mode::Crouch { .. } => states::LAND,
         }
     }
 
@@ -811,6 +863,9 @@ impl Pet {
                 if self.climb_window_edge(prev_x, dir, env, now) {
                     return false;
                 }
+                if self.at_platform_edge(prev_x, dir, env, now) {
+                    return false;
+                }
                 let (lo, hi) = walk_bounds(env);
                 let mut dir = dir;
                 let mut hit_wall = None;
@@ -901,11 +956,28 @@ impl Pet {
                     vx = -vx * WALL_BOUNCE;
                 }
                 self.facing_left = vx < 0.0 || (vx == 0.0 && self.facing_left);
+                if self.miss_y.is_some_and(|y| self.y > y) {
+                    self.miss_y = None;
+                    self.emote(Emote::Sweat);
+                }
+                // 跳去抓視窗側邊：碰到側邊那一刻貼上去往上爬（已經高過頂端的話就讓牠落在頂上）。
+                if let Some(g) = self.grab
+                    && (prev_x - g.x) * (self.x - g.x) <= 0.0
+                    && self.y > g.top
+                {
+                    self.grab = None;
+                    self.x = g.x;
+                    self.y = self.y.min(g.bottom);
+                    self.set_mode(Mode::ClimbOver { side: g.side, top: g.top, across: g.across, glow: false }, now);
+                    return false;
+                }
                 // 往下掉時穿過某個平台的高度 → 落在上面（往上飛時不會被擋）。
                 let platform = (vy > 0.0).then(|| env.platforms.iter().filter(|p| p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right).min_by(|a, b| a.y.total_cmp(&b.y))).flatten();
                 if let Some(top) = platform.map(|p| p.y).or((self.y >= env.ground_y).then_some(env.ground_y)) {
                     // 落在哪就站在哪：起飛前站的視窗還在原地的話，不換掉會被 `stand` 拉回去。
                     self.riding = platform.map(|p| (p.window, p.window_left));
+                    self.grab = None;
+                    self.miss_y = None;
                     self.y = top;
                     self.emote(Emote::Dust);
                     self.set_mode(Mode::Land, now);
@@ -1053,6 +1125,17 @@ impl Pet {
                     self.set_mode(Mode::Walk { dir: side, until: now + secs as f64, speed_mul: 1.0 }, now);
                 }
             }
+            Mode::Crouch { leap } => {
+                self.stand(env, now);
+                if matches!(self.mode, Mode::Crouch { .. }) && t >= LEAP_CROUCH_SECS {
+                    let (vx, vy) = self.leap_velocity(leap, env);
+                    self.riding = None;
+                    self.grab = leap.grab;
+                    self.miss_y = leap.miss.then_some(leap.y);
+                    self.facing_left = vx < 0.0;
+                    self.set_mode(Mode::Fall { vx, vy }, now);
+                }
+            }
             Mode::Cling { side, until } => {
                 self.x = if side < 0.0 { env.wall_left } else { env.wall_right };
                 if now >= until {
@@ -1127,6 +1210,11 @@ impl Pet {
                 pose.rotation_deg = 4.0 * (pi * t * step).sin();
             }
             Mode::Pounce { .. } => jump_pose(&mut pose, t / POUNCE_SECS, POUNCE_HEIGHT, 0.14),
+            Mode::Crouch { .. } => {
+                let s = (std::f32::consts::FRAC_PI_2 * (t / LEAP_CROUCH_SECS).min(1.0)).sin();
+                pose.scale_y = 1.0 - LEAP_CROUCH_SQUASH * s;
+                pose.scale_x = 1.0 + LEAP_CROUCH_SQUASH * 0.7 * s;
+            }
             Mode::Dizzy { .. } => {
                 // 站不穩：以腳為軸左右大幅搖晃，快結束時慢慢站穩。
                 let settle = (1.0 - (t / DIZZY_SECS - 0.75) / 0.25).clamp(0.0, 1.0);
@@ -1375,6 +1463,87 @@ impl Pet {
         true
     }
 
+    /// 站在某個平台上往 `dir` 走，這一步跨出了它的邊緣：看前面有什麼決定跳、停下來看、還是照樣走下去掉落
+    /// （規則見 `STEP_OVER_GAP_WIDTHS` 那組常數）。回傳 `true` = 換了動作。
+    fn at_platform_edge(&mut self, prev_x: f32, dir: f32, env: &Env, now: f64) -> bool {
+        let Some(here) = env.platforms.iter().find(|p| (p.y - self.y).abs() <= PLATFORM_SNAP_PX && prev_x >= p.left && prev_x <= p.right) else {
+            return false;
+        };
+        let edge = if dir > 0.0 { here.right } else { here.left };
+        if (self.x - edge) * dir <= 0.0 || self.small_gap_y(self.x, self.y, env).is_some() {
+            return false;
+        }
+        let (h, hw) = (env.pet_height, env.pet_half_width);
+        let width = 2.0 * hw;
+        // 前面的平台：要往前伸出邊緣至少半個身寬（站得下）；縫 = 離邊緣多遠（重疊的算 0）。最近的優先，一樣近挑高的。
+        let ahead = env
+            .platforms
+            .iter()
+            .filter(|p| !std::ptr::eq(*p, here))
+            .filter_map(|p| {
+                let (near, far) = if dir > 0.0 { (p.left, p.right) } else { (-p.right, -p.left) };
+                (far > edge * dir + hw).then(|| (p, (near - edge * dir).max(0.0)))
+            })
+            .filter(|(_, gap)| *gap <= LEAP_LOOK_WIDTHS * width)
+            .min_by(|(a, ga), (b, gb)| ga.total_cmp(gb).then(a.y.total_cmp(&b.y)));
+        let Some((target, gap)) = ahead else { return false };
+        let (target, gap) = (*target, gap);
+        let rise = self.y - target.y;
+        let near = if dir > 0.0 { target.left.max(edge) } else { target.right.min(edge) };
+        let reach = LEAP_REACH_WIDTHS * width;
+        let leap = if gap > reach {
+            if gap > LEAP_TRY_WIDTHS * width || rise > LEAP_UP_HEIGHTS * h || self.rand01() >= LEAP_TRY_FAR_CHANCE {
+                // 太遠：停在邊緣探頭看看。
+                self.x = prev_x;
+                self.emote(Emote::Question);
+                self.look_origin_left = dir < 0.0;
+                self.facing_left = dir < 0.0;
+                self.set_mode(Mode::Look, now);
+                return true;
+            }
+            // 只差一點：用力跳，最後還是差一點點搆到邊緣。
+            let x = near - dir * hw * LEAP_MISS_HALF_WIDTHS;
+            Leap { x, y: target.y, apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h, grab: None, miss: true }
+        } else if rise <= LEAP_UP_HEIGHTS * h {
+            let x = (near + dir * hw * LEAP_LAND_INSET_HALF_WIDTHS).clamp(target.left, target.right).clamp(env.min_x, env.max_x);
+            Leap { x, y: target.y, apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h, grab: None, miss: false }
+        } else {
+            // 對面高很多：跳過去抓住側邊。側邊要真的是視窗的邊、在前面（不是在頭頂上）、往下伸到搆得到的地方，頂上也要站得下。
+            let side_x = if dir > 0.0 { target.left } else { target.right };
+            let is_side = if dir > 0.0 { target.sides.0 } else { target.sides.1 };
+            if !is_side || (side_x - edge) * dir < 0.0 || target.bottom < self.y - h || target.y - h < env.ceiling {
+                return false;
+            }
+            let grab_y = (self.y - LEAP_UP_HEIGHTS * h).clamp(target.y, target.bottom);
+            let across = (target.right - target.left - width).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
+            Leap { x: side_x, y: grab_y, apex_y: grab_y, grab: Some(Grab { x: side_x, side: dir, top: target.y, bottom: target.bottom, across }), miss: false }
+        };
+        self.x = prev_x;
+        self.facing_left = dir < 0.0;
+        self.set_mode(Mode::Crouch { leap }, now);
+        true
+    }
+
+    /// 起跳的初速：先爬升到 `apex_y`、再落到 `(x, y)`（抓側邊的在最高點就碰到）。
+    /// 掉落時水平速度每秒衰減 `AIR_DRAG`，初速要先補回來，落點才會準。
+    fn leap_velocity(&self, leap: Leap, env: &Env) -> (f32, f32) {
+        let g = GRAVITY_DIP * env.px_per_dip;
+        let rise = (self.y - leap.apex_y).max(1.0);
+        let vy = -(2.0 * g * rise).sqrt();
+        let up_secs = -vy / g;
+        let secs = if leap.grab.is_some() { up_secs } else { up_secs + (2.0 * (leap.y - leap.apex_y).max(0.0) / g).sqrt() };
+        let drag_kept = (1.0 - (-AIR_DRAG * secs).exp()) / AIR_DRAG;
+        ((leap.x - self.x) / drag_kept, vy)
+    }
+
+    /// 腳底在兩個差不多高的平台中間的細縫上（比 `STEP_OVER_GAP_WIDTHS` 個身寬窄）：身體跨得過去，回傳要站的高度。
+    fn small_gap_y(&self, x: f32, y: f32, env: &Env) -> Option<f32> {
+        let max_gap = STEP_OVER_GAP_WIDTHS * 2.0 * env.pet_half_width;
+        let level = |p: &&Platform| (p.y - y).abs() <= PLATFORM_SNAP_PX;
+        let left = env.platforms.iter().filter(level).filter(|p| p.right <= x && x - p.right <= max_gap);
+        left.flat_map(|a| env.platforms.iter().filter(level).filter(move |b| b.left >= x && b.left - a.right <= max_gap).map(move |_| a.y)).next()
+    }
+
     /// 被放進禁止範圍裡：往比較近的那一邊走出去。
     fn walk_out_of(&mut self, b: Rect, env: &Env, now: f64) {
         let (to_left, to_right) = (self.x - b.left, b.right - self.x);
@@ -1564,6 +1733,9 @@ impl Pet {
         if let Some(p) = env.platforms.iter().find(|p| (p.y - self.y).abs() <= PLATFORM_SNAP_PX && self.x >= p.left && self.x <= p.right) {
             self.y = p.y;
             self.riding = Some((p.window, p.window_left));
+        } else if let Some(y) = self.small_gap_y(self.x, self.y, env) {
+            // 跨過兩個視窗中間的細縫：照樣站著（`riding` 留著前一個，走到下一個上面時換掉）。
+            self.y = y;
         } else if self.y < env.ground_y - 0.5 {
             self.riding = None;
             self.set_mode(Mode::Fall { vx: 0.0, vy: 0.0 }, now);
@@ -1952,6 +2124,73 @@ mod tests {
             }
         }
         assert!(fell, "walked off the edge and fell to the floor");
+    }
+
+    /// 站在左邊視窗（200～800、頂端 700）邊緣附近往右走 6 秒；右邊放 `right` 這個視窗。走到閒下來為止。
+    /// 回傳：牠最後站在哪個視窗（`None` = 地上）、途中有沒有抓著側邊爬、有沒有停下來探頭。
+    fn walk_to_right_edge(right: Platform, seed: u64) -> (Option<isize>, bool, bool) {
+        let mut env = env();
+        env.platforms = vec![Platform { left: 200.0, right: 800.0, y: 700.0, window: 1, window_left: 200.0, sides: (true, true), bottom: 1000.0 }, right];
+        let mut now = 0.0;
+        let mut pet = Pet::new(700.0, 700.0, now, seed);
+        pet.stand(&env, now);
+        pet.set_mode(Mode::Walk { dir: 1.0, until: now + 6.0, speed_mul: 1.0 }, now);
+        let (mut climbed, mut looked) = (false, false);
+        for _ in 0..(30.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            climbed |= matches!(pet.mode, Mode::ClimbOver { .. });
+            looked |= matches!(pet.mode, Mode::Look);
+            if matches!(pet.mode, Mode::Idle { .. }) {
+                break;
+            }
+        }
+        let on = (pet.y < env.ground_y).then(|| env.platforms.iter().find(|p| (p.y - pet.y).abs() < 1.0 && pet.x >= p.left && pet.x <= p.right).map(|p| p.window)).flatten();
+        (on, climbed, looked)
+    }
+
+    /// 右邊的視窗：左邊緣在 `left`、頂端在 `y`。
+    fn right_window(left: f32, y: f32) -> Platform {
+        Platform { left, right: left + 600.0, y, window: 2, window_left: left, sides: (true, true), bottom: 1000.0 }
+    }
+
+    #[test]
+    fn steps_over_a_hairline_gap_between_windows() {
+        // 身寬 100：縫 3 像素直接走過去，不跳也不掉。
+        let (on, ..) = walk_to_right_edge(right_window(803.0, 700.0), 6);
+        assert_eq!(on, Some(2));
+    }
+
+    #[test]
+    fn leaps_across_a_gap_onto_the_next_window() {
+        // 同高、縫 120；對面稍高 40、縫 60；對面低 200、縫 100：都跳得過去。
+        for (left, y) in [(920.0, 700.0), (860.0, 660.0), (900.0, 900.0)] {
+            let (on, climbed, _) = walk_to_right_edge(right_window(left, y), 6);
+            assert_eq!((on, climbed), (Some(2), false), "window at {left}, top {y}");
+        }
+    }
+
+    #[test]
+    fn leaps_to_the_side_of_a_much_taller_window_and_climbs_up() {
+        // 對面高出 300（超過半個身高）、縫 80：跳過去抓住側邊往上爬，最後站在它頂上。
+        let (on, climbed, _) = walk_to_right_edge(right_window(880.0, 400.0), 6);
+        assert_eq!((on, climbed), (Some(2), true));
+    }
+
+    #[test]
+    fn just_out_of_reach_sometimes_tries_and_falls_short_farther_only_looks() {
+        // 身寬 100，跳得到 150。縫 180（只差一點）：多半停下來看，偶爾硬跳、掉到地上；縫 250：只看不跳。從來不會到對面。
+        for (left, may_try) in [(980.0, true), (1050.0, false)] {
+            let (mut looked, mut fell) = (0, 0);
+            for seed in 1..=40 {
+                match walk_to_right_edge(right_window(left, 700.0), seed) {
+                    (Some(1), _, true) => looked += 1,
+                    (None, ..) => fell += 1,
+                    other => panic!("gap at {left}, seed {seed}: {other:?}"),
+                }
+            }
+            assert!(if may_try { looked > fell && fell > 0 } else { fell == 0 }, "gap at {left}: looked {looked}, fell {fell}");
+        }
     }
 
     #[test]

@@ -11,7 +11,7 @@ use windows::Win32::Foundation::E_FAIL;
 use windows::core::{Error, Result};
 
 use crate::app::{anchor, window_size};
-use crate::behavior::{self, Demo, Env, Input, Pet, Rect};
+use crate::behavior::{self, Demo, Env, Input, Pet, Platform, Rect};
 use crate::effects::Effects;
 use crate::glow::{GlowPainter, GlowStyle};
 use crate::paths;
@@ -35,6 +35,53 @@ const IDLE_INPUT_SECS: f32 = 10.0;
 const WALL_LEFT_RATIO: f32 = 0.42;
 const WALL_W_HEIGHTS: f32 = 1.3;
 const WALL_H_HEIGHTS: f32 = 0.9;
+
+/// 跳視窗的劇本：舞台上兩個視窗，桌寵站在左邊那個靠右邊緣的地方往右走。
+/// (名稱, 亂數種子, 兩個視窗中間的縫（身寬倍數）, 右邊比左邊高多少（身高倍數，負的是比較低）)。
+/// 種子決定「只差一點」時硬跳還是停下來看：99 會跳、92 只看。
+const LEAP_SCRIPTS: &[(&str, u64, f32, f32)] = &[
+    ("21-leap-step", 99, 0.15, 0.0),
+    ("22-leap-across", 99, 1.0, 0.0),
+    ("23-leap-up", 99, 0.6, 0.35),
+    ("24-leap-down", 99, 0.8, -0.6),
+    ("25-leap-climb", 99, 0.7, 0.9),
+    ("26-leap-miss", 99, 1.8, 0.0),
+    ("27-leap-look", 92, 1.8, 0.0),
+];
+/// 左邊視窗：從舞台左緣到這個比例，頂端在地面往上這麼多個身高；桌寵起點在它右邊緣往內這麼多個身高。
+const LEAP_LEFT_WINDOW_RATIO: f32 = 0.38;
+const LEAP_WINDOW_TOP_HEIGHTS: f32 = 1.0;
+const LEAP_START_INSET_HEIGHTS: f32 = 0.9;
+const LEAP_WALK_SECS: f32 = 6.0;
+const LEAP_SCRIPT_SECS: f32 = 8.0;
+/// 舞台上畫視窗的顏色（BGRA，不透明）。
+const WINDOW_FILL: [u8; 4] = [236, 232, 228, 255];
+const WINDOW_TOP_EDGE: [u8; 4] = [120, 110, 100, 255];
+
+/// 左、右兩個視窗的頂端（跳視窗劇本用）。
+fn leap_windows(stage_w: f32, ground_y: f32, h: f32, half: f32, gap_widths: f32, rise_heights: f32) -> Vec<Platform> {
+    let top = ground_y - h * LEAP_WINDOW_TOP_HEIGHTS;
+    let left_right = stage_w * LEAP_LEFT_WINDOW_RATIO;
+    let right_left = left_right + gap_widths * 2.0 * half;
+    vec![
+        Platform { left: 0.0, right: left_right, y: top, window: 1, window_left: 0.0, sides: (true, true), bottom: ground_y },
+        Platform { left: right_left, right: stage_w, y: top - rise_heights * h, window: 2, window_left: right_left, sides: (true, true), bottom: ground_y },
+    ]
+}
+
+/// 把視窗畫成實心方塊（頂端一條深色邊），桌寵跳的時候看得出縫在哪。
+fn paint_windows(stage: &mut [u8], stage_w: usize, stage_h: usize, windows: &[Platform]) {
+    for w in windows {
+        let (x0, x1) = (w.left.max(0.0) as usize, (w.right as usize).min(stage_w));
+        for y in (w.y.max(0.0) as usize)..(w.bottom as usize).min(stage_h) {
+            let color = if y < w.y as usize + 2 { WINDOW_TOP_EDGE } else { WINDOW_FILL };
+            for x in x0..x1 {
+                let i = (y * stage_w + x) * BYTES_PER_PIXEL;
+                stage[i..i + BYTES_PER_PIXEL].copy_from_slice(&color);
+            }
+        }
+    }
+}
 
 /// 一個動作的劇本：每一格開始前可以對桌寵做事（按下、移動、放開…）。
 struct Script {
@@ -61,7 +108,14 @@ fn demo(d: Demo) -> impl Fn(&mut Pet, f64, &Env) {
 }
 
 fn scripts() -> Vec<Script> {
-    vec![
+    let leaps = LEAP_SCRIPTS.iter().map(|&(name, ..)| Script {
+        name,
+        secs: LEAP_SCRIPT_SECS,
+        start_x: 0.0,
+        setup: |p, n, e, _| demo(Demo::Walk { secs: LEAP_WALK_SECS })(p, n, e),
+        each: nothing_each,
+    });
+    let mut out = vec![
         // 長到看得到一次眨眼。
         Script { name: "01-idle", secs: 4.5, start_x: 0.5, setup: nothing, each: nothing_each },
         Script { name: "02-walk", secs: 3.0, start_x: 0.25, setup: |p, n, e, _| demo(Demo::Walk { secs: 2.6 })(p, n, e), each: nothing_each },
@@ -128,7 +182,9 @@ fn scripts() -> Vec<Script> {
         Script { name: "18-roll", secs: 1.4, start_x: 0.3, setup: |p, n, e, _| demo(Demo::Roll)(p, n, e), each: nothing_each },
         Script { name: "19-dizzy", secs: 3.6, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Dizzy)(p, n, e), each: nothing_each },
         Script { name: WALL_SCRIPT, secs: 12.0, start_x: 0.1, setup: |p, n, e, _| demo(Demo::Walk { secs: 4.0 })(p, n, e), each: nothing_each },
-    ]
+    ];
+    out.extend(leaps);
+    out
 }
 
 /// 把一個視窗的內容疊到舞台上（預乘透明度的「疊在上面」），整張再乘上 `opacity`（跟分層視窗的整體透明度一樣）。
@@ -211,6 +267,12 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
         }
         let x = env.min_x + (env.max_x - env.min_x) * script.start_x;
         let mut pet = Pet::new(x, env.ground_y, 0.0, 99);
+        let mut windows = Vec::new();
+        if let Some(&(_, seed, gap, rise)) = LEAP_SCRIPTS.iter().find(|s| s.0 == script.name) {
+            windows = leap_windows(stage_w as f32, env.ground_y, h, half, gap, rise);
+            env.platforms = windows.clone();
+            pet = Pet::new(windows[0].right - h * LEAP_START_INSET_HEIGHTS, windows[0].y, 0.0, seed);
+        }
         let mut effects = Effects::default();
         let mut now = 0.0f64;
         (script.setup)(&mut pet, now, &env, h);
@@ -256,6 +318,7 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
             };
             renderer.draw(anchor, &scene)?;
             let mut stage = vec![0u8; stage_w * stage_h * BYTES_PER_PIXEL];
+            paint_windows(&mut stage, stage_w, stage_h, &windows);
             if let Some((g, opacity)) = &lit {
                 let origin = glow.render(g, &glow_style)?;
                 let (gw, gh) = glow.canvas.size();
