@@ -27,6 +27,7 @@ use windows_numerics::Vector2;
 
 use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
+use crate::glow::{GlowPainter, GlowStyle};
 use crate::chatter::{self, Chatter, Say};
 use crate::platforms;
 use crate::bubble::{Bubble, Card, CardAction, Pointer};
@@ -49,6 +50,7 @@ use crate::window_restore::{self, WindowRestore};
 static PET_CLASS_NAME: LazyLock<HSTRING> = LazyLock::new(|| HSTRING::from(ipc::PET_WINDOW_CLASS));
 const CARD_CLASS: PCWSTR = w!("YoubanDesktopPet.Card");
 const TOY_CLASS: PCWSTR = w!("YoubanDesktopPet.Toy");
+const GLOW_CLASS: PCWSTR = w!("YoubanDesktopPet.Glow");
 
 pub fn pet_class() -> PCWSTR {
     PCWSTR(PET_CLASS_NAME.as_ptr())
@@ -268,6 +270,8 @@ struct App {
     toy: Option<ToySlot>,
     toy_hwnd: HWND,
     toy_painter: ToyPainter,
+    glow_hwnd: HWND,
+    glow: GlowPainter,
 }
 
 pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
@@ -292,7 +296,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let pack = load_pack_or_default(&pets_dir, &config.pet)?;
     log!("loaded pet '{}' ({} states)", pack.id, pack.states.len());
 
-    let (hwnd, card_hwnd, toy_hwnd) = create_windows()?;
+    let (hwnd, card_hwnd, toy_hwnd, glow_hwnd) = create_windows()?;
     let gfx = Gfx::new()?;
     let wic = Wic::new()?;
     let renderer = PetRenderer::new(&gfx)?;
@@ -360,6 +364,8 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         toy: None,
         toy_hwnd,
         toy_painter: ToyPainter::new(&gfx)?,
+        glow_hwnd,
+        glow: GlowPainter::new(&gfx)?,
     };
     app.resize_window()?;
     if after_update {
@@ -492,19 +498,29 @@ fn create_layered(class: PCWSTR, title: PCWSTR, instance: HINSTANCE) -> Result<H
     unsafe { CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class, title, WS_POPUP, 0, 0, 1, 1, None, None, Some(instance), None) }
 }
 
-fn create_windows() -> Result<(HWND, HWND, HWND)> {
+fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
     let instance = register_class(pet_class(), Some(pet_proc), IDC_HAND)?;
     register_class(CARD_CLASS, Some(card_proc), IDC_ARROW)?;
     register_class(TOY_CLASS, Some(toy_proc), IDC_HAND)?;
+    register_class(GLOW_CLASS, Some(glow_proc), IDC_ARROW)?;
     unsafe { TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed) };
     let pet = create_layered(pet_class(), w!("柚伴"), instance)?;
     let card = create_layered(CARD_CLASS, w!("柚伴提醒"), instance)?;
     let toy = create_layered(TOY_CLASS, w!("柚伴玩具"), instance)?;
+    // 牆的紅光：滑鼠點下去要穿過它，點到後面的東西。
+    let glow = create_layered(GLOW_CLASS, w!("柚伴牆"), instance)?;
+    unsafe {
+        SetWindowLongW(glow, GWL_EXSTYLE, GetWindowLongW(glow, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32);
+    }
     // 設定程式（可能不是系統管理員權限）也要能送指令給以系統管理員權限執行的核心。
     unsafe {
         let _ = ChangeWindowMessageFilterEx(pet, WM_COPYDATA, MSGFLT_ALLOW, None);
     }
-    Ok((pet, card, toy))
+    Ok((pet, card, toy, glow))
+}
+
+extern "system" fn glow_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
 extern "system" fn toy_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1030,6 +1046,9 @@ impl App {
                     }
                 }
                 if busy {
+                    self.glow.hide(self.glow_hwnd);
+                }
+                if busy {
                     self.bubble.hide();
                     self.shown_card = false;
                 }
@@ -1112,6 +1131,8 @@ impl App {
                 wanted: t.toy.kind.is_food() || t.toy.kicks < BALL_MAX_KICKS,
             }),
             blocks: Vec::new(),
+            invisible_floor: false,
+            invisible_walls: (false, false),
         };
         match self.config.roam {
             Roam::Screen => {}
@@ -1161,6 +1182,9 @@ impl App {
         if self.pet.update(now, dt, &env) {
             self.save_state();
         }
+        let glow = self.pet.glow(&env, now);
+        let style = GlowStyle { pet_height: self.sprites.base_height, scale: self.dpi_scale(), color: self.palette.danger.d2d() };
+        self.glow.update(self.glow_hwnd, self.hwnd, glow, dt, &style)?;
         for happening in self.pet.drain_happenings() {
             let ctx = self.talk_ctx(now);
             if let Some(say) = self.chatter.on(happening, &ctx) {

@@ -11,11 +11,13 @@ use windows::Win32::Foundation::E_FAIL;
 use windows::core::{Error, Result};
 
 use crate::app::{anchor, window_size};
-use crate::behavior::{Demo, Env, Input, Pet};
+use crate::behavior::{self, Demo, Env, Input, Pet, Rect};
 use crate::effects::Effects;
+use crate::glow::{GlowPainter, GlowStyle};
 use crate::paths;
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::sprites::Wic;
+use crate::theme;
 
 const BASE_DPI: f32 = 96.0;
 const FPS: f32 = 25.0;
@@ -29,6 +31,11 @@ const BYTES_PER_PIXEL: usize = 4;
 /// 又還不到會自己打瞌睡的時間（不會干擾其他動作的劇本）。
 const IDLE_INPUT_SECS: f32 = 10.0;
 
+/// 「撞上禁止範圍」劇本裡那一塊：從舞台的這個比例開始、寬與高（桌寵身高的倍數），貼著地面。
+const WALL_LEFT_RATIO: f32 = 0.42;
+const WALL_W_HEIGHTS: f32 = 1.3;
+const WALL_H_HEIGHTS: f32 = 0.9;
+
 /// 一個動作的劇本：每一格開始前可以對桌寵做事（按下、移動、放開…）。
 struct Script {
     name: &'static str,
@@ -37,6 +44,9 @@ struct Script {
     setup: fn(&mut Pet, f64, &Env, f32),
     each: fn(&mut Pet, f64, &Env, f32, f32),
 }
+
+/// 這個劇本的舞台中間放一塊看不見的禁止範圍（碰到時亮紅光）。
+const WALL_SCRIPT: &str = "20-wall";
 
 fn nothing(_: &mut Pet, _: f64, _: &Env, _: f32) {}
 fn nothing_each(_: &mut Pet, _: f64, _: &Env, _: f32, _: f32) {}
@@ -117,11 +127,18 @@ fn scripts() -> Vec<Script> {
         Script { name: "17-spin", secs: 1.2, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Spin)(p, n, e), each: nothing_each },
         Script { name: "18-roll", secs: 1.4, start_x: 0.3, setup: |p, n, e, _| demo(Demo::Roll)(p, n, e), each: nothing_each },
         Script { name: "19-dizzy", secs: 3.6, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Dizzy)(p, n, e), each: nothing_each },
+        Script { name: WALL_SCRIPT, secs: 12.0, start_x: 0.1, setup: |p, n, e, _| demo(Demo::Walk { secs: 4.0 })(p, n, e), each: nothing_each },
     ]
 }
 
 /// 把桌寵視窗的內容疊到舞台上（預乘透明度的「疊在上面」）。
 fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32) {
+    blit_faded(stage, stage_w, stage_h, src, src_w, src_h, ox, oy, 1.0);
+}
+
+/// 同 `blit`，整張再乘上 `opacity`（跟分層視窗的整體透明度一樣）。
+#[allow(clippy::too_many_arguments)]
+fn blit_faded(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32, opacity: f32) {
     for y in 0..src_h {
         let sy = oy + y as i32;
         if sy < 0 || sy >= stage_h as i32 {
@@ -133,13 +150,14 @@ fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usi
                 continue;
             }
             let s = (y * src_w + x) * BYTES_PER_PIXEL;
-            let a = src[s + 3] as u32;
+            let scaled = |c: usize| (src[s + c] as f32 * opacity).round() as u32;
+            let a = scaled(3);
             if a == 0 {
                 continue;
             }
             let d = (sy as usize * stage_w + sx as usize) * BYTES_PER_PIXEL;
             for c in 0..BYTES_PER_PIXEL {
-                stage[d + c] = (src[s + c] as u32 + stage[d + c] as u32 * (255 - a) / 255).min(255) as u8;
+                stage[d + c] = (scaled(c) + stage[d + c] as u32 * (255 - a) / 255).min(255) as u8;
             }
         }
     }
@@ -173,6 +191,8 @@ pub fn frames(out_dir: &Path, dpi: u32) -> Result<()> {
         platforms: Vec::new(),
         activity: Activity::Normal,
         blocks: Vec::new(),
+        invisible_floor: false,
+        invisible_walls: (false, false),
         wall_left: 0.0,
         wall_right: stage_w as f32,
         ceiling: 0.0,
@@ -180,9 +200,17 @@ pub fn frames(out_dir: &Path, dpi: u32) -> Result<()> {
     };
     let frame_dt = 1.0 / FPS;
     let anchor = anchor(size);
+    let mut glow = GlowPainter::new(&gfx)?;
+    let glow_style = GlowStyle { pet_height: h, scale: px_per_dip, color: theme::current().danger.d2d() };
     for script in scripts() {
         let dir = out_dir.join(script.name);
         fs::create_dir_all(&dir).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+        let mut env = env.clone();
+        if script.name == WALL_SCRIPT {
+            let left = stage_w as f32 * WALL_LEFT_RATIO;
+            env.blocks = vec![Rect { left, top: env.ground_y - h * WALL_H_HEIGHTS, right: left + h * WALL_W_HEIGHTS, bottom: env.ground_y }];
+            env.platforms = behavior::block_platforms(&env.blocks, env.ceiling, h);
+        }
         let x = env.min_x + (env.max_x - env.min_x) * script.start_x;
         let mut pet = Pet::new(x, env.ground_y, 0.0, 99);
         let mut effects = Effects::default();
@@ -191,12 +219,14 @@ pub fn frames(out_dir: &Path, dpi: u32) -> Result<()> {
         let mut last_state = "";
         let mut anim_frame = 0usize;
         let mut anim_elapsed = 0.0f32;
+        let mut lit = None;
         for i in 0..(script.secs * FPS) as usize {
             for _ in 0..SUBSTEPS {
                 let dt = frame_dt / SUBSTEPS as f32;
                 (script.each)(&mut pet, now, &env, h, now as f32);
                 now += dt as f64;
                 pet.update(now, dt, &env);
+                lit = glow.advance(pet.glow(&env, now), dt);
                 for e in pet.drain_emotes() {
                     effects.spawn(e, now);
                 }
@@ -228,6 +258,11 @@ pub fn frames(out_dir: &Path, dpi: u32) -> Result<()> {
             };
             renderer.draw(anchor, &scene)?;
             let mut stage = vec![0u8; stage_w * stage_h * BYTES_PER_PIXEL];
+            if let Some((g, opacity)) = lit {
+                let origin = glow.render(g, &glow_style)?;
+                let (gw, gh) = glow.canvas.size();
+                blit_faded(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, opacity);
+            }
             let (ox, oy) = ((pet.x - anchor.X).round() as i32, (pet.y - anchor.Y).round() as i32);
             blit(&mut stage, stage_w, stage_h, renderer.canvas.pixels(), size.0 as usize, size.1 as usize, ox, oy);
             wic.save_png(&dir.join(format!("{i:03}.png")), stage_w as u32, stage_h as u32, &stage)?;

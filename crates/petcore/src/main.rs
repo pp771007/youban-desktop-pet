@@ -22,6 +22,7 @@ mod soak;
 mod sprites;
 mod theme;
 mod toy;
+mod glow;
 mod tray;
 mod updater;
 mod window_restore;

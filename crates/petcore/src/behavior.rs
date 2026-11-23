@@ -22,6 +22,8 @@ const PLATFORM_SNAP_PX: f32 = 3.0;
 const BLOCK_TOUCH_PX: f32 = 0.5;
 /// 禁止範圍的頂端當成平台時用的「視窗代碼」：從這裡往下數（真的視窗代碼都是正的）。
 const BLOCK_WINDOW_BASE: isize = -1;
+/// 撞上看不見的牆之後，那一段牆亮多久。
+const BUMP_GLOW_SECS: f64 = 0.6;
 /// 站著的視窗一格內移動超過這麼多像素，算「被載著走」（講話系統會想喊一聲）。
 const RIDE_NOTICE_PX: f32 = 6.0;
 /// 「被載著走」最快多久通知一次。
@@ -206,9 +208,13 @@ pub fn block_platforms(blocks: &[Rect], ceiling: f32, pet_height: f32) -> Vec<Pl
         .collect()
 }
 
-/// 這個平台是不是禁止範圍的頂端；是的話回傳它在 `Env::blocks` 裡的位置。
-pub fn block_index(window: isize) -> Option<usize> {
-    (window <= BLOCK_WINDOW_BASE).then(|| (BLOCK_WINDOW_BASE - window) as usize)
+/// 桌寵正碰著的那段看不見的牆（禁止範圍的邊與頂端、活動範圍的邊）：繪圖層在那裡亮一小段紅光。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Glow {
+    /// 腳下的那一段（橫的），`(x, y)` 是腳底。
+    Floor { x: f32, y: f32 },
+    /// 身旁的那一段（直的），`x` 是牆線、`y` 是那一段的中間。
+    Wall { x: f32, y: f32 },
 }
 
 /// 每一格由平台層算好的環境。
@@ -235,6 +241,9 @@ pub struct Env {
     pub activity: Activity,
     /// 不能進去的地方：走進去前會爬上去、從頂端走過去（頂端要另外放進 `platforms`，見 `block_platforms`）。
     pub blocks: Vec<Rect>,
+    /// 地面、左右兩面牆是活動範圍的框（看不見），不是工作列或螢幕邊：碰到時要亮。
+    pub invisible_floor: bool,
+    pub invisible_walls: (bool, bool),
     /// 工作區域的左右邊與頂端（爬牆用）。
     pub wall_left: f32,
     pub wall_right: f32,
@@ -245,6 +254,8 @@ pub struct Env {
 impl Env {
     /// 只在 `area` 裡面活動：框的底邊是地板、左右是牆、頂端是天花板，框外的視窗頂不能站。
     pub fn confine_to(&mut self, area: Rect) {
+        self.invisible_floor = area.bottom < self.ground_y;
+        self.invisible_walls = (area.left > self.wall_left, area.right < self.wall_right);
         self.ground_y = self.ground_y.min(area.bottom);
         self.ceiling = self.ceiling.max(area.top);
         self.wall_left = self.wall_left.max(area.left);
@@ -441,6 +452,8 @@ pub struct Pet {
     throws: Vec<f64>,
     /// 甩夠多次了，下一次落地就頭暈。
     dizzy_pending: bool,
+    /// 最近一次撞上看不見的牆：(牆線 x, 撞到的高度, 時間)。
+    bump: Option<(f32, f32, f64)>,
     rng: u64,
 }
 
@@ -476,6 +489,7 @@ impl Pet {
             ignore_item_until: f64::NEG_INFINITY,
             throws: Vec::new(),
             dizzy_pending: false,
+            bump: None,
             rng: seed | 1,
         };
         pet.set_idle(now);
@@ -748,6 +762,8 @@ impl Pet {
                         return false;
                     }
                     // 頂端上面沒空間翻過去：當成牆，轉頭。
+                    let wall = if dir > 0.0 { b.left } else { b.right };
+                    self.bump = Some((wall, self.y - env.pet_height / 2.0, now));
                     self.x = prev_x;
                     self.mode = Mode::Walk { dir: -dir, until, speed_mul };
                     self.facing_left = dir > 0.0;
@@ -808,6 +824,8 @@ impl Pet {
                     && let Some(b) = self.block_at(self.x, self.y, env)
                 {
                     if prev_y > b.top {
+                        let wall = if self.x > prev_x { b.left } else { b.right };
+                        self.bump = Some((wall, self.y - env.pet_height / 2.0, now));
                         self.x = prev_x;
                         vx = -vx * WALL_BOUNCE;
                     } else if self.x < b.left || self.x > b.right {
@@ -1182,6 +1200,25 @@ impl Pet {
         (self.y - env.ground_y).abs() < 1.0 && self.rand01() < chance
     }
 
+    /// 這一格要亮的那段看不見的牆。
+    pub fn glow(&self, env: &Env, now: f64) -> Option<Glow> {
+        let wall_mid = self.y - env.pet_half_width;
+        let invisible_side = |side: f32| if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 };
+        match self.mode {
+            Mode::ClimbOver { .. } => return Some(Glow::Wall { x: self.x, y: wall_mid }),
+            Mode::Climb { side, .. } | Mode::Cling { side, .. } if invisible_side(side) => return Some(Glow::Wall { x: self.x, y: wall_mid }),
+            Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } => {}
+            _ => {
+                let hw = env.pet_half_width;
+                let on_block = env.blocks.iter().any(|b| (self.y - b.top).abs() < 1.0 && self.x + hw > b.left && self.x - hw < b.right);
+                if on_block || (env.invisible_floor && (self.y - env.ground_y).abs() < 1.0) {
+                    return Some(Glow::Floor { x: self.x, y: self.y });
+                }
+            }
+        }
+        self.bump.filter(|(.., t)| now - t < BUMP_GLOW_SECS).map(|(x, y, _)| Glow::Wall { x, y })
+    }
+
     /// 身體站在 `(x, y)` 時會碰到的禁止範圍。
     fn block_at(&self, x: f32, y: f32, env: &Env) -> Option<Rect> {
         let (hw, h, e) = (env.pet_half_width, env.pet_height, BLOCK_TOUCH_PX);
@@ -1537,6 +1574,8 @@ mod tests {
             platforms: Vec::new(),
             activity: Activity::Normal,
             blocks: Vec::new(),
+            invisible_floor: false,
+            invisible_walls: (false, false),
             wall_left: 36.0,
             wall_right: 1864.0,
             ceiling: 0.0,
@@ -1888,8 +1927,9 @@ mod tests {
             now += DT as f64;
             pet.update(now, DT, &env);
             assert!(pet.block_at(pet.x, pet.y, &env).is_none() || pet.state() == states::CLIMB, "inside the forbidden area at ({}, {}) while {}", pet.x, pet.y, pet.state());
+            assert_eq!(pet.glow(&env, now).is_some(), pet.state() == states::CLIMB || (pet.y == block.top && pet.state() != states::FALL),"glows only along the forbidden area's edge and top (state {}, y {})", pet.state(), pet.y);
             climbed |= pet.state() == states::CLIMB;
-            on_top |= pet.y == block.top && pet.riding_window().and_then(block_index) == Some(0);
+            on_top |= pet.y == block.top;
             beyond |= on_top && pet.x > block.right && pet.y == env.ground_y;
         }
         assert!(climbed && on_top && beyond, "climbed {climbed}, walked on top {on_top}, got down the far side {beyond}");
