@@ -224,7 +224,7 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                 (script.each)(&mut pet, now, &env, h, now as f32);
                 now += dt as f64;
                 pet.update(now, dt, &env);
-                lit = glow.advance(pet.glow(&env, now), dt);
+                lit = glow.advance(&pet.glows(&env, now), dt);
                 for e in pet.drain_emotes() {
                     effects.spawn(e, now);
                 }
@@ -256,10 +256,10 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
             };
             renderer.draw(anchor, &scene)?;
             let mut stage = vec![0u8; stage_w * stage_h * BYTES_PER_PIXEL];
-            if let Some((g, opacity)) = lit {
+            if let Some((g, opacity)) = &lit {
                 let origin = glow.render(g, &glow_style)?;
                 let (gw, gh) = glow.canvas.size();
-                blit(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, opacity);
+                blit(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, *opacity);
             }
             let (ox, oy) = ((pet.x - anchor.X).round() as i32, (pet.y - anchor.Y).round() as i32);
             blit(&mut stage, stage_w, stage_h, renderer.canvas.pixels(), size.0 as usize, size.1 as usize, ox, oy, 1.0);

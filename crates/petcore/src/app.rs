@@ -1436,9 +1436,9 @@ impl App {
         if self.pet.update(now, dt, &env) {
             self.save_state();
         }
-        let glow = self.pet.glow(&env, now);
+        let glows = self.pet.glows(&env, now);
         let style = GlowStyle { pet_height: self.sprites.base_height, scale: self.dpi_scale(), color: self.palette.danger.d2d() };
-        self.glow.update(self.glow_hwnd, self.hwnd, glow, dt, &style)?;
+        self.glow.update(self.glow_hwnd, self.hwnd, &glows, dt, &style)?;
         for happening in self.pet.drain_happenings() {
             let ctx = self.talk_ctx(now);
             if let Some(say) = self.chatter.on(happening, &ctx) {
