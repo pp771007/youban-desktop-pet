@@ -157,8 +157,10 @@ enum Event {
     UpdateReady,
     Command(String),
     Card(Pointer, f32, f32),
-    /// 使用者點了桌面上的點心／球。
-    ToyPoke,
+    /// 在桌面上的點心／球上按下、放開左鍵（拖動算抓起來，沒拖算點一下）、按右鍵（收掉）。
+    ToyDown,
+    ToyUp,
+    ToyRemove,
     /// 畫範圍的畫面上的滑鼠與鍵盤。
     Area(AreaInput),
 }
@@ -289,6 +291,8 @@ struct App {
     toy: Option<ToySlot>,
     toy_hwnd: HWND,
     toy_painter: ToyPainter,
+    /// 在點心／球上按下左鍵的位置（還沒放開）：拖超過門檻就抓起來。
+    toy_press: Option<(f32, f32)>,
     glow_hwnd: HWND,
     glow: GlowPainter,
     gfx: Gfx,
@@ -388,6 +392,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         toy: None,
         toy_hwnd,
         toy_painter: ToyPainter::new(&gfx)?,
+        toy_press: None,
         glow_hwnd,
         glow: GlowPainter::new(&gfx)?,
         gfx: gfx.clone(),
@@ -573,8 +578,18 @@ extern "system" fn area_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 extern "system" fn toy_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         match msg {
+            WM_LBUTTONDOWN => {
+                SetCapture(hwnd);
+                push(Event::ToyDown);
+                LRESULT(0)
+            }
+            WM_RBUTTONUP => {
+                push(Event::ToyRemove);
+                LRESULT(0)
+            }
             WM_LBUTTONUP => {
-                push(Event::ToyPoke);
+                let _ = ReleaseCapture();
+                push(Event::ToyUp);
                 LRESULT(0)
             }
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
@@ -817,12 +832,24 @@ impl App {
                 Event::SettingChanged => self.palette = theme::with_accent(theme::current(), self.pack.accent.as_deref()),
                 Event::Command(text) => self.command(&text)?,
                 Event::Area(input) => self.area_input(input)?,
-                Event::ToyPoke => {
+                Event::ToyDown => self.toy_press = Some(cursor()),
+                Event::ToyUp => {
+                    let pressed = self.toy_press.take().is_some();
                     let jitter = self.rand01() * 2.0 - 1.0;
                     let s = self.dpi_scale();
                     if let Some(slot) = self.toy.as_mut() {
-                        slot.toy.poke(jitter, s);
+                        if slot.toy.is_held() {
+                            slot.toy.release(s);
+                        } else if pressed {
+                            slot.toy.poke(jitter, s);
+                        }
                         slot.touched = now;
+                    }
+                }
+                Event::ToyRemove => {
+                    self.toy_press = None;
+                    if let Some(slot) = self.toy.as_mut() {
+                        slot.fading.get_or_insert(now);
                     }
                 }
                 Event::Card(kind, x, y) => {
@@ -1380,7 +1407,19 @@ impl App {
     /// 點心／球的物理、什麼時候收掉、畫出來。
     fn update_toy(&mut self, now: f64, dt: f32) -> Result<()> {
         let blocks = self.forbidden_rects();
+        let s = self.dpi_scale();
+        let press = self.toy_press;
         let Some(slot) = self.toy.as_mut() else { return Ok(()) };
+        if let Some((px, py)) = press {
+            let (cx, cy) = cursor();
+            if !slot.toy.is_held() && (cx - px).hypot(cy - py) > behavior::DRAG_THRESHOLD_DIP * s {
+                slot.toy.grab(px, py);
+            }
+            if slot.toy.is_held() {
+                slot.toy.drag_to(cx, cy, dt);
+                slot.touched = now;
+            }
+        }
         let rect = work_area(monitor_at(slot.toy.x, slot.toy.y - 1.0));
         let mut platforms = if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() };
         // 禁止範圍的頂端也接得住東西（掉進範圍裡，桌寵就拿不到了）。

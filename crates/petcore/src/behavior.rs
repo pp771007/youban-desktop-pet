@@ -6,8 +6,8 @@
 use petkit::config::Activity;
 use petkit::states;
 
-/// 拖曳要移動超過這麼多（DIP）才算拖，以內算點一下。
-const DRAG_THRESHOLD_DIP: f32 = 4.0;
+/// 拖曳要移動超過這麼多（DIP）才算拖，以內算點一下（點心和球也用同一個）。
+pub const DRAG_THRESHOLD_DIP: f32 = 4.0;
 const GRAVITY_DIP: f32 = 2600.0;
 /// 丟出去：放手時的速度上限（DIP/秒）、撞牆後剩下的水平速度、空氣阻力（每秒衰減比例）。
 const MAX_THROW_DIP: f32 = 2600.0;

@@ -33,6 +33,10 @@ const POKE_UP_DIP: f32 = 900.0;
 const POKE_X_DIP: f32 = 260.0;
 /// 視窗比東西大一圈，畫陰影與外框不會被切掉。
 const WINDOW_PER_SIZE: f32 = 1.5;
+/// 拿著甩、放手時的速度上限（DIP/秒），跟甩桌寵一樣。
+const MAX_THROW_DIP: f32 = 2600.0;
+/// 拿著移動時，速度往實際移動速度靠的快慢（每秒）：放手時用平滑過的速度，手一抖才不會亂飛。
+const DRAG_VELOCITY_SMOOTHING: f32 = 12.0;
 
 /// 點心與球的圖（數字是陣列裡的第幾張）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,15 +121,52 @@ pub struct Toy {
     pub resting: bool,
     /// 桌寵踢了幾次（玩夠了就不追了）。
     pub kicks: u32,
+    /// 被使用者拿著：抓住的點離底部中心多遠。
+    held: Option<(f32, f32)>,
 }
 
 impl Toy {
     pub fn new(kind: ToyKind, x: f32, y: f32, vx: f32, vy: f32, size: f32) -> Self {
-        Self { kind, x, y, vx, vy, size, spin_deg: 0.0, resting: false, kicks: 0 }
+        Self { kind, x, y, vx, vy, size, spin_deg: 0.0, resting: false, kicks: 0, held: None }
+    }
+
+    /// 使用者在 `(cx, cy)` 抓起來。
+    pub fn grab(&mut self, cx: f32, cy: f32) {
+        self.held = Some((self.x - cx, self.y - cy));
+        self.resting = false;
+        self.vx = 0.0;
+        self.vy = 0.0;
+    }
+
+    /// 拿著移到滑鼠 `(cx, cy)`，順便記下移動速度（放手時用）。
+    pub fn drag_to(&mut self, cx: f32, cy: f32, dt: f32) {
+        let Some((dx, dy)) = self.held else { return };
+        let (x, y) = (cx + dx, cy + dy);
+        let k = (dt * DRAG_VELOCITY_SMOOTHING).min(1.0);
+        let dt = dt.max(1e-3);
+        self.vx += ((x - self.x) / dt - self.vx) * k;
+        self.vy += ((y - self.y) / dt - self.vy) * k;
+        self.x = x;
+        self.y = y;
+    }
+
+    /// 放手：帶著甩的速度飛出去。
+    pub fn release(&mut self, px_per_dip: f32) {
+        self.held = None;
+        let max = MAX_THROW_DIP * px_per_dip;
+        self.vx = self.vx.clamp(-max, max);
+        self.vy = self.vy.clamp(-max, max);
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.held.is_some()
     }
 
     /// 推進一格；回傳 `true` = 這一格剛落地（呼叫端可以趁機出聲音或灰塵）。
     pub fn update(&mut self, dt: f32, w: &World) -> bool {
+        if self.held.is_some() {
+            return false;
+        }
         let s = w.px_per_dip;
         let r = self.size / 2.0;
         if self.resting {
@@ -167,9 +208,9 @@ impl Toy {
         landed
     }
 
-    /// 在地上或視窗頂（滾動中也算），不在空中。
+    /// 在地上或視窗頂（滾動中也算），不在空中、沒被拿著。
     pub fn grounded(&self) -> bool {
-        self.resting || self.vy == 0.0
+        self.held.is_none() && (self.resting || self.vy == 0.0)
     }
 
     /// 桌寵踢球：往 `dir` 飛出去。
@@ -287,6 +328,25 @@ mod tests {
         assert!(t.resting, "comes to rest");
         assert!(t.x + t.size / 2.0 <= 1920.0, "bounced off the right edge, x = {}", t.x);
         assert_eq!(t.kicks, 1);
+    }
+
+    #[test]
+    fn grabbed_and_flung_it_flies_with_momentum_then_lands() {
+        let w = world(&[]);
+        let mut t = Toy::new(ToyKind::ball(0.0), 500.0, 1000.0, 0.0, 0.0, 40.0);
+        settle(&mut t, &w, 1.0);
+        t.grab(500.0, 980.0);
+        assert!(!t.grounded(), "held in the hand, not on the floor");
+        for i in 1..=10 {
+            t.drag_to(500.0 + 25.0 * i as f32, 980.0 - 30.0 * i as f32, DT);
+            assert!(!t.update(DT, &w), "no physics while held");
+        }
+        assert_eq!((t.x, t.y), (750.0, 700.0), "follows the hand");
+        t.release(1.0);
+        settle(&mut t, &w, 0.3);
+        assert!(t.x > 950.0 && t.y < 700.0, "flung up and to the right, at ({}, {})", t.x, t.y);
+        settle(&mut t, &w, 5.0);
+        assert_eq!(t.y, 1000.0, "fell back to the floor");
     }
 
     #[test]
