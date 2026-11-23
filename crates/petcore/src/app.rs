@@ -1332,6 +1332,7 @@ impl App {
             blocks: Vec::new(),
             invisible_floor: false,
             invisible_walls: (false, false),
+            invisible_ceiling: false,
         };
         match self.config.roam {
             Roam::Screen => {}

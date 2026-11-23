@@ -190,6 +190,7 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
         blocks: Vec::new(),
         invisible_floor: false,
         invisible_walls: (false, false),
+        invisible_ceiling: false,
         wall_left: 0.0,
         wall_right: stage_w as f32,
         ceiling: 0.0,

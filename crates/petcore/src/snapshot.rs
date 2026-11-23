@@ -118,6 +118,7 @@ pub fn pet(out: &Path, dpi: u32) -> Result<()> {
         blocks: Vec::new(),
         invisible_floor: false,
         invisible_walls: (false, false),
+        invisible_ceiling: false,
         wall_left: 0.0,
         wall_right: 10_000.0,
         ceiling: 0.0,

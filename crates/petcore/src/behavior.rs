@@ -257,9 +257,10 @@ pub struct Env {
     pub activity: Activity,
     /// 不能進去的地方：走進去前會爬上去、從頂端走過去（頂端要另外放進 `platforms`，見 `block_platforms`）。
     pub blocks: Vec<Rect>,
-    /// 地面、左右兩面牆是活動範圍的框（看不見），不是工作列或螢幕邊：碰到時要亮。
+    /// 地面、左右兩面牆、頂端是活動範圍的框（看不見），不是工作列或螢幕邊：碰到時要亮。
     pub invisible_floor: bool,
     pub invisible_walls: (bool, bool),
+    pub invisible_ceiling: bool,
     /// 工作區域的左右邊與頂端（爬牆用）。
     pub wall_left: f32,
     pub wall_right: f32,
@@ -272,6 +273,7 @@ impl Env {
     pub fn confine_to(&mut self, area: Rect) {
         self.invisible_floor = area.bottom < self.ground_y;
         self.invisible_walls = (area.left > self.wall_left, area.right < self.wall_right);
+        self.invisible_ceiling = area.top > self.ceiling;
         self.ground_y = self.ground_y.min(area.bottom);
         self.ceiling = self.ceiling.max(area.top);
         self.wall_left = self.wall_left.max(area.left);
@@ -474,7 +476,7 @@ pub struct Pet {
     /// 甩夠多次了，下一次落地就頭暈。
     dizzy_pending: bool,
     /// 最近一次撞上看不見的牆：(牆線 x, 撞到的高度, 時間)。
-    bump: Option<(f32, f32, f64)>,
+    bump: Option<(Glow, f64)>,
     rng: u64,
 }
 
@@ -790,7 +792,7 @@ impl Pet {
                     }
                     // 頂端上面沒空間翻過去：當成牆，轉頭。
                     let wall = if dir > 0.0 { b.left } else { b.right };
-                    self.bump = Some((wall, self.y - env.pet_height / 2.0, now));
+                    self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
                     self.x = prev_x;
                     self.mode = Mode::Walk { dir: -dir, until, speed_mul };
                     self.facing_left = dir > 0.0;
@@ -813,6 +815,13 @@ impl Pet {
                 }
                 self.facing_left = dir < 0.0;
                 self.mode = Mode::Walk { dir, until, speed_mul };
+                // 撞到活動範圍的邊（看不見的牆）轉頭：那一段亮一下，轉頭走開後再淡掉。
+                if let Some(side) = hit_wall
+                    && (if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 })
+                {
+                    let wall = if side < 0.0 { env.wall_left } else { env.wall_right };
+                    self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                }
                 if let Some(side) = hit_wall
                     && self.may_climb(env)
                 {
@@ -844,10 +853,19 @@ impl Pet {
             }
             Mode::Fall { vx, vy } => {
                 let (prev_x, prev_y) = (self.x, self.y);
-                let vy = vy + GRAVITY_DIP * env.px_per_dip * dt;
+                let mut vy = vy + GRAVITY_DIP * env.px_per_dip * dt;
                 let mut vx = vx * (1.0 - AIR_DRAG * dt).max(0.0);
                 self.y += vy * dt;
                 self.x += vx * dt;
+                // 往上飛撞到頂端（活動範圍的頂、螢幕上緣）：擋下來，不會飛出去。
+                let head_room = env.ceiling + env.pet_height;
+                if vy < 0.0 && self.y < head_room && prev_y >= head_room {
+                    self.y = head_room;
+                    vy = 0.0;
+                    if env.invisible_ceiling {
+                        self.bump = Some((Glow::Floor { x: self.x, y: env.ceiling }, now));
+                    }
+                }
                 // 從側面撞上禁止範圍就彈回來；從頂端邊緣走下去時腳已經離開頂端、半個身體還壓在上面，
                 // 整個推到範圍外再往下掉（正上方掉下來會落在頂端，下面的平台判斷處理）。
                 if self.block_at(prev_x, prev_y, env).is_none()
@@ -855,7 +873,7 @@ impl Pet {
                 {
                     if prev_y > b.top {
                         let wall = if self.x > prev_x { b.left } else { b.right };
-                        self.bump = Some((wall, self.y - env.pet_height / 2.0, now));
+                        self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
                         self.x = prev_x;
                         vx = -vx * WALL_BOUNCE;
                     } else if self.x < b.left || self.x > b.right {
@@ -864,6 +882,11 @@ impl Pet {
                 }
                 // 往螢幕邊飛就反彈；從牆上往外跳時人在邊界外但正在往內飛，不算撞牆。
                 if (self.x < env.min_x && vx < 0.0) || (self.x > env.max_x && vx > 0.0) {
+                    let left = vx < 0.0;
+                    if (left && env.invisible_walls.0) || (!left && env.invisible_walls.1) {
+                        let wall = if left { env.wall_left } else { env.wall_right };
+                        self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                    }
                     self.x = self.x.clamp(env.min_x, env.max_x);
                     vx = -vx * WALL_BOUNCE;
                 }
@@ -1236,17 +1259,29 @@ impl Pet {
         let invisible_side = |side: f32| if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 };
         match self.mode {
             Mode::ClimbOver { glow: true, .. } => return Some(Glow::Wall { x: self.x, y: wall_mid }),
+            // 爬到頭頂碰到活動範圍的頂：亮頂上那一段（橫的）。
+            Mode::Climb { side, .. } | Mode::Cling { side, .. } if env.invisible_ceiling && self.y - env.pet_height <= env.ceiling + BLOCK_TOUCH_PX => {
+                return Some(Glow::Floor { x: self.x - side * env.pet_half_width, y: env.ceiling });
+            }
             Mode::Climb { side, .. } | Mode::Cling { side, .. } if invisible_side(side) => return Some(Glow::Wall { x: self.x, y: wall_mid }),
             Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } | Mode::ClimbOver { .. } => {}
             _ => {
                 let hw = env.pet_half_width;
+                // 身體貼著活動範圍的邊站著：亮那一段牆（比腳下的地板優先，牆比較少碰到）。
+                let body_mid = self.y - env.pet_height / 2.0;
+                if env.invisible_walls.0 && self.x <= env.min_x + BLOCK_TOUCH_PX {
+                    return Some(Glow::Wall { x: env.wall_left, y: body_mid });
+                }
+                if env.invisible_walls.1 && self.x >= env.max_x - BLOCK_TOUCH_PX {
+                    return Some(Glow::Wall { x: env.wall_right, y: body_mid });
+                }
                 let on_block = env.blocks.iter().any(|b| (self.y - b.top).abs() < 1.0 && self.x + hw > b.left && self.x - hw < b.right);
                 if on_block || (env.invisible_floor && (self.y - env.ground_y).abs() < 1.0) {
                     return Some(Glow::Floor { x: self.x, y: self.y });
                 }
             }
         }
-        self.bump.filter(|(.., t)| now - t < BUMP_GLOW_SECS).map(|(x, y, _)| Glow::Wall { x, y })
+        self.bump.filter(|(_, t)| now - t < BUMP_GLOW_SECS).map(|(g, _)| g)
     }
 
     /// 身體站在 `(x, y)` 時會碰到的禁止範圍。
@@ -1666,6 +1701,7 @@ mod tests {
             blocks: Vec::new(),
             invisible_floor: false,
             invisible_walls: (false, false),
+            invisible_ceiling: false,
             wall_left: 36.0,
             wall_right: 1864.0,
             ceiling: 0.0,
@@ -2053,6 +2089,34 @@ mod tests {
             assert!((area.left..=area.right).contains(&pet.x) && pet.y <= area.bottom, "left the area at ({}, {})", pet.x, pet.y);
         }
         assert!(pet.y == area.bottom || pet.y == 600.0, "stands on the area's bottom edge or the window top inside it, y = {}", pet.y);
+    }
+
+    /// 活動範圍的頂與兩側都是看不見的牆：碰到就亮那一段，往上跳也不會飛出頂端。
+    #[test]
+    fn the_allowed_area_glows_where_the_pet_touches_its_top_and_sides() {
+        let mut env = env();
+        let area = Rect { left: 400.0, top: 700.0, right: 1000.0, bottom: 1000.0 };
+        env.confine_to(area);
+        let (mut now, mut pet) = (0.0, Pet::new(600.0, 1000.0, 0.0, 9));
+        // 走到左邊：撞到牆轉頭，那段亮起來。
+        pet.start_demo(Demo::Walk { secs: 20.0 }, now, &env);
+        let mut side_glow = false;
+        for _ in 0..(20.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            side_glow |= matches!(pet.glow(&env, now), Some(Glow::Wall { x, .. }) if x == area.left || x == area.right);
+        }
+        assert!(side_glow, "touching a side of the area lights it up");
+        // 爬到頂：亮頂上那段。
+        pet.start_demo(Demo::ClimbLeft, now, &env);
+        let mut top_glow = false;
+        for _ in 0..(10.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            top_glow |= matches!(pet.glow(&env, now), Some(Glow::Floor { y, .. }) if y == area.top);
+            assert!(pet.y - env.pet_height >= area.top - 1.0, "head went through the top of the area at y = {}", pet.y);
+        }
+        assert!(top_glow, "climbing up to the top of the area lights up the top");
     }
 
     /// 地上一塊禁止範圍：散步走過去會爬上去、從頂端走過，身體從來不會跑進去。
