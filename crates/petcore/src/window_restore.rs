@@ -54,7 +54,6 @@ pub struct Layout {
     pub windows: BTreeMap<i64, Entry>,
 }
 
-/// 這個視窗要不要排除（純判斷，方便測試）。
 /// 自動記下新視窗之後桌寵說的話：一個就念標題，好幾個就講數量。
 pub fn announce_text(titles: &[String]) -> Option<String> {
     match titles {
@@ -62,12 +61,13 @@ pub fn announce_text(titles: &[String]) -> Option<String> {
         [title] => {
             let short: String = title.chars().take(ANNOUNCE_TITLE_MAX_CHARS).collect();
             let ellipsis = if title.chars().count() > ANNOUNCE_TITLE_MAX_CHARS { "…" } else { "" };
-            Some(format!("記住「{short}{ellipsis}」的位置了"))
+            Some(format!("「{short}{ellipsis}」的位置，我記住囉～"))
         }
-        _ => Some(format!("記住 {} 個新視窗的位置了", titles.len())),
+        _ => Some(format!("新來的 {} 個視窗，我都記住囉！", titles.len())),
     }
 }
 
+/// 這個視窗要不要排除（純判斷，方便測試）。
 pub fn should_exclude(exe_lower: &str, title: &str) -> bool {
     let name = exe_lower.rsplit('\\').next().unwrap_or(exe_lower);
     if name == EXPLORER {
@@ -162,13 +162,15 @@ impl WindowRestore {
 
     fn report_restore(&mut self, ctx: &mut Ctx) {
         let (restored, denied) = self.restore();
-        let detail = (denied > 0).then(|| format!("{denied} 個需要以系統管理員身分執行柚伴才能移動"));
-        ctx.info(format!("已把 {restored} 個視窗放回原位"), detail);
+        let detail = (denied > 0).then(|| format!("有 {denied} 個太重搬不動，要用系統管理員身分開柚伴才行"));
+        let title = if restored == 0 { "沒有要搬的視窗喔".to_owned() } else { format!("幫你把 {restored} 個視窗搬回原位囉～") };
+        ctx.info(title, detail);
     }
 
     fn report_save(&mut self, ctx: &mut Ctx) {
         let n = self.save_all();
-        ctx.info(format!("已記住 {n} 個視窗的位置"), None);
+        let title = if n == 0 { "現在沒有視窗可以記耶".to_owned() } else { format!("{n} 個視窗的位置，我都記好囉！") };
+        ctx.info(title, None);
     }
 }
 
@@ -321,8 +323,8 @@ mod tests {
     #[test]
     fn announces_one_window_by_title_and_several_by_count() {
         assert_eq!(announce_text(&[]), None);
-        assert_eq!(announce_text(&["記事本".into()]).as_deref(), Some("記住「記事本」的位置了"));
-        assert_eq!(announce_text(&["新分頁 - Google Chrome".into()]).as_deref(), Some("記住「新分頁 - Google…」的位置了"));
-        assert_eq!(announce_text(&["a".into(), "b".into(), "c".into()]).as_deref(), Some("記住 3 個新視窗的位置了"));
+        assert_eq!(announce_text(&["記事本".into()]).as_deref(), Some("「記事本」的位置，我記住囉～"));
+        assert_eq!(announce_text(&["新分頁 - Google Chrome".into()]).as_deref(), Some("「新分頁 - Google…」的位置，我記住囉～"));
+        assert_eq!(announce_text(&["a".into(), "b".into(), "c".into()]).as_deref(), Some("新來的 3 個視窗，我都記住囉！"));
     }
 }
