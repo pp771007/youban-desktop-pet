@@ -39,18 +39,19 @@ pub struct Config {
 }
 
 /// 哪些功能要開。關掉的功能核心完全不載入（不跑、不佔記憶體）。
-/// 新功能一律加一個欄位、預設開，舊設定檔讀進來就是開著的。
+/// 每個功能一個欄位；舊設定檔缺的欄位用 `Default` 的值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Features {
     /// 提醒（連同辦公日曆的背景更新）。
     pub reminders: bool,
+    /// 預設關：會自己搬動使用者的視窗，要使用者自己決定打開。
     pub window_restore: bool,
 }
 
 impl Default for Features {
     fn default() -> Self {
-        Self { reminders: true, window_restore: true }
+        Self { reminders: true, window_restore: false }
     }
 }
 
@@ -143,9 +144,10 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{ "pet": "cat" }"#).unwrap();
         assert_eq!(c.pet, "cat");
         assert_eq!(c.size_dip, DEFAULT_SIZE_DIP);
-        assert_eq!(c.features, Features { reminders: true, window_restore: true }, "features missing from an old file stay on");
-        let c: Config = serde_json::from_str(r#"{ "features": { "windowRestore": false } }"#).unwrap();
-        assert_eq!(c.features, Features { reminders: true, window_restore: false });
+        assert_eq!(c.features, Features::default(), "features missing from an old file take defaults");
+        assert!(!c.features.window_restore, "window restore starts off");
+        let c: Config = serde_json::from_str(r#"{ "features": { "windowRestore": true } }"#).unwrap();
+        assert_eq!(c.features, Features { reminders: true, window_restore: true });
     }
 
     #[test]
