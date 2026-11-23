@@ -1116,7 +1116,8 @@ impl App {
     fn update_hidden(&mut self, now: f64) -> bool {
         if now - self.last_busy_check >= BUSY_CHECK_SECS {
             self.last_busy_check = now;
-            let busy = self.config.hide_in_fullscreen && platforms::user_is_busy();
+            // 自己的畫範圍畫面也是蓋滿螢幕的最上層視窗，會被系統當成全螢幕程式：畫的時候不躲。
+            let busy = self.config.hide_in_fullscreen && self.area_editor.is_none() && platforms::user_is_busy();
             if busy != self.hidden {
                 self.hidden = busy;
                 log!("fullscreen app {}; pet {}", if busy { "detected" } else { "gone" }, if busy { "hidden" } else { "shown" });
