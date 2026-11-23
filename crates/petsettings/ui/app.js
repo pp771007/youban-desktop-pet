@@ -27,8 +27,8 @@ const CONFIRM_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
 const LAYOUT_REFRESH_MS = 600;
 const DEFAULT_PAGE = 'reminders';
-/** 功能開關：設定檔 features 的欄位 → 名稱與圖示。 */
-const FEATURES = [['reminders', '提醒', 'bell'], ['windowRestore', '視窗歸位', 'app-window']];
+/** 功能開關：設定檔 features 的欄位 → 名稱與它的頁面（側邊欄「功能」那一組）。 */
+const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows']];
 
 const state = {
   page: DEFAULT_PAGE,
@@ -189,15 +189,24 @@ async function setFeature(key, on) {
   render();
 }
 
-/** 功能關著時，那一頁只留標題和一個「開啟」。 */
+/** 功能頁的標題：名稱旁邊就是這個功能的開關。 */
+function featureTitle(key) {
+  const [, name] = FEATURES.find(([k]) => k === key);
+  return h('div', { class: 'row' },
+    h('h1', {}, name),
+    h('label', { class: 'switch' },
+      h('input', { type: 'checkbox', checked: state.config.features[key], 'aria-label': name, onchange: (e) => setFeature(key, e.target.checked) }),
+      h('span')));
+}
+
+/** 功能關著時，那一頁只留標題（含開關）。 */
 function featureOff(page, key) {
   if (state.config.features[key]) return false;
   const [, name] = FEATURES.find(([k]) => k === key);
-  page.append(h('div', { class: 'page-head' }, h('h1', {}, name)));
+  page.append(h('div', { class: 'page-head' }, featureTitle(key)));
   page.append(h('div', { class: 'card empty' },
     h('img', { src: currentPetImage(), alt: '' }),
-    h('div', { class: 'empty-title' }, `${name}已關閉`),
-    h('button', { class: 'btn btn-primary', onclick: () => setFeature(key, true) }, icon('power'), `開啟${name}`)));
+    h('div', { class: 'empty-title' }, `${name}已關閉`)));
   return true;
 }
 
@@ -210,7 +219,7 @@ function renderReminders(page) {
     return (a.enabled === b.enabled ? 0 : a.enabled ? -1 : 1) || ta.localeCompare(tb);
   });
   page.append(h('div', { class: 'page-head' },
-    h('h1', {}, '提醒'),
+    featureTitle('reminders'),
     h('button', { class: 'btn btn-primary', onclick: () => openEditor(null) }, icon('plus'), '新增提醒')));
 
   if (!sorted.length) {
@@ -783,7 +792,7 @@ function renderWindows(page) {
     setTimeout(async () => { await refreshWindows(); render(); }, LAYOUT_REFRESH_MS);
   };
   page.append(h('div', { class: 'page-head' },
-    h('h1', {}, '視窗歸位'),
+    featureTitle('windowRestore'),
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning, onclick: () => act('restoreLayout', '已恢復') }, icon('rotate-ccw'), '恢復位置'),
       h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => act('saveLayout', '已記住目前位置') }, icon('save'), '記住目前位置'))));
@@ -828,13 +837,6 @@ function renderGeneral(page) {
         state.autostartError ? h('div', { class: 'setting-error' }, state.autostartError) : null),
       autostart),
     settingRow('自動更新', configSwitch('autoUpdate', '自動更新'), `目前版本 ${state.version}`)));
-  page.append(h('section', { class: 'section' },
-    h('h2', {}, '功能'),
-    h('div', { class: 'card' }, FEATURES.map(([key, name, glyph]) => h('div', { class: 'setting' },
-      h('div', { class: 'setting-main' }, h('div', { class: 'setting-title' }, icon(glyph), name)),
-      h('label', { class: 'switch' },
-        h('input', { type: 'checkbox', checked: state.config.features[key], 'aria-label': name, onchange: (e) => setFeature(key, e.target.checked) }),
-        h('span')))))));
 }
 
 // ---------- 骨架 ----------
@@ -847,6 +849,9 @@ function render() {
   const nav = NAV_PARENT[state.page] || state.page;
   for (const b of document.querySelectorAll('.nav-item')) {
     if (b.dataset.page === nav) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  }
+  for (const [key, , pageId] of FEATURES) {
+    document.querySelector(`.nav-item[data-page="${pageId}"]`).classList.toggle('off', !state.config.features[key]);
   }
   const page = document.getElementById('page');
   page.replaceChildren();

@@ -231,14 +231,18 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('checkbox', { name: '自動更新' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.autoUpdate) === false && await page.getByText('目前版本 0.1.0').isVisible(), 'auto update switch writes config and shows version');
 
-    // 功能開關：關掉提醒 → 提醒頁只剩「開啟」；從那裡開回來
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-general-light.png') });
+
+    // 功能開關在功能頁的標題旁：關掉提醒 → 那頁只剩關閉狀態、側邊欄變淡；同一個開關開回來
+    await page.locator('.nav-item[data-page="reminders"]').click();
     await page.getByRole('checkbox', { name: '提醒', exact: true }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.features.reminders) === false, 'turning a feature off writes config');
-    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-general-light.png') });
-    await page.locator('.nav-item[data-page="reminders"]').click();
     check(await page.getByText('提醒已關閉').isVisible() && !(await page.getByRole('button', { name: '新增提醒' }).count()), 'turned-off feature page shows only the off state');
-    await page.getByRole('button', { name: '開啟提醒' }).click();
+    check(await page.locator('.nav-item[data-page="reminders"].off').count() === 1, 'turned-off feature is dimmed in the sidebar');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-feature-off-light.png') });
+    await page.getByRole('checkbox', { name: '提醒', exact: true }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.features.reminders) === true && await page.getByText('喝水').isVisible(), 'feature turned back on from its page');
+    check(await page.locator('.nav-item.off').count() === 0, 'sidebar no longer dimmed');
     await page.locator('.nav-item[data-page="general"]').click();
 
     // 核心沒在跑：橫幅出現、要核心的按鈕停用

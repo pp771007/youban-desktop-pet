@@ -102,6 +102,14 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 var(--lift) 0 var(--color-border);
 }
 .nav-item[aria-current="page"] .icon { color: var(--color-accent); }
+/* 關著的功能：還點得進去（進去才開得起來），只是淡一點。 */
+.nav-item.off { opacity: 0.5; }
+.nav-label {
+  margin: calc(var(--space-4) * 1px) calc(var(--space-4) * 1px) calc(var(--space-1) * 1px);
+  color: var(--color-text-muted);
+  font-size: calc(var(--font-size-caption) * 1px);
+  font-weight: 700;
+}
 
 .content { flex: 1; overflow-y: auto; padding: calc(var(--space-6) * 1px) calc(var(--space-6) * 1px) calc(var(--space-7) * 1px); }
 
