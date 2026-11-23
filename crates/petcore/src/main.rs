@@ -85,7 +85,7 @@ fn main() {
         Some(FRAMES_FLAG) => {
             let out = arg(2).map(std::path::PathBuf::from).unwrap_or_else(|| "frames".into());
             let dpi = arg(3).and_then(|d| d.parse().ok()).unwrap_or(SNAPSHOT_DEFAULT_DPI);
-            if let Err(e) = preview::frames(&out, dpi) {
+            if let Err(e) = preview::frames(&out, dpi, arg(4)) {
                 eprintln!("frames failed: {e}");
                 std::process::exit(1);
             }

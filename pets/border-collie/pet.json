@@ -1,0 +1,12 @@
+{
+  "spec": 1,
+  "name": "邊牧",
+  "accent": "#7587A6",
+  "states": {
+    "idle": { "frames": 1, "fps": 1, "procedural": true },
+    "walk": { "frames": 2, "fps": 4, "speed": 32, "procedural": true },
+    "sleep": { "frames": 2, "fps": 1, "procedural": true },
+    "happy": { "frames": 1, "fps": 1, "procedural": true },
+    "drag": { "frames": 1, "fps": 1, "procedural": true }
+  }
+}

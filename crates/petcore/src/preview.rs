@@ -1,4 +1,4 @@
-//! `Youban.exe --frames <資料夾> [dpi]`：不開視窗，把每個動作跑一遍、每秒 25 格輸出成 PNG 序列，
+//! `Youban.exe --frames <資料夾> [dpi] [桌寵]`：不開視窗，把每個動作跑一遍、每秒 25 格輸出成 PNG 序列，
 //! 放在一個固定大小的「舞台」上（地面在下緣、左右是螢幕邊），用來檢查動態是否自然。
 //! 舞台背景是透明的，轉成 GIF 時再墊背景。
 
@@ -163,10 +163,11 @@ fn blit_faded(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_
     }
 }
 
-pub fn frames(out_dir: &Path, dpi: u32) -> Result<()> {
+/// `pet` 沒給就用預設的那一隻。
+pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
     let config = Config::default();
     let pets_dir = paths::pets_dir().ok_or_else(|| Error::new(E_FAIL, "找不到 pets 資料夾"))?;
-    let pack = pack::load(&pets_dir.join(&config.pet)).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+    let pack = pack::load(&pets_dir.join(pet.unwrap_or(&config.pet))).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     let gfx = Gfx::new()?;
     let wic = Wic::new()?;
     let mut renderer = PetRenderer::new(&gfx)?;

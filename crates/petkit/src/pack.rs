@@ -222,6 +222,20 @@ mod tests {
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
+    /// 跟著程式一起發的桌寵（repo 的 `pets/`）每一隻都要讀得進來、有名字、有站姿圖。
+    #[test]
+    fn bundled_pets_load() {
+        let pets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../pets");
+        let mut count = 0;
+        for entry in fs::read_dir(&pets).unwrap() {
+            let dir = entry.unwrap().path();
+            let pack = load(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+            assert!(!pack.name.is_empty() && pack.resolve(crate::states::IDLE).is_some_and(|r| r.own), "{}", dir.display());
+            count += 1;
+        }
+        assert!(count >= 1);
+    }
+
     fn temp_pack(files: &[&str], manifest: Option<&str>) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
         let dir = std::env::temp_dir().join(format!("petkit-test-{}-{n}", std::process::id())).join("mypet");
