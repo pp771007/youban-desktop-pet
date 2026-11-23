@@ -128,6 +128,11 @@ for (const scheme of ['light', 'dark']) {
     check(await page.locator('#save-btn').isDisabled(), 'save disabled until title filled');
     await page.locator('#title').fill('站起來走走');
     check(await page.locator('#save-btn').isEnabled(), 'save enabled after title');
+    // 時間一個鍵一個鍵打：打到一半欄位不能被換掉（打 30 不能變成 03）
+    await page.locator('#time').focus();
+    await page.keyboard.type('0930', { delay: 50 });
+    const typedTime = await page.locator('#time').inputValue();
+    check(typedTime.endsWith(':30'), `typing a time digit by digit keeps every digit (got ${typedTime})`);
     await page.getByRole('button', { name: '工作日' }).click();
     check(!(await page.getByText('遇到假日').isVisible()), 'workdays hides holiday policy');
     await page.getByRole('button', { name: '每週' }).click();

@@ -340,6 +340,12 @@ function changed() {
   updatePreview();
 }
 
+/** 打字型的欄位（時間、日期）改了：不重畫抽屜 —— 重畫會把輸入框換掉，打到一半的數字就跳開了（打 30 變 03）。 */
+function edited() {
+  document.getElementById('save-btn').disabled = !editorValid(editor.draft);
+  updatePreview();
+}
+
 function editorValid(r) {
   return r.title.trim() && r.time && !(r.repeat.kind === 'weekly' && !r.repeat.days.length);
 }
@@ -351,7 +357,7 @@ function drawEditor() {
   const repeatExtra = (() => {
     const rep = r.repeat;
     if (rep.kind === 'once') {
-      return field('日期', h('input', { id: 'once-date', class: 'input', type: 'date', value: r.startDate, onchange: (e) => { r.startDate = e.target.value; changed(); } }), 'once-date');
+      return field('日期', h('input', { id: 'once-date', class: 'input', type: 'date', value: r.startDate, onchange: (e) => { r.startDate = e.target.value; edited(); } }), 'once-date');
     }
     if (rep.kind === 'weekly') {
       return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '星期'),
@@ -388,7 +394,7 @@ function drawEditor() {
           h('select', { class: 'select', 'aria-label': '每幾分鐘', onchange: (e) => { rep.everyMinutes = Number(e.target.value); changed(); } },
             INTERVAL_CHOICES.map((m) => h('option', { value: m, selected: rep.everyMinutes === m }, `${m} 分鐘`))),
           '到',
-          h('input', { class: 'input input-time', type: 'time', value: rep.until, 'aria-label': '到幾點', onchange: (e) => { rep.until = e.target.value; changed(); } })),
+          h('input', { class: 'input input-time', type: 'time', value: rep.until, 'aria-label': '到幾點', onchange: (e) => { rep.until = e.target.value; edited(); } })),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rep.workdaysOnly, onchange: (e) => { rep.workdaysOnly = e.target.checked; changed(); } }), '只在上班日'));
     }
     return null;
@@ -419,7 +425,7 @@ function drawEditor() {
     h('div', { class: 'drawer-body' },
       field('提醒內容', h('input', { id: 'title', class: 'input', placeholder: '例：喝水、繳卡費', value: r.title, maxlength: 60,
         oninput: (e) => { r.title = e.target.value; document.getElementById('save-btn').disabled = !editorValid(r); } }), 'title'),
-      field('時間', h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, onchange: (e) => { r.time = e.target.value; changed(); } }), 'time'),
+      field('時間', h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, onchange: (e) => { r.time = e.target.value; edited(); } }), 'time'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '重複'),
         segmented(REPEAT_KINDS, r.repeat.kind, (k) => { r.repeat = repeatDefaults(k, r); changed(); })),
       repeatExtra,
