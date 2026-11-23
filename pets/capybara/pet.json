@@ -8,6 +8,7 @@
     "sit": { "heightRatio": 0.93 },
     "doze": { "heightRatio": 0.89 },
     "yawn": { "heightRatio": 0.96 },
-    "wake": { "heightRatio": 0.8 }
+    "wake": { "heightRatio": 0.8 },
+    "climb": { "heightRatio": 1.3 }
   }
 }
