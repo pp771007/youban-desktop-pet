@@ -65,7 +65,11 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
                     segments = subtract(segments, o.left as f32, o.right as f32);
                 }
                 let (window, window_left) = (hwnd.0 as isize, r.left as f32);
-                out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| Platform { left, right, y: r.top as f32, window, window_left }));
+                out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| {
+                    // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
+                    let sides = (left == r.left as f32, right == r.right as f32);
+                    Platform { left, right, y: r.top as f32, window, window_left, sides }
+                }));
             }
             above.push(r);
         }

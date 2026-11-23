@@ -31,6 +31,11 @@ const RIDE_NOTICE_EVERY_SECS: f64 = 8.0;
 /// 走到螢幕邊（或活動範圍的左右邊）時去爬牆的機率（安靜時不爬）。
 const CLIMB_CHANCE: f32 = 0.5;
 const CLIMB_CHANCE_LIVELY: f32 = 0.8;
+/// 在地面走到視窗側邊時沿著它爬上去的機率。
+const WINDOW_CLIMB_CHANCE: f32 = 0.3;
+const WINDOW_CLIMB_CHANCE_LIVELY: f32 = 0.5;
+/// 爬上視窗後走多遠（視窗頂端可走寬度的幾成）。
+const WINDOW_TOP_WALK_FRACTION: (f32, f32) = (0.2, 0.6);
 /// 爬牆速度是走路速度的幾倍。
 /// 爬牆速度是走路速度的幾倍（動畫預覽看過：太慢會很拖沓）。
 const CLIMB_SPEED_MUL: f32 = 1.6;
@@ -180,6 +185,8 @@ pub struct Platform {
     pub window: isize,
     /// 那個視窗的左邊緣：視窗被拖動時用它算移動了多少（段的左右會因為遮擋改變，視窗左邊緣不會）。
     pub window_left: f32,
+    /// 左、右端是不是視窗真正的側邊：是的話桌寵可以從地面沿著它爬上來。
+    pub sides: (bool, bool),
 }
 
 /// 桌面上的點心或球（主程式的物理算好的位置）。
@@ -210,7 +217,8 @@ pub fn block_platforms(blocks: &[Rect], ceiling: f32, pet_height: f32) -> Vec<Pl
         .iter()
         .enumerate()
         .filter(|(_, b)| b.top - pet_height >= ceiling)
-        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left })
+        // 禁止範圍的邊另外處理（走進去就爬過去、會亮紅光），不算視窗的邊。
+        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left, sides: (false, false) })
         .collect()
 }
 
@@ -376,8 +384,9 @@ enum Mode {
     Climb { side: f32, target_y: f32 },
     /// 爬到定點，貼在牆上停一下。
     Cling { side: f32, until: f64 },
-    /// 爬禁止範圍的邊（`side` 同 `Climb`：範圍在牠的哪一邊），爬到頂端 `top` 就翻上去、往前走過寬 `across` 的頂端。
-    ClimbOver { side: f32, top: f32, across: f32 },
+    /// 爬禁止範圍或視窗的邊（`side` 同 `Climb`：範圍在牠的哪一邊），爬到頂端 `top` 就翻上去、往前走 `across` 遠。
+    /// `glow`：禁止範圍是看不見的牆，爬的那段亮紅光；視窗本來就看得到，不亮。
+    ClimbOver { side: f32, top: f32, across: f32, glow: bool },
     /// 講話（頭上有對話泡泡）。
     Talk { until: f64 },
     Spin,
@@ -785,6 +794,9 @@ impl Pet {
                     self.facing_left = dir > 0.0;
                     return false;
                 }
+                if self.climb_window_edge(prev_x, dir, env, now) {
+                    return false;
+                }
                 let (lo, hi) = walk_bounds(env);
                 let mut dir = dir;
                 let mut hit_wall = None;
@@ -993,7 +1005,7 @@ impl Pet {
                     self.set_mode(Mode::Cling { side, until }, now);
                 }
             }
-            Mode::ClimbOver { side, top, across } => {
+            Mode::ClimbOver { side, top, across, .. } => {
                 let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip;
                 self.y -= speed * CLIMB_SPEED_MUL * dt;
                 if self.y <= top {
@@ -1221,9 +1233,9 @@ impl Pet {
         let wall_mid = self.y - env.pet_half_width;
         let invisible_side = |side: f32| if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 };
         match self.mode {
-            Mode::ClimbOver { .. } => return Some(Glow::Wall { x: self.x, y: wall_mid }),
+            Mode::ClimbOver { glow: true, .. } => return Some(Glow::Wall { x: self.x, y: wall_mid }),
             Mode::Climb { side, .. } | Mode::Cling { side, .. } if invisible_side(side) => return Some(Glow::Wall { x: self.x, y: wall_mid }),
-            Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } => {}
+            Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } | Mode::ClimbOver { .. } => {}
             _ => {
                 let hw = env.pet_half_width;
                 let on_block = env.blocks.iter().any(|b| (self.y - b.top).abs() < 1.0 && self.x + hw > b.left && self.x - hw < b.right);
@@ -1268,7 +1280,39 @@ impl Pet {
         let side = dir.signum();
         self.x = if side > 0.0 { b.left } else { b.right };
         self.riding = None;
-        self.set_mode(Mode::ClimbOver { side, top: b.top, across: b.right - b.left }, now);
+        self.set_mode(Mode::ClimbOver { side, top: b.top, across: b.right - b.left, glow: true }, now);
+        true
+    }
+
+    /// 在地面上從 `prev_x` 走到現在的位置，剛好走到某個視窗的側邊、而且是朝視窗走：偶爾沿著它爬上去。
+    fn climb_window_edge(&mut self, prev_x: f32, dir: f32, env: &Env, now: f64) -> bool {
+        if (self.y - env.ground_y).abs() >= 1.0 {
+            return false;
+        }
+        let chance = match env.activity {
+            Activity::Calm => return false,
+            Activity::Normal => WINDOW_CLIMB_CHANCE,
+            Activity::Lively => WINDOW_CLIMB_CHANCE_LIVELY,
+        };
+        let h = env.pet_height;
+        let crossed = |edge: f32| (prev_x - edge) * (self.x - edge) <= 0.0 && prev_x != self.x;
+        let edge = env.platforms.iter().find_map(|p| {
+            // 頂端要比地面高出一個身高（太矮的跨過去就好），上面也要有地方站。
+            if p.y > env.ground_y - h || p.y - h < env.ceiling {
+                return None;
+            }
+            let at = if dir > 0.0 && p.sides.0 { p.left } else if dir < 0.0 && p.sides.1 { p.right } else { return None };
+            crossed(at).then_some((at, p.y, p.right - p.left))
+        });
+        let Some((at, top, width)) = edge else { return false };
+        if self.block_at(at, self.y, env).is_some() || self.rand01() >= chance {
+            return false;
+        }
+        self.x = at;
+        self.riding = None;
+        // 翻上去後走一小段停下來（不會一路走到另一頭掉下去）。
+        let across = (width - env.pet_half_width * 2.0).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
+        self.set_mode(Mode::ClimbOver { side: dir.signum(), top, across, glow: false }, now);
         true
     }
 
@@ -1829,7 +1873,7 @@ mod tests {
     #[test]
     fn lands_on_a_window_top_and_walks_off_its_edge() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0 }];
+        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false) }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 1000.0, now, 6);
         pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, now, &env);
@@ -1854,8 +1898,8 @@ mod tests {
     fn thrown_from_one_window_onto_another_stays_there() {
         let mut env = env();
         env.platforms = vec![
-            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0 },
-            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0 },
+            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false) },
+            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0, sides: (false, false) },
         ];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
@@ -1872,7 +1916,7 @@ mod tests {
     #[test]
     fn window_moving_away_drops_the_pet() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0 }];
+        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false) }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
         run(&mut pet, &mut now, 0.1, &env);
@@ -1894,6 +1938,28 @@ mod tests {
             assert_ne!(pet.state(), states::WALK);
         }
         assert_eq!(pet.x, 500.0);
+    }
+
+    #[test]
+    fn climbs_up_the_side_of_a_window_and_stands_on_top() {
+        let mut env = env();
+        env.activity = Activity::Lively;
+        env.platforms = vec![Platform { left: 700.0, right: 1100.0, y: 600.0, window: 1, window_left: 700.0, sides: (true, true) }];
+        let mut now = 0.0;
+        let mut pet = Pet::new(300.0, 1000.0, now, 17);
+        let (mut climbed, mut on_top) = (false, false);
+        for _ in 0..(900.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            if pet.state() == states::CLIMB && (pet.x == 700.0 || pet.x == 1100.0) {
+                climbed = true;
+                assert!(pet.glow(&env, now).is_none(), "a window is visible: no red glow");
+            } else if climbed && pet.y == 600.0 && pet.state() != states::CLIMB {
+                on_top = true;
+                break;
+            }
+        }
+        assert!(climbed && on_top, "climbed the window's side {climbed}, stood on its top {on_top}");
     }
 
     #[test]
@@ -1940,8 +2006,8 @@ mod tests {
         let mut env = env();
         env.activity = Activity::Lively;
         env.platforms = vec![
-            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0 },
-            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0 },
+            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0, sides: (false, false) },
+            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0, sides: (false, false) },
         ];
         let area = Rect { left: 400.0, top: 300.0, right: 1000.0, bottom: 800.0 };
         env.confine_to(area);
@@ -2029,7 +2095,7 @@ mod tests {
     fn rides_along_when_its_window_is_dragged() {
         let mut env = env();
         env.activity = Activity::Calm;
-        let window = |dx: f32, dy: f32| vec![Platform { left: 400.0 + dx, right: 900.0 + dx, y: 700.0 + dy, window: 7, window_left: 400.0 + dx }];
+        let window = |dx: f32, dy: f32| vec![Platform { left: 400.0 + dx, right: 900.0 + dx, y: 700.0 + dy, window: 7, window_left: 400.0 + dx, sides: (false, false) }];
         env.platforms = window(0.0, 0.0);
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
