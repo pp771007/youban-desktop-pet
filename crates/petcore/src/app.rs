@@ -1844,6 +1844,7 @@ impl App {
             can_speak: !self.hidden && self.cards.is_empty() && self.transition.is_none() && self.soak.is_none(),
             asleep: self.pet.state() == states::SLEEP,
             name: self.config.given_name(&self.pack.id).map(str::to_owned),
+            user_name: self.config.user_name().map(str::to_owned),
         }
     }
 

@@ -169,6 +169,16 @@ pub struct Ctx {
     pub asleep: bool,
     /// 使用者幫牠取的名字（沒取是 `None`）。
     pub name: Option<String>,
+    /// 牠怎麼叫使用者（沒設是 `None`）。
+    pub user_name: Option<String>,
+}
+
+/// 打招呼、歡迎回來時叫使用者的名字：「小明，早安！」。
+fn address(say: Say, ctx: &Ctx) -> Say {
+    match ctx.user_name.as_deref() {
+        Some(user) => Say { text: format!("{user}，{}", say.text), ..say },
+        None => say,
+    }
 }
 
 pub struct Chatter {
@@ -232,7 +242,7 @@ impl Chatter {
             Happening::Ate => self.react(ATE, None, ctx, true),
             Happening::Kicked { .. } => self.react(KICKED, None, ctx, false),
             // 今天還沒打招呼的話，接下來的 `tick` 會打招呼，這裡不搶。
-            Happening::Woke { slept_secs } if slept_secs >= WELCOME_BACK_SECS && self.greeted_on == Some(day_of(ctx.clock)) => self.react(WELCOME_BACK, Some(Emote::Hearts), ctx, true),
+            Happening::Woke { slept_secs } if slept_secs >= WELCOME_BACK_SECS && self.greeted_on == Some(day_of(ctx.clock)) => self.react(WELCOME_BACK, Some(Emote::Hearts), ctx, true).map(|s| address(s, ctx)),
             Happening::Woke { .. } => None,
         }
     }
@@ -257,7 +267,7 @@ impl Chatter {
         }
         if self.greeted_on != Some(today) {
             self.greeted_on = Some(today);
-            return Some(self.say(greeting_lines(ctx.clock, ctx.workday), None, now));
+            return Some(address(self.say(greeting_lines(ctx.clock, ctx.workday), None, now), ctx));
         }
         if now - self.last_said < MIN_GAP_SECS {
             return None;
@@ -372,7 +382,7 @@ mod tests {
 
     /// 2026-11-23 是星期一。
     fn ctx(now: f64, clock: NaiveDateTime) -> Ctx {
-        Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false, name: None }
+        Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false, name: None, user_name: None }
     }
 
     /// 從 `now` 開始每秒 tick 一次，跑 `secs` 秒（時鐘跟著走），收集講過的話。
@@ -481,6 +491,18 @@ mod tests {
         assert!(said.last().is_some_and(|s| POKED.contains(&s.text.as_str())), "fifth poke complains, got {said:?}");
         assert!(said.iter().all(|s| s.reply), "reacting to a poke is a reply: it still speaks while focusing");
         assert_eq!(c.on(Happening::Thrown { speed_dip: 300.0 }, &ctx(300.0, clock)), None, "a gentle drop is not a throw");
+    }
+
+    #[test]
+    fn greets_and_welcomes_back_by_the_users_name() {
+        let (mut now, mut clock) = (0.0, at(2026, 11, 23, 9, 0));
+        let mut c = Chatter::new(now, 7, None);
+        let said = run(&mut c, &mut now, &mut clock, 10, |x| x.user_name = Some("小明".into()));
+        assert!(said.len() == 1 && said[0].starts_with("小明，"), "{said:?}");
+        let mut x = ctx(now + 100.0, clock);
+        x.user_name = Some("小明".into());
+        let back = c.on(Happening::Woke { slept_secs: WELCOME_BACK_SECS }, &x).unwrap();
+        assert!(back.text.starts_with("小明，") && WELCOME_BACK.iter().any(|l| back.text.ends_with(l)), "{back:?}");
     }
 
     #[test]

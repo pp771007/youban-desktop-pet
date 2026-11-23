@@ -232,6 +232,11 @@ for (const scheme of ['light', 'dark']) {
     await nameBox().press('Enter');
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).waitFor();
     check(await page.evaluate(() => !('capybara-side' in (window.__mock.config.petNames || {}))), 'clearing the name goes back to the pet kind');
+    const userBox = page.getByRole('textbox', { name: '怎麼叫你' });
+    await userBox.fill(' 小明 ');
+    await userBox.press('Enter');
+    await page.waitForFunction(() => window.__mock.config.userName === '小明');
+    check(await userBox.inputValue() === '小明', 'what the pet calls you is saved trimmed');
     await page.getByRole('button', { name: '大' }).click();
     check(await page.evaluate(() => window.__mock.config.sizeDip) === 176, 'size choice writes config');
     await page.getByRole('button', { name: '安靜' }).click();

@@ -30,6 +30,8 @@ pub struct Config {
     /// 使用者幫每隻桌寵取的名字（桌寵 id → 名字）；沒取的用桌寵包自己的名字。放這裡不放 `pet.json`：
     /// 內建桌寵的資料夾更新時會整個換掉。
     pub pet_names: BTreeMap<String, String>,
+    /// 桌寵怎麼叫使用者（打招呼、歡迎回來時加在前面）；空的就不叫名字。
+    pub user_name: String,
     pub size_dip: u32,
     pub sleep_after_secs: u64,
     pub activity: Activity,
@@ -162,6 +164,7 @@ impl Default for Config {
         Self {
             pet: DEFAULT_PET.to_owned(),
             pet_names: BTreeMap::new(),
+            user_name: String::new(),
             size_dip: DEFAULT_SIZE_DIP,
             sleep_after_secs: DEFAULT_SLEEP_AFTER_SECS,
             activity: Activity::default(),
@@ -209,6 +212,11 @@ impl Config {
     /// 使用者幫這隻桌寵取的名字；沒取過是 `None`。
     pub fn given_name(&self, id: &str) -> Option<&str> {
         self.pet_names.get(id).map(|n| n.trim()).filter(|n| !n.is_empty())
+    }
+
+    /// 桌寵怎麼叫使用者；沒設是 `None`。
+    pub fn user_name(&self) -> Option<&str> {
+        Some(self.user_name.trim()).filter(|n| !n.is_empty())
     }
 }
 
