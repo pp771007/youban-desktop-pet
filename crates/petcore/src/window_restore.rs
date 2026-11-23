@@ -15,6 +15,7 @@ use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, PROCES
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PWSTR};
 
+use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent};
 
@@ -263,8 +264,9 @@ impl Module for WindowRestore {
         }
     }
 
-    fn menu(&self) -> Vec<(u32, &'static str)> {
-        vec![(MENU_SAVE, "儲存視窗位置"), (MENU_RESTORE, "恢復視窗位置")]
+    /// 跟設定程式那一頁的按鈕同名。
+    fn menu(&self) -> Vec<(u32, &'static str, Icon)> {
+        vec![(MENU_SAVE, "記住目前位置", Icon::Save), (MENU_RESTORE, "恢復位置", Icon::RotateCcw)]
     }
 }
 

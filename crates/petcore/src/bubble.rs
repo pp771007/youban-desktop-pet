@@ -1,18 +1,15 @@
 //! 桌寵頭上的卡片（提醒、錯過的提醒、一般通知）：獨立的分層視窗，尾巴指向桌寵。
 //! 尺寸、顏色、圓角、字級、動畫全部來自設計參數（`theme`）。
 
-use std::collections::HashMap;
-
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectWrite::*;
-use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow};
-use windows::core::{HSTRING, Interface, Result};
+use windows::core::{HSTRING, Result};
 use windows_numerics::{Matrix3x2, Vector2};
 
-use crate::log;
+use crate::icons::{Icon, Icons};
 use crate::render::{Canvas, Gfx, TRANSPARENT};
 use crate::theme::{self, Palette, Rgba};
 
@@ -22,8 +19,6 @@ const TILE_DIP: f32 = 40.0;
 const GLYPH_DIP: f32 = 22.0;
 /// 圖示底色：主題色的淡色版（透明度）。
 const TILE_TINT_ALPHA: f32 = 0.16;
-/// 圖示快取最多幾張（4 種圖示 × 深淺色 × 幾隻桌寵的強調色）。
-const SVG_CACHE_MAX: usize = 16;
 const BUTTON_HEIGHT_DIP: f32 = 36.0;
 const TAIL_WIDTH_DIP: f32 = 20.0;
 const TAIL_HEIGHT_DIP: f32 = 10.0;
@@ -73,29 +68,6 @@ impl Card {
 
     pub fn warning(title: impl Into<String>, detail: Option<String>) -> Self {
         Card::Info { title: title.into(), detail, tone: Tone::Warning }
-    }
-}
-
-/// 卡片左上角的圖示：專案自己的圖示（`crates/petsettings/ui/icons/`），
-/// 跟設定程式用同一份檔案。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Glyph {
-    Bell,
-    History,
-    Check,
-    Alert,
-    Download,
-}
-
-impl Glyph {
-    fn svg(self) -> &'static str {
-        match self {
-            Glyph::Bell => include_str!("../../petsettings/ui/icons/bell-ring.svg"),
-            Glyph::History => include_str!("../../petsettings/ui/icons/history.svg"),
-            Glyph::Check => include_str!("../../petsettings/ui/icons/circle-check.svg"),
-            Glyph::Alert => include_str!("../../petsettings/ui/icons/triangle-alert.svg"),
-            Glyph::Download => include_str!("../../petsettings/ui/icons/download.svg"),
-        }
     }
 }
 
@@ -161,7 +133,7 @@ struct Layout {
     texts: Vec<(IDWriteTextLayout, Vector2, Ink)>,
     /// 卡片寬度（講話泡泡跟著字數變，其他固定）。
     card_w: f32,
-    tile: Option<(D2D_RECT_F, Glyph, Tint)>,
+    tile: Option<(D2D_RECT_F, Icon, Tint)>,
     buttons: Vec<Button>,
 }
 
@@ -178,57 +150,20 @@ pub struct CardPainter {
     brush: ID2D1SolidColorBrush,
     formats: Option<Formats>,
     layout: Option<Layout>,
-    /// 畫 SVG 要 Direct2D 1.5 的介面；拿不到（舊版 Windows）就不畫圖示，卡片照常能用。
-    svg_target: Option<ID2D1DeviceContext5>,
-    /// (圖示, 顏色, 像素大小) → 已解析的 SVG；換縮放比例時清掉。
-    svgs: HashMap<(Glyph, u32, u32), ID2D1SvgDocument>,
+    icons: Icons,
 }
 
 impl CardPainter {
     pub fn new(gfx: &Gfx) -> Result<Self> {
         let canvas = Canvas::new(gfx)?;
         let brush = unsafe { canvas.rt.CreateSolidColorBrush(&TRANSPARENT, None)? };
-        let svg_target = canvas.rt.cast::<ID2D1DeviceContext5>().ok();
-        if svg_target.is_none() {
-            log!("Direct2D SVG unavailable; card icons disabled");
-        }
-        Ok(Self { canvas, gfx: gfx.clone(), brush, formats: None, layout: None, svg_target, svgs: HashMap::new() })
-    }
-
-    /// 把圖示的 SVG 換上指定顏色、拉成指定大小。
-    fn svg(&mut self, glyph: Glyph, color: Rgba, size: f32) -> Option<ID2D1SvgDocument> {
-        let target = self.svg_target.as_ref()?;
-        let to_byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u32;
-        let rgb = (to_byte(color.r) << 16) | (to_byte(color.g) << 8) | to_byte(color.b);
-        let key = (glyph, rgb, size.round() as u32);
-        if let Some(doc) = self.svgs.get(&key) {
-            return Some(doc.clone());
-        }
-        // 每隻桌寵的強調色不同，換來換去會一直多出新顏色的圖示：滿了就整個重來。
-        if self.svgs.len() >= SVG_CACHE_MAX {
-            self.svgs.clear();
-        }
-        // 原檔寫死 24×24 並用 currentColor 上色：改成填滿畫布、換成實際顏色。
-        let text = glyph.svg().replace("currentColor", &format!("#{rgb:06x}")).replace("width=\"24\"", "width=\"100%\"").replace("height=\"24\"", "height=\"100%\"");
-        let doc = unsafe {
-            let stream = SHCreateMemStream(Some(text.as_bytes()))?;
-            target.CreateSvgDocument(&stream, D2D_SIZE_F { width: size, height: size })
-        };
-        match doc {
-            Ok(doc) => {
-                self.svgs.insert(key, doc.clone());
-                Some(doc)
-            }
-            Err(e) => {
-                log!("svg {glyph:?} failed: {e}");
-                None
-            }
-        }
+        let icons = Icons::new(&canvas.rt);
+        Ok(Self { canvas, gfx: gfx.clone(), brush, formats: None, layout: None, icons })
     }
 
     fn formats(&mut self, s: f32) -> Result<&Formats> {
         if self.formats.as_ref().is_none_or(|f| f.scale != s) {
-            self.svgs.clear();
+            self.icons.clear();
             let make = |size: f32, bold: bool, center: bool| -> Result<IDWriteTextFormat> {
                 unsafe {
                     let f = self.gfx.dwrite.CreateTextFormat(
@@ -326,7 +261,7 @@ impl CardPainter {
                 };
                 button_row(y, items, &mut buttons);
                 y += BUTTON_HEIGHT_DIP * s;
-                (Glyph::Bell, Tint::Accent)
+                (Icon::BellRing, Tint::Accent)
             }
             Card::Missed { rows, more } => {
                 let (t, _, h) = self.text("錯過的提醒", &subtitle, text_w, Some(1.0))?;
@@ -348,7 +283,7 @@ impl CardPainter {
                 y += theme::SPACE_3 * s;
                 button_row(y, vec![("全部完成".to_string(), CardAction::Dismiss, true)], &mut buttons);
                 y += BUTTON_HEIGHT_DIP * s;
-                (Glyph::History, Tint::Accent)
+                (Icon::History, Tint::Accent)
             }
             Card::Update { version } => {
                 let (t, _, h) = self.text(&format!("新版 {version} 準備好了"), &body_bold, text_w, Some(TITLE_MAX_LINES))?;
@@ -356,7 +291,7 @@ impl CardPainter {
                 y = (y + h).max(tile_rect.bottom) + theme::SPACE_4 * s;
                 button_row(y, vec![("現在更新".to_string(), CardAction::Done, true), ("下次啟動時".to_string(), CardAction::Dismiss, false)], &mut buttons);
                 y += BUTTON_HEIGHT_DIP * s;
-                (Glyph::Download, Tint::Accent)
+                (Icon::Download, Tint::Accent)
             }
             Card::Speech { .. } => unreachable!("laid out by layout_speech"),
             Card::Info { title, detail, tone } => {
@@ -378,8 +313,8 @@ impl CardPainter {
                 }
                 y = ty.max(tile_rect.bottom);
                 match tone {
-                    Tone::Success => (Glyph::Check, Tint::Success),
-                    Tone::Warning => (Glyph::Alert, Tint::Warning),
+                    Tone::Success => (Icon::CircleCheck, Tint::Success),
+                    Tone::Warning => (Icon::Alert, Tint::Warning),
                 }
             }
         };
@@ -424,7 +359,7 @@ impl CardPainter {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn finish_layout(&mut self, margin: f32, card_w: f32, bottom: f32, s: f32, tail_frac: f32, texts: Vec<(IDWriteTextLayout, Vector2, Ink)>, tile: Option<(D2D_RECT_F, Glyph, Tint)>, buttons: Vec<Button>) {
+    fn finish_layout(&mut self, margin: f32, card_w: f32, bottom: f32, s: f32, tail_frac: f32, texts: Vec<(IDWriteTextLayout, Vector2, Ink)>, tile: Option<(D2D_RECT_F, Icon, Tint)>, buttons: Vec<Button>) {
         let card_rect = D2D_RECT_F { left: margin, top: margin, right: margin + card_w, bottom };
         let corner = theme::RADIUS_LG * s + TAIL_WIDTH_DIP * s / 2.0;
         let tail_x = (margin + card_w * tail_frac).clamp(margin + corner, margin + card_w - corner);
@@ -459,7 +394,7 @@ impl CardPainter {
         let tip = self.tail_tip(s);
         let tile = self.layout.as_ref().and_then(|l| l.tile);
         let glyph_size = GLYPH_DIP * s;
-        let glyph_doc = tile.and_then(|(_, glyph, tint)| self.svg(glyph, tint.color(palette), glyph_size));
+        let glyph_doc = tile.and_then(|(_, glyph, tint)| self.icons.doc(glyph, tint.color(palette), glyph_size));
         let l = self.layout.as_ref().expect("layout first");
         self.canvas.ensure_size(l.width, l.height)?;
         let rt = &self.canvas.rt;
@@ -472,18 +407,7 @@ impl CardPainter {
             rt.Clear(Some(&TRANSPARENT));
             rt.SetTransform(&Matrix3x2::scale_around(appear_scale, appear_scale, tip));
 
-            // 柔和陰影：一層層往外擴的圓角矩形疊出來。每層的透明度算成「離卡片邊緣 d 的地方，
-            // 疊起來的濃度 = A × (1 - d/blur)²」，近邊緣濃、往外平滑淡掉，不會出現一圈硬邊。
-            let blur = theme::SHADOW_POPUP_BLUR * s;
-            let offset = theme::SHADOW_POPUP_Y * s * 0.5;
-            let density = |d: f32| theme::SHADOW_POPUP_ALPHA * (1.0 - d / blur).max(0.0).powi(2);
-            for i in (1..=SHADOW_LAYERS).rev() {
-                let grow = blur * i as f32 / SHADOW_LAYERS as f32;
-                let inner = blur * (i - 1) as f32 / SHADOW_LAYERS as f32;
-                brush.SetColor(&palette.shadow.with_alpha(density(inner) - density(grow)));
-                let r = D2D_RECT_F { left: l.card.left - grow, top: l.card.top - grow * 0.5 + offset, right: l.card.right + grow, bottom: l.card.bottom + grow + offset };
-                rt.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: radius + grow, radiusY: radius + grow }, brush);
-            }
+            popup_shadow(rt, brush, l.card, radius, s, palette);
 
             let card = D2D1_ROUNDED_RECT { rect: l.card, radiusX: radius, radiusY: radius };
             brush.SetColor(&palette.surface_raised.d2d());
@@ -504,10 +428,9 @@ impl CardPainter {
                 let center = Vector2 { X: rect.left + r, Y: rect.top + r };
                 brush.SetColor(&tint.color(palette).with_alpha(TILE_TINT_ALPHA));
                 rt.FillEllipse(&D2D1_ELLIPSE { point: center, radiusX: r, radiusY: r }, brush);
-                if let (Some(doc), Some(target)) = (&glyph_doc, &self.svg_target) {
+                if let Some(doc) = &glyph_doc {
                     let at = Matrix3x2::translation(center.X - glyph_size / 2.0, center.Y - glyph_size / 2.0);
-                    target.SetTransform(&(at * Matrix3x2::scale_around(appear_scale, appear_scale, tip)));
-                    target.DrawSvgDocument(doc);
+                    self.icons.draw(doc, &(at * Matrix3x2::scale_around(appear_scale, appear_scale, tip)));
                     rt.SetTransform(&Matrix3x2::scale_around(appear_scale, appear_scale, tip));
                 }
             }
@@ -559,6 +482,24 @@ impl CardPainter {
         self.layout(card, s, 0.5)?;
         self.paint(palette, s, hover, None, 1.0)?;
         Ok(self.canvas.size())
+    }
+}
+
+/// 浮在桌面上的東西（卡片、右鍵選單）底下的柔和陰影。畫面要先留 `SHADOW_POPUP_BLUR` 的邊。
+/// 一層層往外擴的圓角矩形疊出來。每層的透明度算成「離邊緣 d 的地方，
+/// 疊起來的濃度 = A × (1 - d/blur)²」，近邊緣濃、往外平滑淡掉，不會出現一圈硬邊。
+pub fn popup_shadow(rt: &ID2D1RenderTarget, brush: &ID2D1SolidColorBrush, rect: D2D_RECT_F, radius: f32, s: f32, palette: &Palette) {
+    let blur = theme::SHADOW_POPUP_BLUR * s;
+    let offset = theme::SHADOW_POPUP_Y * s * 0.5;
+    let density = |d: f32| theme::SHADOW_POPUP_ALPHA * (1.0 - d / blur).max(0.0).powi(2);
+    for i in (1..=SHADOW_LAYERS).rev() {
+        let grow = blur * i as f32 / SHADOW_LAYERS as f32;
+        let inner = blur * (i - 1) as f32 / SHADOW_LAYERS as f32;
+        let r = D2D_RECT_F { left: rect.left - grow, top: rect.top - grow * 0.5 + offset, right: rect.right + grow, bottom: rect.bottom + grow + offset };
+        unsafe {
+            brush.SetColor(&palette.shadow.with_alpha(density(inner) - density(grow)));
+            rt.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: radius + grow, radiusY: radius + grow }, brush);
+        }
     }
 }
 

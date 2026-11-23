@@ -14,7 +14,9 @@ use crate::app::{anchor, window_size};
 use crate::behavior::{Emote, Env, Input, Pet, Pose};
 use crate::effects::Effects;
 use crate::bubble::{Card, CardPainter};
+use crate::icons::Icon;
 use crate::paths;
+use crate::popup_menu::{Entry, Item, MenuPainter};
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::sprites::Wic;
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
@@ -239,6 +241,44 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         toys.draw(&t)?;
         let (w, h) = toys.canvas.size();
         sheet.push(w, h, toys.canvas.pixels());
+    }
+    // 第二層用 repo 裡真的桌寵（小圖讀圖檔）。
+    let mut pets: Vec<_> = paths::pets_dir()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let p = pack::load(&e.path()).ok()?;
+            let picture = p.states.get(states::IDLE)?.variants.first()?.frames.first()?.clone();
+            Some((p.name, picture))
+        })
+        .collect();
+    pets.sort();
+    let children: Vec<Entry> = pets.into_iter().enumerate().map(|(i, (name, picture))| Entry::Item(Item { id: 10 + i as u32, label: name, icon: None, picture: Some(picture), checked: i == 1, children: Vec::new() })).collect();
+    let switch = Item { id: 2, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: children.clone() };
+    let main = vec![
+        Entry::Header("桌寵".into()),
+        Item::entry(1, "陪你第 12 天", Icon::Heart),
+        Entry::Item(switch.clone()),
+        Item::entry(3, "餵點心", Icon::Cookie),
+        Item::entry(4, "丟球", Icon::Ball),
+        Entry::Header("提醒".into()),
+        Item::entry(5, "新增提醒…", Icon::Bell),
+        Entry::Header("視窗歸位".into()),
+        Item::entry(6, "記住目前位置", Icon::Save),
+        Item::entry(7, "恢復位置", Icon::RotateCcw),
+        Entry::Separator,
+        Item::entry(8, "設定…", Icon::Settings),
+        Item::entry(9, "結束", Icon::Power),
+    ];
+    let mut menus = MenuPainter::new(&gfx)?;
+    menus.load_pictures(&wic, &children, s);
+    for palette in [&theme::LIGHT, &theme::DARK] {
+        for (entries, hover) in [(main.clone(), Some(2)), (children.clone(), Some(3))] {
+            let (w, h) = menus.render(entries, palette, s, hover)?;
+            sheet.push(w, h, menus.canvas.pixels());
+        }
     }
     sheet.save(&wic, out)
 }

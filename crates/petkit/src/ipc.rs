@@ -27,5 +27,7 @@ pub const CMD_SAY: &str = "say";
 pub const CMD_TOY: &str = "toy";
 /// 在螢幕上畫一個範圍 `{"kind": "allowed" | "forbidden"}`：畫好由核心寫進設定檔。
 pub const CMD_DRAW_AREA: &str = "drawArea";
+/// 在桌面上框出一個範圍給人看 `{"kind", "area": {"left", "top", "right", "bottom"}}`；不帶 `area` = 收掉。
+pub const CMD_PREVIEW_AREA: &str = "previewArea";
 pub const AREA_ALLOWED: &str = "allowed";
 pub const AREA_FORBIDDEN: &str = "forbidden";

@@ -29,7 +29,7 @@ use windows_numerics::Vector2;
 use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::glow::{GlowPainter, GlowStyle};
-use crate::area_editor::{AreaEditor, AreaInput, AreaKind, Outcome};
+use crate::area_editor::{AreaEditor, AreaInput, AreaKind, AreaPreview, Outcome};
 use crate::chatter::{self, Chatter, Say};
 use crate::platforms;
 use crate::bubble::{self, Bubble, Card, CardAction, Pointer};
@@ -45,7 +45,9 @@ use crate::render::{Gfx, PetRenderer, Scene};
 use crate::soak::{Action, Soak};
 use crate::sprites::{SpriteSet, Wic};
 use crate::theme::{self, Palette};
-use crate::tray::{self, MenuItem, Tray};
+use crate::icons::Icon;
+use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
+use crate::tray::{self, Tray};
 use crate::window_restore::{self, WindowRestore};
 
 /// 設定程式靠這個類別名稱找到核心（`petkit::ipc::PET_WINDOW_CLASS`）。
@@ -54,8 +56,11 @@ const CARD_CLASS: PCWSTR = w!("YoubanDesktopPet.Card");
 const TOY_CLASS: PCWSTR = w!("YoubanDesktopPet.Toy");
 const GLOW_CLASS: PCWSTR = w!("YoubanDesktopPet.Glow");
 const AREA_CLASS: PCWSTR = w!("YoubanDesktopPet.Area");
+const MENU_CLASS: PCWSTR = w!("YoubanDesktopPet.Menu");
 /// 畫範圍時，框要至少這麼大才算：禁止範圍（DIP）、活動範圍（站姿寬的幾倍 × 身高的幾倍，要能在裡面走動）。
 const MIN_FORBIDDEN_DIP: f32 = 16.0;
+/// 範圍預覽最多留多久：設定程式沒機會叫收掉（當掉、被強制關掉）時自己收。
+const AREA_PREVIEW_MAX_SECS: f64 = 15.0;
 const MIN_ALLOWED_WIDTHS: f32 = 2.0;
 const MIN_ALLOWED_HEIGHTS: f32 = 1.5;
 /// 畫好範圍後桌寵說的話。
@@ -138,6 +143,8 @@ const MENU_SETTINGS: u32 = 11;
 const MENU_DAYS: u32 = 12;
 const MENU_FEED: u32 = 13;
 const MENU_BALL: u32 = 14;
+/// 打開桌寵清單那一層（本身不會被選到）。
+const MENU_SWITCH_PET: u32 = 15;
 const MENU_PET_BASE: u32 = 100;
 const SETTINGS_PAGE_REMINDERS: &str = "reminders";
 const SETTINGS_PAGE_PETS: &str = "pets";
@@ -164,6 +171,8 @@ enum Event {
     ToyRemove,
     /// 畫範圍的畫面上的滑鼠與鍵盤。
     Area(AreaInput),
+    /// 右鍵選單上的滑鼠與鍵盤。
+    MenuInput(isize, MenuInput),
 }
 
 /// 桌面上的點心或球，與它自己的視窗。
@@ -188,7 +197,7 @@ static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 fn push(event: Event) {
     EVENTS.with_borrow_mut(|q| {
         // 連續的滑鼠移動只留最後一筆，佇列不會因為滑鼠狂動而長大。
-        let is_move = |e: &Event| matches!(e, Event::PointerMove | Event::Hover | Event::Card(Pointer::Move, ..) | Event::Area(AreaInput::Move(..)));
+        let is_move = |e: &Event| matches!(e, Event::PointerMove | Event::Hover | Event::Card(Pointer::Move, ..) | Event::Area(AreaInput::Move(..)) | Event::MenuInput(_, MenuInput::Move(..)));
         if is_move(&event) && q.last().is_some_and(|last| std::mem::discriminant(last) == std::mem::discriminant(&event) && is_move(last)) {
             q.pop();
         }
@@ -299,6 +308,11 @@ struct App {
     gfx: Gfx,
     /// 正在畫範圍（設定程式按了「畫範圍」）。
     area_editor: Option<AreaEditor>,
+    /// 打開中的右鍵選單，與打開時列出的桌寵（選了第幾隻要對回 id）。
+    menu: Option<PopupMenu>,
+    menu_pets: Vec<PetChoice>,
+    /// 設定程式裡滑鼠停在某個範圍上：桌面上框出來給人看。
+    area_preview: Option<AreaPreview>,
 }
 
 pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
@@ -400,6 +414,9 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         glow: GlowPainter::new(&gfx)?,
         gfx: gfx.clone(),
         area_editor: None,
+        menu: None,
+        menu_pets: Vec::new(),
+        area_preview: None,
     };
     app.resize_window()?;
     if after_update {
@@ -490,18 +507,27 @@ fn load_pack_or_default(pets_dir: &Path, id: &str) -> Result<PetPack> {
 }
 
 /// `pets/` 裡所有讀得進來的桌寵：(資料夾名, 顯示名稱)。
-fn list_pets(pets_dir: &Path) -> Vec<(String, String)> {
-    let mut out: Vec<(String, String)> = std::fs::read_dir(pets_dir)
+/// 裝了的一隻桌寵（右鍵選單換桌寵用）。
+struct PetChoice {
+    id: String,
+    name: String,
+    /// 站姿的第一張（選單上的小圖）。
+    picture: PathBuf,
+}
+
+fn list_pets(pets_dir: &Path) -> Vec<PetChoice> {
+    let mut out: Vec<PetChoice> = std::fs::read_dir(pets_dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
-            let folder = e.file_name().to_str()?.to_owned();
+            let id = e.file_name().to_str()?.to_owned();
             let p = pack::load(&e.path()).ok()?;
-            Some((folder, p.name))
+            let picture = p.states.get(states::IDLE)?.variants.first()?.frames.first()?.clone();
+            Some(PetChoice { id, name: p.name, picture })
         })
         .collect();
-    out.sort();
+    out.sort_by(|a, b| a.id.cmp(&b.id));
     out
 }
 
@@ -538,6 +564,7 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
     register_class(TOY_CLASS, Some(toy_proc), IDC_HAND)?;
     register_class(GLOW_CLASS, Some(glow_proc), IDC_ARROW)?;
     register_class(AREA_CLASS, Some(area_proc), IDC_CROSS)?;
+    register_class(MENU_CLASS, Some(menu_proc), IDC_ARROW)?;
     unsafe { TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed) };
     let pet = create_layered(pet_class(), w!("柚伴"), instance)?;
     let card = create_layered(CARD_CLASS, w!("柚伴提醒"), instance)?;
@@ -576,6 +603,30 @@ extern "system" fn area_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
         }
         None => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+extern "system" fn menu_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let (x, y) = client_xy(lparam);
+    let input = match msg {
+        WM_MOUSEMOVE => {
+            // 要求滑鼠離開時通知（WM_MOUSELEAVE），反白才會跟著拿掉。
+            let mut track = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+            unsafe {
+                let _ = TrackMouseEvent(&mut track);
+            }
+            Some(MenuInput::Move(x, y))
+        }
+        WM_MOUSELEAVE => Some(MenuInput::Leave),
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN => Some(MenuInput::Down(x, y)),
+        WM_LBUTTONUP | WM_RBUTTONUP => Some(MenuInput::Up(x, y)),
+        WM_KEYDOWN => Some(MenuInput::Key(wparam.0 as u16)),
+        WM_ACTIVATE if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE => Some(MenuInput::Deactivate),
+        _ => None,
+    };
+    if let Some(i) = input {
+        push(Event::MenuInput(hwnd.0 as isize, i));
+    }
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
 extern "system" fn toy_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -808,6 +859,10 @@ impl App {
         for event in events {
             let now = self.now();
             let env = self.env();
+            // 選單開著時去抓桌寵或玩具，選單就收起來（它們的視窗不搶焦點，選單不會自己發現）。
+            if matches!(event, Event::PointerDown | Event::ToyDown) {
+                self.menu = None;
+            }
             match event {
                 Event::PointerDown => {
                     let (x, y) = cursor();
@@ -824,7 +879,8 @@ impl App {
                     let (x, _) = cursor();
                     self.pet.input(Input::Hover { x }, now, &env);
                 }
-                Event::Menu => self.show_menu()?,
+                Event::Menu => self.open_menu()?,
+                Event::MenuInput(hwnd, input) => self.menu_input(HWND(hwnd as _), input)?,
                 Event::TaskbarCreated => self.tray.add(),
                 Event::DisplayChanged => self.broadcast(&ModuleEvent::DisplayChanged),
                 Event::HolidaysUpdated => {
@@ -960,6 +1016,13 @@ impl App {
             ipc::CMD_OPEN_SETTINGS => self.open_settings(v["page"].as_str()),
             ipc::CMD_DUMP_STATUS => self.dump_status(),
             ipc::CMD_TOY => self.spawn_toy(v["kind"].as_str() == Some("ball")),
+            ipc::CMD_PREVIEW_AREA => {
+                self.area_preview = None;
+                if let Ok(area) = serde_json::from_value::<Area>(v["area"].clone()) {
+                    let color = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) { self.palette.accent } else { self.palette.danger };
+                    self.area_preview = Some(AreaPreview::open(&self.gfx, GLOW_CLASS, &area, color.d2d(), self.dpi_scale(), self.now())?);
+                }
+            }
             ipc::CMD_DRAW_AREA => {
                 let kind = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) { AreaKind::Allowed } else { AreaKind::Forbidden };
                 self.open_area_editor(kind)?;
@@ -1032,54 +1095,82 @@ impl App {
         })
     }
 
-    fn show_menu(&mut self) -> Result<()> {
-        let pets = list_pets(&self.pets_dir);
-        let mut items = Vec::new();
+    /// 右鍵選單：桌寵自己的一組，再來每個開著的功能一組（標題是功能名稱），最後是設定與結束。
+    fn menu_entries(&self, pets: &[PetChoice]) -> Vec<Entry> {
+        let mut entries = vec![Entry::Header("桌寵".into())];
         let days = self.companions.days(&self.pack.id);
         if days > 0 {
-            items.push(MenuItem::Item { id: MENU_DAYS, label: format!("♥ 陪你第 {days} 天"), checked: false });
-            items.push(MenuItem::Separator);
+            entries.push(Item::entry(MENU_DAYS, format!("陪你第 {days} 天"), Icon::Heart));
         }
-        items.extend([
-            MenuItem::Sub {
-                label: "換一隻桌寵".into(),
-                items: pets.iter().enumerate().map(|(i, (id, name))| MenuItem::Item { id: MENU_PET_BASE + i as u32, label: name.clone(), checked: *id == self.pack.id }).collect(),
-            },
-            MenuItem::Item { id: MENU_FEED, label: "餵點心".into(), checked: false },
-            MenuItem::Item { id: MENU_BALL, label: "丟球".into(), checked: false },
-        ]);
-        items.push(MenuItem::Separator);
-        for (id, label) in self.modules.menu() {
-            items.push(MenuItem::Item { id, label: label.into(), checked: false });
+        let choices = pets
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Entry::Item(Item { id: MENU_PET_BASE + i as u32, label: p.name.clone(), icon: None, picture: Some(p.picture.clone()), checked: p.id == self.pack.id, children: Vec::new() }))
+            .collect();
+        entries.push(Entry::Item(Item { id: MENU_SWITCH_PET, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: choices }));
+        entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
+        entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
+        for group in self.modules.menu() {
+            let mut items: Vec<Entry> = group.items.into_iter().map(|(id, label, icon)| Item::entry(id, label, icon)).collect();
+            if group.module == reminder_module::ID {
+                items.insert(0, Item::entry(MENU_ADD_REMINDER, "新增提醒…", Icon::Bell));
+            }
+            if !items.is_empty() {
+                entries.push(Entry::Header(group.name.into()));
+                entries.extend(items);
+            }
         }
-        items.push(MenuItem::Separator);
-        if self.config.features.reminders {
-            items.push(MenuItem::Item { id: MENU_ADD_REMINDER, label: "新增提醒…".into(), checked: false });
-        }
-        items.push(MenuItem::Item { id: MENU_SETTINGS, label: "設定…".into(), checked: false });
-        items.push(MenuItem::Separator);
-        items.push(MenuItem::Item { id: MENU_EXIT, label: "結束".into(), checked: false });
+        entries.push(Entry::Separator);
+        entries.push(Item::entry(MENU_SETTINGS, "設定…", Icon::Settings));
+        entries.push(Item::entry(MENU_EXIT, "結束", Icon::Power));
+        entries
+    }
 
-        match tray::show_menu(self.hwnd, &items) {
-            Some(MENU_EXIT) => self.quit(),
-            Some(MENU_ADD_REMINDER) => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
-            Some(MENU_SETTINGS) => self.open_settings(None),
-            Some(MENU_DAYS) => self.open_settings(Some(SETTINGS_PAGE_PETS)),
-            Some(MENU_FEED) => self.spawn_toy(false),
-            Some(MENU_BALL) => self.spawn_toy(true),
-            Some(id) if (MENU_PET_BASE..crate::modules::MENU_BASE).contains(&id) => {
-                if let Some((pet, _)) = pets.get((id - MENU_PET_BASE) as usize) {
-                    self.begin_switch(pet.clone(), true);
+    fn open_menu(&mut self) -> Result<()> {
+        self.menu = None;
+        let pets = list_pets(&self.pets_dir);
+        let entries = self.menu_entries(&pets);
+        self.menu_pets = pets;
+        let (x, y) = cursor();
+        let s = monitor_dpi(monitor_at(x, y + 1.0)) as f32 / BASE_DPI as f32;
+        self.menu = Some(PopupMenu::open(&self.gfx, &self.wic, MENU_CLASS, entries, self.palette, s)?);
+        Ok(())
+    }
+
+    fn menu_input(&mut self, hwnd: HWND, input: MenuInput) -> Result<()> {
+        let now = self.now();
+        let Some(menu) = self.menu.as_mut() else { return Ok(()) };
+        match menu.input(hwnd, input, now)? {
+            Some(MenuOutcome::Pick(id)) => {
+                self.menu = None;
+                self.menu_pick(id);
+            }
+            Some(MenuOutcome::Close) => self.menu = None,
+            None => {}
+        }
+        Ok(())
+    }
+
+    fn menu_pick(&mut self, id: u32) {
+        let pets = std::mem::take(&mut self.menu_pets);
+        match id {
+            MENU_EXIT => self.quit(),
+            MENU_ADD_REMINDER => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
+            MENU_SETTINGS => self.open_settings(None),
+            MENU_DAYS => self.open_settings(Some(SETTINGS_PAGE_PETS)),
+            MENU_FEED => self.spawn_toy(false),
+            MENU_BALL => self.spawn_toy(true),
+            id if (MENU_PET_BASE..crate::modules::MENU_BASE).contains(&id) => {
+                if let Some(pet) = pets.get((id - MENU_PET_BASE) as usize) {
+                    self.begin_switch(pet.id.clone(), true);
                 }
             }
-            Some(id) => {
+            id => {
                 let mut out = Vec::new();
                 self.modules.menu_clicked(id, local_now(), &self.config, &mut out);
                 self.apply(out);
             }
-            None => {}
         }
-        Ok(())
     }
 
     /// 用 WM_CLOSE 排進訊息佇列，而不是當場 DestroyWindow：當場關掉的話，
@@ -1151,7 +1242,9 @@ impl App {
             return;
         }
         self.last_topmost = now;
-        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.card_hwnd] {
+        // 後設的在上面：選單開著的話要蓋過桌寵。
+        let menu = self.menu.as_ref().map(PopupMenu::hwnds).unwrap_or_default();
+        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.card_hwnd].into_iter().chain(menu) {
             unsafe {
                 let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
@@ -1250,6 +1343,7 @@ impl App {
 
     fn open_area_editor(&mut self, kind: AreaKind) -> Result<()> {
         self.area_editor = None;
+        self.area_preview = None;
         let s = self.dpi_scale();
         let (existing, min, color) = match kind {
             AreaKind::Allowed => (self.config.allowed_area.into_iter().collect(), (self.idle_width() * MIN_ALLOWED_WIDTHS, self.sprites.base_height * MIN_ALLOWED_HEIGHTS), self.palette.accent.d2d()),
@@ -1305,6 +1399,12 @@ impl App {
         let now = self.now();
         let dt = ((now - self.last_tick) as f32).clamp(0.0, MAX_DT);
         self.last_tick = now;
+        if self.area_preview.as_ref().is_some_and(|p| now - p.shown_at > AREA_PREVIEW_MAX_SECS) {
+            self.area_preview = None;
+        }
+        if let Some(menu) = self.menu.as_mut() {
+            menu.tick(now)?;
+        }
 
         if now - self.last_module_tick >= MODULE_TICK_SECS {
             self.last_module_tick = now;
@@ -1572,8 +1672,8 @@ impl App {
         match action {
             Action::SwitchPet => {
                 let pets = list_pets(&self.pets_dir);
-                if let Some((id, _)) = pets.iter().find(|(id, _)| *id != self.pack.id) {
-                    self.begin_switch(id.clone(), false);
+                if let Some(pet) = pets.iter().find(|p| p.id != self.pack.id) {
+                    self.begin_switch(pet.id.clone(), false);
                 }
             }
             Action::ShowCard => self.enqueue("core", "test".into(), Card::Reminder { title: "壓力測試提醒".into(), time: "12:00".into(), snooze_open: false }),

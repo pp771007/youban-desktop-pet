@@ -152,6 +152,20 @@ impl Wic {
             let stream = self.factory.CreateStream()?;
             stream.InitializeFromMemory(png)?;
             let decoder = self.factory.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
+            self.shrink(&decoder, rt, max_side)
+        }
+    }
+
+    /// 同 `load_embedded`，讀檔案（右鍵選單上的桌寵小圖）。
+    pub fn load_file(&self, path: &Path, rt: &ID2D1RenderTarget, max_side: f32) -> Result<(ID2D1Bitmap, f32, f32)> {
+        unsafe {
+            let decoder = self.factory.CreateDecoderFromFilename(&HSTRING::from(path.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
+            self.shrink(&decoder, rt, max_side)
+        }
+    }
+
+    fn shrink(&self, decoder: &IWICBitmapDecoder, rt: &ID2D1RenderTarget, max_side: f32) -> Result<(ID2D1Bitmap, f32, f32)> {
+        unsafe {
             let frame = decoder.GetFrame(0)?;
             let converter = self.factory.CreateFormatConverter()?;
             converter.Initialize(&frame, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;

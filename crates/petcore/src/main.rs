@@ -24,6 +24,8 @@ mod theme;
 mod toy;
 mod glow;
 mod area_editor;
+mod icons;
+mod popup_menu;
 mod tray;
 mod updater;
 mod window_restore;

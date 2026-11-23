@@ -778,19 +778,31 @@ function promptPanel(s, example) {
 }
 
 /** 活動範圍選了「只在範圍內」或「避開這些地方」時，底下列出畫好的框。框由核心在螢幕上畫，畫好寫進設定檔。 */
+/** 叫核心在桌面上框出一個範圍；不帶範圍 = 收掉。核心沒在跑就算了。 */
+function previewArea(kind, area) {
+  invoke('send_core', { command: area ? { cmd: 'previewArea', kind, area } : { cmd: 'previewArea' } }).catch(() => {});
+}
+
 function areaRows() {
   const draw = (kind) => invoke('send_core', { command: { cmd: 'drawArea', kind } });
   const size = (a) => h('span', { class: 'tag' }, `${a.right - a.left} × ${a.bottom - a.top}`);
   const drawButton = (kind, glyph, label) => h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => draw(kind) }, icon(glyph), label);
+  // 滑鼠移到某個範圍那一列：桌面上框出那塊範圍，移開就收掉。
+  const preview = (row, kind, area) => {
+    row.addEventListener('mouseenter', () => previewArea(kind, area));
+    row.addEventListener('mouseleave', () => previewArea());
+    return row;
+  };
   if (state.config.roam === 'inside') {
     const a = state.config.allowedArea;
-    return [settingRow('範圍', h('div', { class: 'row' }, a ? size(a) : null, a ? drawButton('allowed', 'rotate-ccw', '重畫') : drawButton('allowed', 'plus', '畫範圍')))];
+    const row = settingRow('範圍', h('div', { class: 'row' }, a ? size(a) : null, a ? drawButton('allowed', 'rotate-ccw', '重畫') : drawButton('allowed', 'plus', '畫範圍')));
+    return [a ? preview(row, 'allowed', a) : row];
   }
   if (state.config.roam === 'avoid') {
-    const remove = async (i) => { state.config.forbiddenAreas.splice(i, 1); await saveConfig(); render(); };
+    const remove = async (i) => { previewArea(); state.config.forbiddenAreas.splice(i, 1); await saveConfig(); render(); };
     return [
-      ...state.config.forbiddenAreas.map((a, i) => settingRow(`禁止範圍 ${i + 1}`, h('div', { class: 'row' }, size(a),
-        h('button', { class: 'btn btn-secondary btn-small', 'aria-label': `刪除禁止範圍 ${i + 1}`, onclick: () => remove(i) }, icon('trash-2'), '刪除')))),
+      ...state.config.forbiddenAreas.map((a, i) => preview(settingRow(`禁止範圍 ${i + 1}`, h('div', { class: 'row' }, size(a),
+        h('button', { class: 'btn btn-danger btn-small', 'aria-label': `刪除禁止範圍 ${i + 1}`, onclick: () => remove(i) }, icon('trash-2'), '刪除'))), 'forbidden', a)),
       settingRow('', drawButton('forbidden', 'plus', '新增禁止範圍')),
     ];
   }
@@ -993,6 +1005,8 @@ async function main() {
   document.getElementById('drawer-backdrop').addEventListener('click', closeEditor);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && editor) closeEditor(); });
   document.getElementById('start-core').addEventListener('click', async () => { await invoke('start_core'); setTimeout(pollCore, 800); });
+  // 切到別的視窗時，滑鼠移開範圍那一列的通知收不到：框一起收掉。
+  window.addEventListener('blur', () => previewArea());
   // 核心也會寫設定檔（畫好範圍、從托盤換桌寵）：回到這個視窗時重新讀，畫面才不會停在舊的。
   window.addEventListener('focus', async () => {
     const config = await invoke('load_config');

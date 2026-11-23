@@ -170,3 +170,49 @@ impl Drop for AreaEditor {
         }
     }
 }
+
+/// 設定程式裡滑鼠移到某個範圍那一列時，桌面上框出那塊範圍（跟畫範圍時同一個樣子）。
+/// 滑鼠點擊穿過它，不擋後面的視窗；收掉（`drop`）時連視窗一起關。
+pub struct AreaPreview {
+    hwnd: HWND,
+    /// 什麼時候開的：設定程式來不及叫收掉（例如當掉）時，過一陣子自己收。
+    pub shown_at: f64,
+}
+
+impl AreaPreview {
+    pub fn open(gfx: &Gfx, class: PCWSTR, area: &Area, color: D2D1_COLOR_F, scale: f32, now: f64) -> Result<Self> {
+        let (w, h) = (area.width().max(1), area.height().max(1));
+        let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None)? };
+        let hwnd = unsafe {
+            CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class, w!("柚伴範圍預覽"), WS_POPUP, area.left, area.top, w, h, None, None, Some(instance.into()), None)?
+        };
+        let preview = Self { hwnd, shown_at: now };
+        let mut canvas = Canvas::new(gfx)?;
+        canvas.ensure_size(w, h)?;
+        let border = BORDER_DIP * scale;
+        let rect = D2D_RECT_F { left: border / 2.0, top: border / 2.0, right: w as f32 - border / 2.0, bottom: h as f32 - border / 2.0 };
+        unsafe {
+            let rt = &canvas.rt;
+            let b = rt.CreateSolidColorBrush(&D2D1_COLOR_F { a: FILL_ALPHA, ..color }, None)?;
+            rt.BeginDraw();
+            rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            rt.FillRectangle(&rect, &b);
+            b.SetColor(&color);
+            rt.DrawRectangle(&rect, &b, border, None);
+            rt.EndDraw(None, None)?;
+        }
+        canvas.present(hwnd, POINT { x: area.left, y: area.top }, 1.0)?;
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
+        Ok(preview)
+    }
+}
+
+impl Drop for AreaPreview {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyWindow(self.hwnd);
+        }
+    }
+}
