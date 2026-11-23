@@ -626,6 +626,12 @@ extern "system" fn menu_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
     if let Some(i) = input {
         push(Event::MenuInput(hwnd.0 as isize, i));
     }
+    // 第二層（WS_EX_NOACTIVATE）被點時光靠樣式擋不住：同一個執行緒裡它照樣會被啟用，
+    // 第一層就收到「失去焦點」而整個選單收掉，放開滑鼠時已經沒有選單可點。
+    let no_activate = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32 & WS_EX_NOACTIVATE.0 != 0;
+    if msg == WM_MOUSEACTIVATE && no_activate {
+        return LRESULT(MA_NOACTIVATE as isize);
+    }
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
 }
 
@@ -1153,6 +1159,7 @@ impl App {
 
     fn menu_pick(&mut self, id: u32) {
         let pets = std::mem::take(&mut self.menu_pets);
+        log!("menu pick {id}");
         match id {
             MENU_EXIT => self.quit(),
             MENU_ADD_REMINDER => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
