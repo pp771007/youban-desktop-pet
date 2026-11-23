@@ -139,6 +139,8 @@ impl EffectPainter {
     }
 
     /// 以 `c` 為中心畫一張圖，長邊 `size`；`flip` 左右翻，`turn` 旋轉角度。
+    // 每個特效的呼叫都是一行寫完位置、大小、透明度、翻轉、角度；包成結構只會讓十幾個呼叫端更長。
+    #[allow(clippy::too_many_arguments)]
     fn put(&self, rt: &ID2D1RenderTarget, art: Art, c: Vector2, size: f32, alpha: f32, flip: bool, turn: f32) {
         let Some((_, list)) = &self.sprites else { return };
         if size <= 0.0 || alpha <= 0.0 {

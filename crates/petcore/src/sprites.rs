@@ -249,13 +249,13 @@ fn clean_and_bound(pixels: &mut [u8], w: u32, h: u32, stride: u32) -> Option<(WI
     let (mut mass, mut moment) = (0u64, 0u64);
     for y in 0..h {
         let row = &mut pixels[(y * stride) as usize..(y * stride + w * BYTES_PER_PIXEL) as usize];
-        for (x, px) in row.chunks_exact_mut(BYTES_PER_PIXEL as usize).enumerate() {
+        for (x, px) in row.as_chunks_mut::<{ BYTES_PER_PIXEL as usize }>().0.iter_mut().enumerate() {
             let a = px[3];
             if a <= ALPHA_NOISE {
                 px.fill(0);
                 continue;
             }
-            if a >= ALPHA_SOLID && a < u8::MAX {
+            if (ALPHA_SOLID..u8::MAX).contains(&a) {
                 for c in &mut px[..3] {
                     *c = ((*c as u32 * u8::MAX as u32) / a as u32).min(u8::MAX as u32) as u8;
                 }

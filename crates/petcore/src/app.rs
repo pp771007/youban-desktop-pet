@@ -306,15 +306,17 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         updater::cleanup(&dir);
         updater::discard_stale(&paths::update_dir());
         // 上次按了「下次啟動時」：一啟動就先換，換好讓新的核心接手。
-        if config.auto_update && soak_secs.is_none() && updater::enabled_for(&dir) {
-            if let Some(staged) = updater::staged(&paths::update_dir()) {
-                match updater::apply_and_restart(&staged, &dir) {
-                    Ok(()) => {
-                        log!("pending update applied at startup; handing over");
-                        return Ok(());
-                    }
-                    Err(e) => log!("pending update failed: {e}"),
+        if config.auto_update
+            && soak_secs.is_none()
+            && updater::enabled_for(&dir)
+            && let Some(staged) = updater::staged(&paths::update_dir())
+        {
+            match updater::apply_and_restart(&staged, &dir) {
+                Ok(()) => {
+                    log!("pending update applied at startup; handing over");
+                    return Ok(());
                 }
+                Err(e) => log!("pending update failed: {e}"),
             }
         }
     }
@@ -1655,11 +1657,13 @@ impl App {
             self.speech = None;
             self.pet.stop_talking(now);
         }
-        if let Some(front) = self.cards.front() {
-            if matches!(front.card, Card::Info { .. }) && self.shown_card && self.bubble.shown_for(now) >= INFO_SECS {
-                self.cards.pop_front();
-                self.shown_card = false;
-            }
+        if let Some(front) = self.cards.front()
+            && matches!(front.card, Card::Info { .. })
+            && self.shown_card
+            && self.bubble.shown_for(now) >= INFO_SECS
+        {
+            self.cards.pop_front();
+            self.shown_card = false;
         }
         match self.cards.front() {
             Some(q) => {

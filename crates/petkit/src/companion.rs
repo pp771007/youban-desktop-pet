@@ -38,7 +38,7 @@ impl Companion {
 }
 
 pub fn is_milestone(days: u32) -> bool {
-    MILESTONES.contains(&days) || (days > DAYS_PER_YEAR && days % DAYS_PER_YEAR == 0)
+    MILESTONES.contains(&days) || (days > DAYS_PER_YEAR && days.is_multiple_of(DAYS_PER_YEAR))
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -131,14 +131,10 @@ fn scripts() -> Vec<Script> {
     ]
 }
 
-/// 把桌寵視窗的內容疊到舞台上（預乘透明度的「疊在上面」）。
-fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32) {
-    blit_faded(stage, stage_w, stage_h, src, src_w, src_h, ox, oy, 1.0);
-}
-
-/// 同 `blit`，整張再乘上 `opacity`（跟分層視窗的整體透明度一樣）。
+/// 把一個視窗的內容疊到舞台上（預乘透明度的「疊在上面」），整張再乘上 `opacity`（跟分層視窗的整體透明度一樣）。
+// 兩張點陣圖各自的像素與寬高、貼上的位置：每個參數都是獨立的量，包成結構只會讓呼叫端更長。
 #[allow(clippy::too_many_arguments)]
-fn blit_faded(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32, opacity: f32) {
+fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32, opacity: f32) {
     for y in 0..src_h {
         let sy = oy + y as i32;
         if sy < 0 || sy >= stage_h as i32 {
@@ -262,10 +258,10 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
             if let Some((g, opacity)) = lit {
                 let origin = glow.render(g, &glow_style)?;
                 let (gw, gh) = glow.canvas.size();
-                blit_faded(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, opacity);
+                blit(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, opacity);
             }
             let (ox, oy) = ((pet.x - anchor.X).round() as i32, (pet.y - anchor.Y).round() as i32);
-            blit(&mut stage, stage_w, stage_h, renderer.canvas.pixels(), size.0 as usize, size.1 as usize, ox, oy);
+            blit(&mut stage, stage_w, stage_h, renderer.canvas.pixels(), size.0 as usize, size.1 as usize, ox, oy, 1.0);
             wic.save_png(&dir.join(format!("{i:03}.png")), stage_w as u32, stage_h as u32, &stage)?;
         }
         println!("{} ({} frames)", script.name, (script.secs * FPS) as usize);

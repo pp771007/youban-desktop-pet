@@ -115,7 +115,7 @@ impl ReminderModule {
         if rows.is_empty() {
             return None;
         }
-        rows.sort_by(|a, b| b.0.cmp(&a.0));
+        rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         let more = rows.len().saturating_sub(MISSED_MAX_ROWS);
         let rows = rows.into_iter().take(MISSED_MAX_ROWS).map(|(_, t, w)| (t, w)).collect();
         Some(Card::Missed { rows, more })

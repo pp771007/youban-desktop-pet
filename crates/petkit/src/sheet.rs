@@ -51,7 +51,7 @@ pub struct Piece {
 
 /// 找出每一隻、裁下來、清掉特效符號，依閱讀順序回傳。
 pub fn split(pixels: &[u8], width: usize, height: usize) -> Vec<Piece> {
-    let alpha: Vec<u8> = pixels.chunks_exact(BYTES_PER_PIXEL).map(|p| p[ALPHA]).collect();
+    let alpha: Vec<u8> = pixels.as_chunks::<BYTES_PER_PIXEL>().0.iter().map(|p| p[ALPHA]).collect();
     find_figures(&alpha, width, height)
         .into_iter()
         .map(|rect| {
