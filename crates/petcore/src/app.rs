@@ -1499,18 +1499,20 @@ impl App {
         self.check_update(now);
     }
 
-    /// 每小時看一次要不要去檢查新版（實際一天最多查一次）；新版解好了就挑空檔換上。
+    /// 啟動時查一次新版，之後每小時看一次要不要再查（實際一天最多查一次）；新版解好了就挑空檔換上。
     fn check_update(&mut self, now: f64) {
         let Some(install) = paths::install_dir() else { return };
         if !self.config.auto_update || self.soak.is_some() || !updater::enabled_for(&install) {
             return;
         }
         if now - self.last_update_check >= UPDATE_CHECK_SECS {
+            // 一啟動就查一次，不管上次查是什麼時候：重開柚伴就能拿到新版，不用等滿一天。
+            let just_started = self.last_update_check == f64::NEG_INFINITY;
             self.last_update_check = now;
             let dir = paths::update_dir();
             if updater::staged(&dir).is_some() {
                 self.update_ready = true;
-            } else if updater::due(&dir) {
+            } else if just_started || updater::due(&dir) {
                 updater::spawn(dir, &install, self.hwnd);
             }
         }

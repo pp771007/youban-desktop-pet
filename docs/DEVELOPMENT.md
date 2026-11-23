@@ -53,7 +53,7 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。不想裝進系統的話，Inno Setup 的安裝檔可以 `/PORTABLE=1 /CURRENTUSER /DIR=<資料夾>` 解到任何地方，再把 `$env:ISCC` 指到裡面的 `ISCC.exe`。
 在 Git Bash 裡跑會叫到 GNU tar 而失敗，請從 PowerShell 跑。
 
-柚伴每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。安裝版下載安裝程式在背景安靜地裝，免安裝版下載 zip 直接換檔。
+柚伴每次啟動和之後每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。安裝版下載安裝程式在背景安靜地裝，免安裝版下載 zip 直接換檔。
 設定 →「一般」的「檢查更新」不等每天的定時，馬上查（自動更新關著也能按）；進度由核心寫在 `%LOCALAPPDATA%\youban-desktop-pet\update\status.json`。
 從 `target\` 底下跑的開發版不會自動更新，按「檢查更新」會說「開發中的版本不會更新」。
 
