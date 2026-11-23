@@ -10,8 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::reminders::Style;
 
-/// 休息提醒預設連續用多久提醒一次（分鐘）。
-pub const DEFAULT_REST_EVERY_MINUTES: u32 = 50;
+/// 休息提醒預設連續用多久提醒一次（分鐘）：研究上每坐 30 分鐘起來走幾分鐘，降血糖、血壓的效果最好，
+/// 拉到一小時就差很多。
+pub const DEFAULT_REST_EVERY_MINUTES: u32 = 30;
 
 pub const DEFAULT_PET: &str = "capybara";
 /// 中尺寸：桌寵身高 128 DIP（100% 縮放時 128 像素）。
