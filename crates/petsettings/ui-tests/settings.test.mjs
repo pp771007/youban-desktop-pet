@@ -183,13 +183,29 @@ for (const scheme of ['light', 'dark']) {
     check(stretch && stretch.repeat.kind === 'interval' && stretch.repeat.everyMinutes === 90 && stretch.time === '09:00' && stretch.repeat.until === '18:00' && stretch.style === 'auto', 'template fills an interval reminder that goes away by itself');
     await page.waitForFunction(() => !document.getElementById('drawer').getBoundingClientRect().width || document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
 
-    // 刪除要按兩次
+    // 刪除先跳確認框：取消什麼都不做，確定才刪
     await page.locator('.list-row', { hasText: '站起來走走' }).click();
     await page.getByRole('button', { name: '刪除' }).click();
-    check(await page.evaluate(() => window.__mock.file.reminders.length) === 4, 'first delete click only asks');
-    await page.getByRole('button', { name: '確定刪除' }).click();
+    await page.getByRole('alertdialog', { name: '刪除「站起來走走」？' }).waitFor();
+    if (shotDir) {
+      // 確認框本身、紅色按鈕滑鼠移上去、按下去：三種樣子都要看過。
+      const dialog = page.getByRole('alertdialog');
+      const danger = dialog.getByRole('button', { name: '刪除' });
+      await page.screenshot({ path: path.join(shotDir, 'settings-confirm-light.png') });
+      await danger.hover();
+      await dialog.screenshot({ path: path.join(shotDir, 'confirm-hover.png') });
+      await page.mouse.down();
+      await dialog.screenshot({ path: path.join(shotDir, 'confirm-pressed.png') });
+      // 在框裡別的地方放開：不算按到，框還開著，接著照常用 Esc 取消。
+      await dialog.getByRole('heading').hover();
+      await page.mouse.up();
+    }
+    await page.keyboard.press('Escape');
+    check(await page.getByRole('alertdialog').count() === 0 && await page.evaluate(() => window.__mock.file.reminders.length) === 4, 'delete asks first and Esc cancels');
+    await page.getByRole('button', { name: '刪除' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '刪除' }).click();
     await page.waitForSelector('.drawer:not(.open)');
-    check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'second click deletes');
+    check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'confirming the dialog deletes');
 
     // 特別日子
     await page.locator('input[type=date][aria-label="日期"]').fill('2027-07-29');
@@ -262,8 +278,8 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'add_frames' && c.state === 'idle' && c.variant === '2')), 'another idle group can be added');
 
     await page.getByRole('button', { name: '刪除這隻' }).click();
-    check(await page.evaluate(() => window.__mock.pets.length) === 3, 'first delete click only asks');
-    await page.getByRole('button', { name: '確定刪除' }).click();
+    check(await page.evaluate(() => window.__mock.pets.length) === 3 && await page.getByRole('alertdialog').getByText('救不回來').isVisible(), 'deleting a pet asks first');
+    await page.getByRole('alertdialog').getByRole('button', { name: '刪除' }).click();
     await page.waitForSelector('.pet-grid');
     check(await page.evaluate(() => window.__mock.pets.length === 2 && window.__mock.config.pet !== 'my-1'), 'deleting the current custom pet switches to another one');
     check(await page.locator('.pet-cell', { hasText: '水豚（側面）' }).getByRole('button', { name: '編輯動作' }).count() === 0, 'built-in pets have no edit button');

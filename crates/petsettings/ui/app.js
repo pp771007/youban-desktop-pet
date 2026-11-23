@@ -39,7 +39,6 @@ const DEFAULT_VARIANT = 'default';
 const PLAYER_TICK_MS = 50;
 const TOAST_MS = 2200;
 const CORE_POLL_MS = 3000;
-const CONFIRM_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
 const LAYOUT_REFRESH_MS = 600;
 const UPDATE_POLL_MS = 500;
@@ -90,6 +89,35 @@ const icon = (name) => h('span', { class: 'icon', style: `--i:url(icons/${name}.
 function segmented(options, current, onPick) {
   return h('div', { class: 'segmented', role: 'group' },
     options.map(([value, label]) => h('button', { type: 'button', 'aria-pressed': String(value === current), onclick: () => onPick(value) }, label)));
+}
+
+/**
+ * 刪不回來的操作先跳確認框：標題講要做什麼，`detail` 一行講後果，紅色那顆按鈕在右邊。
+ * 焦點先放在「取消」，按 Esc 或點外面也是取消。回傳 true = 確定。
+ */
+function confirmDialog({ title, detail, confirm }) {
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      resolve(ok);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        done(false);
+      }
+    };
+    const cancel = h('button', { class: 'btn btn-secondary', onclick: () => done(false) }, '取消');
+    const dialog = h('div', { class: 'modal', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': title, onclick: (e) => e.stopPropagation() },
+      h('h2', {}, title),
+      detail ? h('p', { class: 'modal-detail' }, detail) : null,
+      h('div', { class: 'modal-foot' }, cancel, h('button', { class: 'btn btn-danger-solid', onclick: () => done(true) }, confirm)));
+    const backdrop = h('div', { class: 'modal-backdrop', onclick: () => done(false) }, dialog);
+    document.body.append(backdrop);
+    document.addEventListener('keydown', onKey, true);
+    cancel.focus();
+  });
 }
 
 function toast(text) {
@@ -339,7 +367,7 @@ function repeatDefaults(kind, r) {
 let editor = null;
 
 function openEditor(existing) {
-  editor = { draft: structuredClone(existing || newReminder()), isNew: !existing, preview: [], confirmDelete: false };
+  editor = { draft: structuredClone(existing || newReminder()), isNew: !existing, preview: [] };
   document.getElementById('drawer-backdrop').hidden = false;
   const drawer = document.getElementById('drawer');
   drawer.setAttribute('aria-hidden', 'false');
@@ -437,22 +465,16 @@ function drawEditor() {
   })();
 
   const deleteBtn = editor.isNew ? null : h('button', {
-    class: `btn btn-danger${editor.confirmDelete ? ' confirming' : ''}`,
+    class: 'btn btn-danger',
     onclick: async () => {
-      if (!editor.confirmDelete) {
-        editor.confirmDelete = true;
-        drawEditor();
-        clearTimeout(drawEditor.confirmTimer);
-        drawEditor.confirmTimer = setTimeout(() => { if (editor) { editor.confirmDelete = false; drawEditor(); } }, CONFIRM_MS);
-        return;
-      }
+      if (!await confirmDialog({ title: `刪除「${r.title}」？`, confirm: '刪除' })) return;
       state.file.reminders = state.file.reminders.filter((x) => x.id !== r.id);
       await saveReminders();
       closeEditor();
       toast('已刪除');
       render();
     },
-  }, icon('trash-2'), editor.confirmDelete ? '確定刪除' : '刪除');
+  }, icon('trash-2'), '刪除');
 
   // 選了切換鈕整個抽屜會重畫：記住捲到哪，畫完捲回去，不然會跳回最上面。
   const scrolled = drawer.querySelector('.drawer-body')?.scrollTop ?? 0;
@@ -688,7 +710,7 @@ async function openPetEdit(id) {
     invoke('pet_actions', { id }),
     Promise.all(states.map((s) => invoke('example_frames', { state: s }))),
   ]);
-  state.edit = { id, actions, examples: Object.fromEntries(states.map((s, i) => [s, examples[i]])), prompt: null, busy: null, confirmDelete: false };
+  state.edit = { id, actions, examples: Object.fromEntries(states.map((s, i) => [s, examples[i]])), prompt: null, busy: null };
   state.page = 'pet-edit';
   render();
   document.getElementById('page').parentElement.scrollTop = 0;
@@ -716,14 +738,14 @@ function renderPetEdit(page) {
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-ghost btn-small', onclick: () => go('pets') }, icon('chevron-left'), '桌寵'),
       h('h1', {}, pet.name)),
-    h('button', { class: `btn btn-danger btn-small${e.confirmDelete ? ' confirming' : ''}`, onclick: async () => {
-      if (!e.confirmDelete) {
-        e.confirmDelete = true;
-        render();
-        setTimeout(() => { if (state.edit === e) { e.confirmDelete = false; render(); } }, CONFIRM_MS);
+    h('button', { class: 'btn btn-danger btn-small', onclick: async () => {
+      if (!await confirmDialog({ title: `刪除「${pet.name}」？`, detail: '牠的動作圖也會一起刪掉，刪了就救不回來', confirm: '刪除' })) return;
+      try {
+        await invoke('delete_pet', { id: pet.id });
+      } catch (err) {
+        toast(`刪不掉：${err}`);
         return;
       }
-      await invoke('delete_pet', { id: pet.id });
       if (state.config.pet === pet.id) {
         state.config.pet = state.pets.find((p) => p.id !== pet.id)?.id || state.config.pet;
         await saveConfig();
@@ -731,7 +753,7 @@ function renderPetEdit(page) {
       await reloadPets();
       toast(`已刪除 ${pet.name}`);
       go('pets');
-    } }, icon('trash-2'), e.confirmDelete ? '確定刪除' : '刪除這隻')));
+    } }, icon('trash-2'), '刪除這隻')));
   for (const group of ACTION_GROUPS) {
     page.append(h('section', { class: 'section' },
       h('h2', {}, group.title),

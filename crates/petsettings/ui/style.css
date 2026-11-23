@@ -196,7 +196,23 @@ button, input, select { font: inherit; color: inherit; }
 .btn-ghost:active:not(:disabled) { transform: none; }
 .btn-danger { background: transparent; color: var(--color-danger); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-danger) 12%, transparent); }
-.btn-danger.confirming { background: var(--color-danger); color: #fff; box-shadow: 0 var(--lift) 0 color-mix(in srgb, var(--color-danger) 70%, #000); }
+.btn-danger-solid { background: var(--color-danger); color: #fff; box-shadow: 0 var(--lift) 0 color-mix(in srgb, var(--color-danger) 70%, #000); }
+.btn-danger-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--color-danger) 88%, #000); }
+
+/* 確認框：畫面正中間的小卡片，底下一層淡淡的遮罩（點遮罩 = 取消）。 */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: color-mix(in srgb, var(--color-shadow) 35%, transparent); animation: fade calc(var(--motion-fast) * 1ms) ease-out; }
+.modal {
+  width: min(360px, calc(100vw - 32px));
+  padding: calc(var(--space-5) * 1px);
+  border: var(--outline) solid var(--color-border);
+  border-radius: calc(var(--radius-lg) * 1px);
+  background: var(--color-surface-raised);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--color-shadow) 25%, transparent);
+  animation: pop calc(var(--motion-medium) * 1ms) cubic-bezier(var(--motion-spring));
+}
+.modal h2 { margin: 0; font-size: calc(var(--font-size-subtitle) * 1px); }
+.modal-detail { margin: calc(var(--space-2) * 1px) 0 0; color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); }
+.modal-foot { display: flex; justify-content: flex-end; gap: calc(var(--space-2) * 1px); margin-top: calc(var(--space-5) * 1px); }
 
 :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 
@@ -620,6 +636,7 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 @keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(0.94); } }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
 @keyframes bob { 50% { transform: translateY(-6px); } }
 @keyframes hop { 40% { transform: translateY(-10px) scaleY(1.04); } 70% { transform: translateY(0) scaleY(0.96); } }
