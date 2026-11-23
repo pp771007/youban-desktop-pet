@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn lands_on_a_window_and_falls_when_it_goes_away() {
-        let platforms = [Platform { left: 400.0, right: 700.0, y: 600.0, window: 1, window_left: 400.0, sides: (false, false) }];
+        let platforms = [Platform { left: 400.0, right: 700.0, y: 600.0, window: 1, window_left: 400.0, sides: (false, false), bottom: 1000.0 }];
         let mut t = Toy::new(ToyKind::Food(1), 500.0, 100.0, 0.0, 0.0, 40.0);
         settle(&mut t, &world(&platforms), 3.0);
         assert_eq!(t.y, 600.0);
