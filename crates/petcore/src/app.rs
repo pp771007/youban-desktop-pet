@@ -63,6 +63,9 @@ const SAY_FORBIDDEN_SET: &str = "知道了，那裡我不去～";
 const SAY_AREA_SECS: f32 = 3.0;
 /// 桌寵躲起來時，提醒卡離螢幕右下角多遠（DIP）。
 const HIDDEN_CARD_INSET_DIP: f32 = 24.0;
+/// 每隔多久把自己的視窗重新放回最上層。建立時就是最上層，但躲起來再出現之類的時候會掉到一般視窗後面
+///（實際看過被一般的終端機、聊天軟體視窗蓋住）；定時放回去，不搶焦點。
+const TOPMOST_REASSERT_SECS: f64 = 2.0;
 
 pub fn pet_class() -> PCWSTR {
     PCWSTR(PET_CLASS_NAME.as_ptr())
@@ -270,6 +273,8 @@ struct App {
     /// 有全螢幕程式在前面，桌寵躲起來了。
     hidden: bool,
     last_busy_check: f64,
+    last_topmost: f64,
+    card_hwnd: HWND,
     rng: u64,
     soak: Option<Soak>,
     chatter: Chatter,
@@ -368,6 +373,8 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         last_platform_scan: f64::NEG_INFINITY,
         hidden: false,
         last_busy_check: f64::NEG_INFINITY,
+        last_topmost: f64::NEG_INFINITY,
+        card_hwnd,
         // 先把種子打散：種子只有低 32 位元有值，xorshift 前幾次輸出的高位元幾乎都是 0，
         // `rand01`（取高位元）會一直挑到第一種點心／球。
         rng: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1,
@@ -1094,12 +1101,28 @@ impl App {
                     self.glow.hide(self.glow_hwnd);
                     self.bubble.hide();
                     self.shown_card = false;
+                } else {
+                    // 重新出現時馬上放回最上層。
+                    self.last_topmost = f64::NEG_INFINITY;
                 }
                 // 躲起來的期間不算時間，回來時動畫不會一口氣跳很多格。
                 self.last_tick = now;
             }
         }
         self.hidden
+    }
+
+    /// 把自己的視窗依序放回最上層：紅光墊在最下、再來點心、桌寵，卡片在最上面。
+    fn keep_topmost(&mut self, now: f64) {
+        if now - self.last_topmost < TOPMOST_REASSERT_SECS {
+            return;
+        }
+        self.last_topmost = now;
+        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.card_hwnd] {
+            unsafe {
+                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+            }
+        }
     }
 
     fn scan_platforms(&mut self, now: f64) {
@@ -1262,6 +1285,7 @@ impl App {
             return Ok(());
         }
         self.reload_if_dpi_changed()?;
+        self.keep_topmost(now);
         let appear = self.advance_transition(now)?;
         self.scan_platforms(now);
 
