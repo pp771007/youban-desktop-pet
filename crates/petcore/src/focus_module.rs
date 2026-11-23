@@ -17,6 +17,20 @@ const MENU_STOP: u32 = 2;
 const CARD_KEY: &str = "focus";
 const TIME_FORMAT: &str = "%H:%M";
 
+/// 台詞：每次隨機挑一句。`{m}` 專注幾分鐘、`{r}` 休息幾分鐘、`{n}` 專注了幾輪。
+const START: &[&str] = &["好，我安靜陪你～", "一起加油吧！我在旁邊陪你", "開始專注囉，我不吵你～", "專心時間到，我也坐好了", "你專心，我顧著時間喔"];
+const SHORT_BREAK: &[&str] = &["專注 {m} 分鐘了，休息一下吧～", "辛苦了！起來喝口水吧", "做得好～休息 {r} 分鐘喔", "{m} 分鐘到囉，伸個懶腰吧", "好認真！讓眼睛休息一下吧"];
+const LONG_BREAK: &[&str] = &["專注 {n} 輪了，好好休息 {r} 分鐘吧～", "連續 {n} 輪好厲害！休息久一點吧", "今天好努力喔，休息 {r} 分鐘再繼續吧"];
+const BACK: &[&str] = &["休息結束囉，繼續加油！", "回來囉～下一輪開始！", "充電完畢，一起繼續吧", "休息夠了嗎？我們繼續吧～"];
+
+/// 照時間挑一句（模組沒有亂數；每段結束的時間不同，挑到的就不同）。
+fn line(lines: &[&str], now: NaiveDateTime, fill: &[(&str, u32)]) -> String {
+    // 每段都在整分鐘結束、時間戳是 60 的倍數：先除掉秒、再打散，不然每次都挑到同一句。
+    let minute = now.and_utc().timestamp().unsigned_abs() / 60;
+    let i = (minute.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as usize % lines.len();
+    fill.iter().fold(lines[i].to_owned(), |s, (key, v)| s.replace(key, &v.to_string()))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Phase {
     Idle,
@@ -45,7 +59,7 @@ impl FocusModule {
     fn start(&mut self, ctx: &mut Ctx) {
         self.phase = Phase::Focus { until: ctx.now + minutes(ctx.config.focus_minutes), round: 1 };
         self.before = Phase::Idle;
-        ctx.say("好，我安靜陪你～");
+        ctx.say(line(START, ctx.now, &[]));
     }
 
     fn stop(&mut self, ctx: &mut Ctx) {
@@ -86,13 +100,13 @@ impl Module for FocusModule {
                 let rest = if long { ctx.config.long_break_minutes } else { ctx.config.short_break_minutes };
                 self.before = self.phase;
                 self.phase = Phase::Break { until: now + minutes(rest), round };
-                let title = if long { format!("專注 {round} 輪了，好好休息 {rest} 分鐘吧～") } else { format!("專注 {} 分鐘了，休息一下吧～", ctx.config.focus_minutes) };
-                Self::card(ctx, title);
+                let fill = [("{m}", ctx.config.focus_minutes), ("{r}", rest), ("{n}", round)];
+                Self::card(ctx, line(if long { LONG_BREAK } else { SHORT_BREAK }, now, &fill));
             }
             Phase::Break { until, round } if now >= until => {
                 self.before = self.phase;
                 self.phase = if ctx.config.focus_auto_continue { Phase::Focus { until: now + minutes(ctx.config.focus_minutes), round: round + 1 } } else { Phase::Idle };
-                Self::card(ctx, "休息結束囉，繼續加油！".into());
+                Self::card(ctx, line(BACK, now, &[]));
             }
             _ => {}
         }
@@ -181,9 +195,12 @@ mod tests {
             now += Duration::minutes(1);
             titles.extend(card_titles(&step(&mut f, &config, now, None)));
         }
-        assert_eq!(titles.iter().filter(|t| t.contains("休息一下")).count(), 3, "{titles:?}");
-        assert_eq!(titles.iter().filter(|t| t.contains("15 分鐘")).count(), 1, "the 4th break is long: {titles:?}");
-        assert!(titles.iter().filter(|t| t.contains("休息結束")).count() >= 3);
+        // 這張卡是不是 `lines` 裡的某一句（休息 `rest` 分鐘、第 4 輪）。
+        let is = |lines: &[&str], rest: &str, t: &String| lines.iter().any(|l| l.replace("{m}", "25").replace("{r}", rest).replace("{n}", "4") == *t);
+        assert_eq!(titles.iter().filter(|t| is(SHORT_BREAK, "5", t)).count(), 3, "{titles:?}");
+        assert_eq!(titles.iter().filter(|t| is(LONG_BREAK, "15", t)).count(), 1, "the 4th break is long: {titles:?}");
+        assert_eq!(titles.iter().filter(|t| is(BACK, "", t)).count(), 3, "{titles:?}");
+        assert!(!titles.iter().any(|t| t.contains('{')), "every placeholder is filled: {titles:?}");
         assert!(f.session(now).is_some_and(|s| !s.focusing && s.minutes_left == 5), "still in the long break at 11:05");
 
         step(&mut f, &config, now, Some(ModuleEvent::Menu(MENU_STOP)));

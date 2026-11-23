@@ -129,6 +129,10 @@ pub struct Say {
     pub emote: Option<Emote>,
     /// 泡泡要顯示幾秒。
     pub secs: f32,
+    /// 回應使用者剛做的事（戳、摸、拖、畫好範圍、開始專注）：專注中照講。
+    /// `false` = 自己找話講（閒聊、功能的通知），專注中一律不講。桌寵所有的話都從 `App::say` 出去，
+    /// 那裡只看這個欄位決定；故意不給預設值，新加的每一句都得自己選一邊。
+    pub reply: bool,
 }
 
 /// 每次問「要不要講話」時的環境。
@@ -262,7 +266,7 @@ impl Chatter {
             return None;
         }
         self.last_react = ctx.now;
-        Some(self.say(lines, emote, ctx.now))
+        Some(Say { reply: true, ..self.say(lines, emote, ctx.now) })
     }
 
     /// 休息提醒（跟「講話」設定無關，每秒問一次）：連續用電腦滿 `every_secs` 而且離上次提醒也滿了，
@@ -292,7 +296,7 @@ impl Chatter {
         self.recent.push_back(line);
         self.last_said = now;
         let chars = line.chars().count() as f32;
-        Say { text: line.to_owned(), emote, secs: (SHOW_BASE_SECS + SHOW_PER_CHAR_SECS * chars).min(SHOW_MAX_SECS) }
+        Say { text: line.to_owned(), emote, secs: (SHOW_BASE_SECS + SHOW_PER_CHAR_SECS * chars).min(SHOW_MAX_SECS), reply: false }
     }
 
     fn rand01(&mut self) -> f32 {
@@ -447,6 +451,7 @@ mod tests {
             said.extend(c.on(Happening::Clicked, &ctx(100.0 + i as f64, clock)));
         }
         assert!(said.last().is_some_and(|s| POKED.contains(&s.text.as_str())), "fifth poke complains, got {said:?}");
+        assert!(said.iter().all(|s| s.reply), "reacting to a poke is a reply: it still speaks while focusing");
         assert_eq!(c.on(Happening::Thrown { speed_dip: 300.0 }, &ctx(300.0, clock)), None, "a gentle drop is not a throw");
     }
 

@@ -961,7 +961,8 @@ impl App {
                     let now = self.now();
                     let ctx = self.talk_ctx(now);
                     if ctx.can_speak && !ctx.asleep {
-                        self.say(Say { text, emote: None, secs: MODULE_SAY_SECS }, now);
+                        // 功能自己找話講（例如記住新視窗）；專注自己的台詞是在回應「開始專注」。
+                        self.say(Say { text, emote: None, secs: MODULE_SAY_SECS, reply: owner == focus_module::ID }, now);
                     }
                 }
             }
@@ -1059,7 +1060,7 @@ impl App {
             ipc::CMD_SAY => {
                 let text = v["text"].as_str().unwrap_or("測試講話").to_owned();
                 let secs = v["secs"].as_f64().unwrap_or(4.0) as f32;
-                self.say(Say { text, emote: None, secs }, self.now());
+                self.say(Say { text, emote: None, secs, reply: true }, self.now());
             }
             // 自動測試用：把桌寵拎到 (x, y) 放手（跟真的用滑鼠拖一樣走拖曳流程）。
             ipc::CMD_DROP => {
@@ -1420,7 +1421,7 @@ impl App {
         }
         self.config_stamp = stamp(&path);
         if self.config.talk != Talk::Never {
-            self.say(Say { text: text.to_owned(), emote: Some(Emote::Note), secs: SAY_AREA_SECS }, self.now());
+            self.say(Say { text: text.to_owned(), emote: Some(Emote::Note), secs: SAY_AREA_SECS, reply: true }, self.now());
         }
         Ok(())
     }
@@ -1795,8 +1796,7 @@ impl App {
             now,
             clock,
             idle_input_secs: idle_input_secs(),
-            // 專注中不閒聊（模組自己要講的話、提醒卡照常）。
-            talk: if self.focusing() { Talk::Never } else { self.config.talk },
+            talk: self.config.talk,
             workday: self.is_workday(clock.date()),
             can_speak: !self.hidden && self.cards.is_empty() && self.transition.is_none() && self.soak.is_none(),
             asleep: self.pet.state() == states::SLEEP,
@@ -1833,7 +1833,8 @@ impl App {
                 }
             }
         }
-        let free = self.speech.is_none() && self.cards.is_empty() && !self.hidden && self.transition.is_none() && now >= MILESTONE_AFTER_SECS;
+        // 專注中先留著，專注完再慶祝（不然 `say` 會把它擋掉，那一天的紀念就沒了）。
+        let free = self.speech.is_none() && self.cards.is_empty() && !self.hidden && self.transition.is_none() && now >= MILESTONE_AFTER_SECS && !self.focusing();
         if !free {
             return;
         }
@@ -1842,12 +1843,17 @@ impl App {
         self.effects.spawn(Emote::Star, now);
         if self.config.talk != Talk::Never {
             let text = if days == 1 { "初次見面，請多指教！".to_owned() } else { format!("我們一起過了 {days} 天了！謝謝你一直陪著我") };
-            self.say(Say { text, emote: Some(Emote::Hearts), secs: MILESTONE_SAY_SECS }, now);
+            self.say(Say { text, emote: Some(Emote::Hearts), secs: MILESTONE_SAY_SECS, reply: false }, now);
         }
     }
 
     /// 開口講一句：泡泡＋講話動作（＋表情）。
+    /// 桌寵講話的唯一出口：專注中只講回應使用者的話（`Say::reply`），自己找話講的一律不講。
     fn say(&mut self, say: Say, now: f64) {
+        if !say.reply && self.focusing() {
+            log!("hushed while focusing: {}", say.text);
+            return;
+        }
         log!("say: {}", say.text);
         self.pet.talk(say.secs, now);
         if let Some(e) = say.emote {
