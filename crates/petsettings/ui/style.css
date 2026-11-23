@@ -238,6 +238,9 @@ button, input, select { font: inherit; color: inherit; }
   transition: background calc(var(--motion-fast) * 1ms), color calc(var(--motion-fast) * 1ms);
 }
 .segmented button:hover { color: var(--color-text); }
+/* 抽屜比較窄（「重複」有 6 個選項）：撐滿一整列平分，不換行 —— 換到第二行會跑出膠囊外框。 */
+.drawer .segmented { display: flex; flex-wrap: nowrap; }
+.drawer .segmented button { flex: 1; min-width: 0; padding: 0 calc(var(--space-2) * 1px); white-space: nowrap; }
 .segmented button[aria-pressed="true"] {
   background: var(--color-surface-raised);
   border-color: var(--color-border-strong);
