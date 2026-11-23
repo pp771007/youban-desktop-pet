@@ -84,9 +84,7 @@ impl Countdown {
 
     /// 每一格呼叫：`shown` 是這一格要不要顯示、顯示什麼（`None` 就淡出收起來）。
     pub fn update(&mut self, shown: Option<Shown>, dt: f32, s: f32, palette: &Palette) -> Result<()> {
-        let target = if shown.is_some() { 1.0 } else { 0.0 };
-        let step = dt / FADE_SECS;
-        self.opacity = if target > self.opacity { (self.opacity + step).min(1.0) } else { (self.opacity - step).max(0.0) };
+        self.opacity = fade(self.opacity, shown.is_some(), dt);
         if self.opacity <= 0.0 {
             self.last = None;
             if std::mem::take(&mut self.visible) {
@@ -174,4 +172,28 @@ impl Countdown {
 pub fn clock_text(secs: i64) -> String {
     let secs = secs.max(0);
     format!("{:02}:{:02}", secs / 60, secs % 60)
+}
+
+/// 淡入淡出推進一格：要顯示就往 1 走、到了停住；不顯示就往 0 走。
+fn fade(opacity: f32, showing: bool, dt: f32) -> f32 {
+    let step = dt / FADE_SECS;
+    if showing { (opacity + step).min(1.0) } else { (opacity - step).max(0.0) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stays_fully_shown_instead_of_flickering() {
+        let mut o = 0.0;
+        let mut seen = Vec::new();
+        for _ in 0..30 {
+            o = fade(o, true, 0.035);
+            seen.push(o);
+        }
+        assert!(seen[10..].iter().all(|&o| o == 1.0), "once faded in it stays at full opacity: {seen:?}");
+        assert_eq!(fade(1.0, false, 1.0), 0.0);
+        assert_eq!(clock_text(1498), "24:58");
+    }
 }
