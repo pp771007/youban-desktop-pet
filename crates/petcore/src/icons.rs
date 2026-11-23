@@ -33,6 +33,10 @@ pub enum Icon {
     Power,
     Check,
     ChevronRight,
+    Clock,
+    Stop,
+    Tomato,
+    Cup,
 }
 
 impl Icon {
@@ -54,6 +58,10 @@ impl Icon {
             Icon::Power => include_str!("../../petsettings/ui/icons/power.svg"),
             Icon::Check => include_str!("../../petsettings/ui/icons/check.svg"),
             Icon::ChevronRight => include_str!("../../petsettings/ui/icons/chevron-right.svg"),
+            Icon::Clock => include_str!("../../petsettings/ui/icons/clock.svg"),
+            Icon::Stop => include_str!("../../petsettings/ui/icons/x.svg"),
+            Icon::Tomato => include_str!("../../petsettings/ui/icons/tomato.svg"),
+            Icon::Cup => include_str!("../../petsettings/ui/icons/cup.svg"),
         }
     }
 }

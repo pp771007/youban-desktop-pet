@@ -11,13 +11,26 @@ const TOOLTIP: &str = petkit::APP_NAME;
 pub struct Tray {
     hwnd: HWND,
     icon: HICON,
+    /// 滑鼠移到托盤圖示上的提示（平常是產品名，專注時加上還剩多久）。
+    tip: String,
 }
 
 impl Tray {
     pub fn new(hwnd: HWND, icon: HICON) -> Self {
-        let tray = Self { hwnd, icon };
+        let tray = Self { hwnd, icon, tip: TOOLTIP.to_owned() };
         tray.add();
         tray
+    }
+
+    /// 換提示文字（一樣就不動）；`None` = 回到產品名。
+    pub fn set_tip(&mut self, tip: Option<String>) {
+        let tip = tip.unwrap_or_else(|| TOOLTIP.to_owned());
+        if tip != self.tip {
+            self.tip = tip;
+            unsafe {
+                let _ = Shell_NotifyIconW(NIM_MODIFY, &self.data());
+            }
+        }
     }
 
     /// 檔案總管重啟後托盤會清空，收到 `TaskbarCreated` 時再加一次。
@@ -46,7 +59,9 @@ impl Tray {
             hIcon: self.icon,
             ..Default::default()
         };
-        for (dst, src) in data.szTip.iter_mut().zip(TOOLTIP.encode_utf16()) {
+        // 最後一格留給結尾的 0。
+        let room = data.szTip.len() - 1;
+        for (dst, src) in data.szTip[..room].iter_mut().zip(self.tip.encode_utf16()) {
             *dst = src;
         }
         data

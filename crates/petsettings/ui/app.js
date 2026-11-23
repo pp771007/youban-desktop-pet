@@ -12,6 +12,11 @@ const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後�
 const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
 /** 時間到怎麼提醒（`petkit::reminders::Style`）。 */
 const STYLE_CHOICES = [['card', '要按完成'], ['auto', '自己消失']];
+/** 專注（番茄鐘）的時間選項（分鐘）與倒數顯示方式（`petkit::config::Countdown`）。 */
+const FOCUS_CHOICES = [[15, '15 分'], [25, '25 分'], [30, '30 分'], [45, '45 分'], [50, '50 分']];
+const SHORT_BREAK_CHOICES = [[3, '3 分'], [5, '5 分'], [10, '10 分']];
+const LONG_BREAK_CHOICES = [[10, '10 分'], [15, '15 分'], [20, '20 分'], [30, '30 分']];
+const COUNTDOWN_CHOICES = [['always', '一直顯示'], ['hover', '滑鼠移過去才顯示']];
 /** 休息提醒：連續用電腦多久提醒一次（分鐘）。 */
 const REST_CHOICES = [[30, '30 分'], [45, '45 分'], [50, '50 分'], [60, '1 小時'], [90, '1.5 小時']];
 /** 新增提醒時一鍵套用：上班時間每隔一陣子提醒一下（自己消失，不用按）。`label` 是按鈕上的字，`title` 是套用後的提醒內容。 */
@@ -42,7 +47,7 @@ const UPDATE_POLL_MS = 500;
 const UPDATE_BUSY = ['checking', 'downloading'];
 const DEFAULT_PAGE = 'reminders';
 /** 功能開關：設定檔 features 的欄位 → 名稱與它的頁面（側邊欄「功能」那一組）。 */
-const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows']];
+const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows'], ['focus', '專注', 'focus']];
 
 const state = {
   page: DEFAULT_PAGE,
@@ -926,6 +931,24 @@ function openWindowEdit(w) {
   });
 }
 
+// ---------- 頁面：專注 ----------
+
+function renderFocus(page) {
+  if (featureOff(page, 'focus')) return;
+  const c = state.config;
+  const set = async (key, value) => { c[key] = value; await saveConfig(); render(); };
+  page.append(h('div', { class: 'page-head' },
+    featureTitle('focus'),
+    h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'focusStart' } }) }, icon('tomato'), '開始專注')));
+  page.append(h('div', { class: 'card' },
+    settingRow('專注', segmented(FOCUS_CHOICES, c.focusMinutes, (v) => set('focusMinutes', v))),
+    settingRow('短休息', segmented(SHORT_BREAK_CHOICES, c.shortBreakMinutes, (v) => set('shortBreakMinutes', v))),
+    settingRow(`長休息（每 ${c.focusRoundsBeforeLong} 輪一次）`, segmented(LONG_BREAK_CHOICES, c.longBreakMinutes, (v) => set('longBreakMinutes', v))),
+    settingRow('休息完自動開始下一輪', configSwitch('focusAutoContinue', '休息完自動開始下一輪')),
+    settingRow('卡片', segmented(STYLE_CHOICES, c.focusStyle, (v) => set('focusStyle', v))),
+    settingRow('倒數', segmented(COUNTDOWN_CHOICES, c.focusCountdown, (v) => set('focusCountdown', v)))));
+}
+
 // ---------- 頁面：一般 ----------
 
 function renderGeneral(page) {
@@ -991,7 +1014,7 @@ async function pollUpdate() {
 
 // ---------- 骨架 ----------
 
-const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWindows, general: renderGeneral, 'pet-edit': renderPetEdit };
+const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWindows, focus: renderFocus, general: renderGeneral, 'pet-edit': renderPetEdit };
 /** 不在側欄上的頁面算在哪一個分類底下。 */
 const NAV_PARENT = { 'pet-edit': 'pets' };
 

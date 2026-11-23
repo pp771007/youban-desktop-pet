@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Instant, SystemTime};
 
 use petkit::companion::{self, CompanionFile};
-use petkit::config::{Area, Config, Roam, Talk, load_json, write_atomic};
+use petkit::config::{Activity, Area, Config, Countdown as CountdownMode, Roam, Talk, load_json, write_atomic};
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
 use petkit::reminders::Style;
@@ -42,6 +42,8 @@ use crate::memwatch::{self, MemWatch};
 use crate::modules::{ModuleEvent, ModuleHost, Request};
 use crate::paths;
 use crate::reminder_module::{self, ReminderModule};
+use crate::focus_module::{self, FocusModule};
+use crate::countdown::{self, Countdown};
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::soak::{Action, Soak};
 use crate::sprites::{SpriteSet, Wic};
@@ -310,6 +312,8 @@ struct App {
     toy_press: Option<(f32, f32)>,
     glow_hwnd: HWND,
     glow: GlowPainter,
+    /// 專注時桌寵頭上的倒數。
+    countdown: Countdown,
     gfx: Gfx,
     /// 正在畫範圍（設定程式按了「畫範圍」）。
     area_editor: Option<AreaEditor>,
@@ -344,7 +348,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let pack = load_pack_or_default(&pets_dir, &config.pet)?;
     log!("loaded pet '{}' ({} states)", pack.id, pack.states.len());
 
-    let (hwnd, card_hwnd, toy_hwnd, glow_hwnd) = create_windows()?;
+    let (hwnd, card_hwnd, toy_hwnd, glow_hwnd, countdown_hwnd) = create_windows()?;
     let gfx = Gfx::new()?;
     let wic = Wic::new()?;
     let renderer = PetRenderer::new(&gfx)?;
@@ -417,6 +421,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         toy_press: None,
         glow_hwnd,
         glow: GlowPainter::new(&gfx)?,
+        countdown: Countdown::new(&gfx, countdown_hwnd)?,
         gfx: gfx.clone(),
         area_editor: None,
         menu: None,
@@ -465,7 +470,7 @@ fn play_reminder_sound() {
 /// 設定裡開著的功能 → 要載入的模組（也是右鍵選單裡的順序）。
 fn enabled_modules(config: &Config) -> Vec<&'static str> {
     let f = config.features;
-    [(f.reminders, reminder_module::ID), (f.window_restore, window_restore::ID)].into_iter().filter(|(on, _)| *on).map(|(_, id)| id).collect()
+    [(f.reminders, reminder_module::ID), (f.window_restore, window_restore::ID), (f.focus, focus_module::ID)].into_iter().filter(|(on, _)| *on).map(|(_, id)| id).collect()
 }
 
 fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
@@ -476,6 +481,7 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
             holiday_cache: paths::holiday_cache_dir(),
         })),
         window_restore::ID => Box::new(WindowRestore::new(paths::window_layout_file())),
+        focus_module::ID => Box::new(FocusModule::default()),
         _ => unreachable!("unknown module {id}"),
     }
 }
@@ -563,7 +569,7 @@ fn create_layered(class: PCWSTR, title: PCWSTR, instance: HINSTANCE) -> Result<H
     unsafe { CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class, title, WS_POPUP, 0, 0, 1, 1, None, None, Some(instance), None) }
 }
 
-fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
+fn create_windows() -> Result<(HWND, HWND, HWND, HWND, HWND)> {
     let instance = register_class(pet_class(), Some(pet_proc), IDC_HAND)?;
     register_class(CARD_CLASS, Some(card_proc), IDC_ARROW)?;
     register_class(TOY_CLASS, Some(toy_proc), IDC_HAND)?;
@@ -579,11 +585,16 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
     unsafe {
         SetWindowLongW(glow, GWL_EXSTYLE, GetWindowLongW(glow, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32);
     }
+    // 專注倒數的小膠囊：一樣讓滑鼠點穿過去。
+    let countdown = create_layered(GLOW_CLASS, w!("柚伴專注"), instance)?;
+    unsafe {
+        SetWindowLongW(countdown, GWL_EXSTYLE, GetWindowLongW(countdown, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32);
+    }
     // 設定程式（可能不是系統管理員權限）也要能送指令給以系統管理員權限執行的核心。
     unsafe {
         let _ = ChangeWindowMessageFilterEx(pet, WM_COPYDATA, MSGFLT_ALLOW, None);
     }
-    Ok((pet, card, toy, glow))
+    Ok((pet, card, toy, glow, countdown))
 }
 
 extern "system" fn glow_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -1107,6 +1118,7 @@ impl App {
             "queued": self.cards.len(),
             "platforms": self.platforms.iter().map(|p| [p.left, p.right, p.y]).collect::<Vec<_>>(),
             "hidden": self.hidden,
+            "focus": self.modules.session(local_now()).map(|s| serde_json::json!({ "focusing": s.focusing, "secsLeft": s.secs_left })),
             "modules": self.modules.ids(),
             "privateBytes": mem.private_bytes,
             "workingSet": mem.working_set,
@@ -1128,7 +1140,7 @@ impl App {
         entries.push(Entry::Item(Item { id: MENU_SWITCH_PET, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: choices }));
         entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
         entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
-        for group in self.modules.menu() {
+        for group in self.modules.menu(local_now()) {
             let mut items: Vec<Entry> = group.items.into_iter().map(|(id, label, icon)| Item::entry(id, label, icon)).collect();
             if group.module == reminder_module::ID {
                 items.insert(0, Item::entry(MENU_ADD_REMINDER, "新增提醒…", Icon::Bell));
@@ -1190,6 +1202,11 @@ impl App {
                 self.apply(out);
             }
         }
+    }
+
+    /// 專注中（不含中間的休息）。
+    fn focusing(&self) -> bool {
+        self.modules.session(local_now()).is_some_and(|s| s.focusing)
     }
 
     fn rest_every_secs(&self) -> f64 {
@@ -1267,7 +1284,7 @@ impl App {
         self.last_topmost = now;
         // 後設的在上面：選單開著的話要蓋過桌寵。
         let menu = self.menu.as_ref().map(PopupMenu::hwnds).unwrap_or_default();
-        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.card_hwnd].into_iter().chain(menu) {
+        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.countdown.hwnd(), self.card_hwnd].into_iter().chain(menu) {
             unsafe {
                 let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
             }
@@ -1334,7 +1351,8 @@ impl App {
             pet_height: self.sprites.base_height,
             pet_half_width: half,
             platforms: if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() },
-            activity: self.config.activity,
+            // 專注中安靜陪著：不散步、不追滑鼠、不爬牆（跟「安靜」一樣）。
+            activity: if self.focusing() { Activity::Calm } else { self.config.activity },
             wall_left: rect.left as f32,
             wall_right: rect.right as f32,
             ceiling: rect.top as f32,
@@ -1415,6 +1433,23 @@ impl App {
         self.config.forbidden_areas.iter().map(|a| area_rect(*a)).collect()
     }
 
+    /// 專注倒數：專注（或休息）中、頭上沒有卡片或泡泡時顯示；設定成「滑鼠移過去才顯示」就只在滑鼠停在桌寵身上時顯示。
+    fn update_countdown(&mut self, dt: f32) -> Result<()> {
+        let h = self.sprites.base_height;
+        let hovering = {
+            let (cx, cy) = cursor();
+            (cx - self.pet.x).abs() <= self.idle_width() / 2.0 && cy <= self.pet.y && cy >= self.pet.y - h
+        };
+        let free_above = self.speech.is_none() && self.cards.is_empty() && self.menu.is_none();
+        let wanted = self.config.focus_countdown == CountdownMode::Always || hovering;
+        let shown = self
+            .modules
+            .session(local_now())
+            .filter(|_| free_above && wanted)
+            .map(|s| countdown::Shown { text: countdown::clock_text(s.secs_left), focusing: s.focusing, head: Vector2 { X: self.pet.x, Y: self.pet.y - h } });
+        self.countdown.update(shown, dt, self.dpi_scale(), &self.palette)
+    }
+
     fn idle_width(&self) -> f32 {
         self.sprites.states[states::IDLE].variants[0].frames[0].width
     }
@@ -1436,6 +1471,7 @@ impl App {
         }
         self.drive_soak(now)?;
         if self.update_hidden(now) {
+            self.countdown.update(None, dt, self.dpi_scale(), &self.palette)?;
             if self.config.remind_in_fullscreen {
                 // 全螢幕程式自己也可能是最上層：卡片要定時放回它上面，不然跳了也看不到。
                 self.keep_topmost(now);
@@ -1455,6 +1491,7 @@ impl App {
         let glows = self.pet.glows(&env, now);
         let style = GlowStyle { pet_height: self.sprites.base_height, scale: self.dpi_scale(), color: self.palette.danger.d2d() };
         self.glow.update(self.glow_hwnd, self.hwnd, &glows, dt, &style)?;
+        self.update_countdown(dt)?;
         for happening in self.pet.drain_happenings() {
             let ctx = self.talk_ctx(now);
             if let Some(say) = self.chatter.on(happening, &ctx) {
@@ -1599,9 +1636,12 @@ impl App {
         if let Some(say) = self.chatter.tick(&ctx) {
             self.say(say, now);
         }
-        // 休息提醒放在設定的「提醒」頁，跟著提醒功能一起開關。
+        let session = self.modules.session(local_now());
+        self.tray.set_tip(session.map(|s| format!("{} · {}中，還剩 {} 分", petkit::APP_NAME, if s.focusing { "專注" } else { "休息" }, s.minutes_left)));
+        // 休息提醒放在設定的「提醒」頁，跟著提醒功能一起開關；專注（含中間的休息）進行中先暫停，不跟番茄鐘搶著叫人休息。
         if self.config.features.reminders
             && self.config.rest_reminder
+            && self.modules.session(local_now()).is_none()
             && let Some(text) = self.chatter.rest_due(now, self.rest_every_secs())
         {
             let time = local_now().format("%H:%M").to_string();
@@ -1755,7 +1795,8 @@ impl App {
             now,
             clock,
             idle_input_secs: idle_input_secs(),
-            talk: self.config.talk,
+            // 專注中不閒聊（模組自己要講的話、提醒卡照常）。
+            talk: if self.focusing() { Talk::Never } else { self.config.talk },
             workday: self.is_workday(clock.date()),
             can_speak: !self.hidden && self.cards.is_empty() && self.transition.is_none() && self.soak.is_none(),
             asleep: self.pet.state() == states::SLEEP,

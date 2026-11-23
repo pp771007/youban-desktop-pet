@@ -33,7 +33,7 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'auto', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'auto', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'auto', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -275,6 +275,16 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('checkbox', { name: '記住新視窗時說一聲' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.announceNewWindows) === false, 'new-window announcement switch writes config');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-windows-light.png') });
+
+    // 專注：開始專注送指令給核心；時間、倒數方式寫進設定
+    await page.locator('.nav-item[data-page="focus"]').click();
+    await page.getByRole('button', { name: '開始專注' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'focusStart')), 'start focus sends command');
+    await page.getByRole('button', { name: '45 分' }).click();
+    await page.getByRole('button', { name: '滑鼠移過去才顯示' }).click();
+    check(await page.evaluate(() => { const c = window.__mock.config; return c.focusMinutes === 45 && c.focusCountdown === 'hover'; }), 'focus length and countdown mode write config');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-focus-light.png') });
+    await page.locator('.nav-item[data-page="windows"]').click();
 
     // 點一個視窗直接打數字改位置；寬高空著不能套用
     await page.locator('.list-row', { hasText: '記事本' }).click();

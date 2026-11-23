@@ -65,9 +65,23 @@ pub trait Module {
     fn tick(&mut self, _ctx: &mut Ctx) {}
     fn on_event(&mut self, _event: &ModuleEvent, _ctx: &mut Ctx) {}
     /// 這個模組要放進右鍵選單的項目：(模組自己的編號, 文字, 圖示)。選單上會放在 `name` 這個小標題底下。
-    fn menu(&self) -> Vec<(u32, &'static str, Icon)> {
+    fn menu(&self, _now: NaiveDateTime) -> Vec<(u32, String, Icon)> {
         Vec::new()
     }
+    /// 正在進行的專注／休息（只有專注模組會有）：核心依它讓桌寵安靜、暫停休息提醒、顯示倒數。
+    fn session(&self, _now: NaiveDateTime) -> Option<Session> {
+        None
+    }
+}
+
+/// 專注模組現在在哪一段、還剩多久。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Session {
+    /// `true` = 專注中，`false` = 休息中。
+    pub focusing: bool,
+    pub secs_left: i64,
+    /// 無條件進位的分鐘（還剩 30 秒算 1 分）。
+    pub minutes_left: i64,
 }
 
 /// 右鍵選單上一個模組的那一組。
@@ -75,7 +89,7 @@ pub struct MenuGroup {
     pub module: &'static str,
     pub name: &'static str,
     /// (選單編號, 文字, 圖示)。
-    pub items: Vec<(u32, &'static str, Icon)>,
+    pub items: Vec<(u32, String, Icon)>,
 }
 
 /// 選單編號：模組 `i` 的項目是 `MENU_BASE + i * MENU_STRIDE + 自己的編號`。
@@ -127,16 +141,20 @@ impl ModuleHost {
     }
 
     /// 每個模組一組（沒有項目的也給，呼叫端可能要往裡面加）。
-    pub fn menu(&self) -> Vec<MenuGroup> {
+    pub fn menu(&self, now: NaiveDateTime) -> Vec<MenuGroup> {
         self.modules
             .iter()
             .enumerate()
             .map(|(i, m)| MenuGroup {
                 module: m.id(),
                 name: m.name(),
-                items: m.menu().into_iter().map(|(local, label, icon)| (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)).collect(),
+                items: m.menu(now).into_iter().map(|(local, label, icon)| (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)).collect(),
             })
             .collect()
+    }
+
+    pub fn session(&self, now: NaiveDateTime) -> Option<Session> {
+        self.modules.iter().find_map(|m| m.session(now))
     }
 
     /// 選單編號 → 交給對應的模組。
@@ -197,8 +215,8 @@ mod tests {
             self.0 += 1;
             ctx.info("tick", None);
         }
-        fn menu(&self) -> Vec<(u32, &'static str, Icon)> {
-            vec![(3, "做事", Icon::Check)]
+        fn menu(&self, _now: NaiveDateTime) -> Vec<(u32, String, Icon)> {
+            vec![(3, "做事".into(), Icon::Check)]
         }
         fn on_event(&mut self, event: &ModuleEvent, ctx: &mut Ctx) {
             if let ModuleEvent::Menu(3) = event {
@@ -209,6 +227,7 @@ mod tests {
 
     #[test]
     fn sync_turns_modules_off_and_back_on() {
+        let now = || chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
         let make = |id: &str| -> Box<dyn Module> {
             match id {
                 "fine" => Box::new(Fine(0)),
@@ -218,10 +237,10 @@ mod tests {
         let mut host = ModuleHost::new(Vec::new());
         assert!(host.sync(&["fine"], make).is_empty());
         assert_eq!(host.ids(), ["fine"]);
-        assert_eq!(host.menu().len(), 1);
+        assert_eq!(host.menu(now()).len(), 1);
         assert_eq!(host.sync(&[], make), ["fine"], "turned off → reported so its cards can be withdrawn");
         assert!(host.ids().is_empty());
-        assert!(host.menu().is_empty(), "a turned-off module leaves nothing in the menu");
+        assert!(host.menu(now()).is_empty(), "a turned-off module leaves nothing in the menu");
         host.sync(&["fine"], make);
         assert_eq!(host.ids(), ["fine"]);
     }
@@ -238,7 +257,7 @@ mod tests {
         out.clear();
         host.tick(now, &config, &mut out);
         assert_eq!(out.len(), 1, "boom is gone, fine still ticks");
-        let menu = host.menu();
+        let menu = host.menu(now);
         assert_eq!(menu.len(), 1);
         out.clear();
         host.menu_clicked(menu[0].items[0].0, now, &config, &mut out);

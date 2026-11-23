@@ -24,6 +24,8 @@ mod theme;
 mod toy;
 mod glow;
 mod area_editor;
+mod countdown;
+mod focus_module;
 mod icons;
 mod popup_menu;
 mod tray;

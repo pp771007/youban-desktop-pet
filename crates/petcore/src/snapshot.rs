@@ -274,6 +274,14 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         Item::entry(8, "設定…", Icon::Settings),
         Item::entry(9, "結束", Icon::Power),
     ];
+    let mut chip = crate::countdown::Countdown::new(&gfx, windows::Win32::Foundation::HWND::default())?;
+    for palette in [&theme::LIGHT, &theme::DARK] {
+        for (text, focusing) in [("24:59", true), ("03:07", false)] {
+            let shown = crate::countdown::Shown { text: text.into(), focusing, head: windows_numerics::Vector2 { X: 0.0, Y: 0.0 } };
+            let (w, h) = chip.render(&shown, s, palette)?;
+            sheet.push(w, h, chip.pixels());
+        }
+    }
     let mut menus = MenuPainter::new(&gfx)?;
     menus.load_pictures(&wic, &children, s);
     for palette in [&theme::LIGHT, &theme::DARK] {

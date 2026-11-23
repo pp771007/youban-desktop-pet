@@ -52,7 +52,26 @@ pub struct Config {
     pub rest_every_minutes: u32,
     /// 休息提醒的卡片要按完成，還是自己消失。
     pub rest_style: Style,
+    /// 專注（番茄鐘）：專注多久、短休息、長休息（分鐘），幾輪一次長休息。
+    pub focus_minutes: u32,
+    pub short_break_minutes: u32,
+    pub long_break_minutes: u32,
+    pub focus_rounds_before_long: u32,
+    /// 休息完自動開始下一輪專注（關著就停在那裡，要再從選單開始）。
+    pub focus_auto_continue: bool,
+    /// 每段結束的卡片要按完成，還是自己消失。
+    pub focus_style: Style,
+    /// 桌寵旁邊的倒數：一直顯示，或滑鼠移到桌寵上才顯示。
+    pub focus_countdown: Countdown,
     pub features: Features,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Countdown {
+    #[default]
+    Always,
+    Hover,
 }
 
 /// 哪些功能要開。關掉的功能核心完全不載入（不跑、不佔記憶體）。
@@ -64,11 +83,13 @@ pub struct Features {
     pub reminders: bool,
     /// 預設關：會自己搬動使用者的視窗，要使用者自己決定打開。
     pub window_restore: bool,
+    /// 專注（番茄鐘）：沒有開始就什麼都不做，只有右鍵選單多一項。
+    pub focus: bool,
 }
 
 impl Default for Features {
     fn default() -> Self {
-        Self { reminders: true, window_restore: false }
+        Self { reminders: true, window_restore: false, focus: true }
     }
 }
 
@@ -152,6 +173,14 @@ impl Default for Config {
             rest_reminder: true,
             rest_every_minutes: DEFAULT_REST_EVERY_MINUTES,
             rest_style: Style::Auto,
+            // 標準番茄鐘：25 分鐘專注、5 分鐘短休息，每 4 輪一次 15 分鐘長休息。
+            focus_minutes: 25,
+            short_break_minutes: 5,
+            long_break_minutes: 15,
+            focus_rounds_before_long: 4,
+            focus_auto_continue: true,
+            focus_style: Style::Auto,
+            focus_countdown: Countdown::default(),
             features: Features::default(),
         }
     }
@@ -199,7 +228,7 @@ mod tests {
         assert_eq!(c.features, Features::default(), "features missing from an old file take defaults");
         assert!(!c.features.window_restore, "window restore starts off");
         let c: Config = serde_json::from_str(r#"{ "features": { "windowRestore": true } }"#).unwrap();
-        assert_eq!(c.features, Features { reminders: true, window_restore: true });
+        assert_eq!(c.features, Features { reminders: true, window_restore: true, focus: true });
         let c: Config = serde_json::from_str(r#"{ "roam": "nearby" }"#).unwrap();
         assert_eq!(c.roam, Roam::Screen, "the removed 'nearby' choice reads as the whole screen");
     }

@@ -13,6 +13,9 @@ pub const CMD_OPEN_SETTINGS: &str = "openSettings";
 pub const CMD_DUMP_STATUS: &str = "dumpStatus";
 pub const CMD_CARD_ACTION: &str = "cardAction";
 pub const CMD_QUIT: &str = "quit";
+/// 開始／停止專注（設定程式的「開始專注」；右鍵選單走模組自己的選單項目）。
+pub const CMD_FOCUS_START: &str = "focusStart";
+pub const CMD_FOCUS_STOP: &str = "focusStop";
 /// 不等每天的定時檢查，現在就去查新版；進度寫到 `paths::update_status_file`。
 pub const CMD_CHECK_UPDATE: &str = "checkUpdate";
 /// 換上已經下載好的新版（跟更新卡上的「現在更新」一樣）。
