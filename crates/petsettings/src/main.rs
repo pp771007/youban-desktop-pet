@@ -30,6 +30,9 @@ const WINDOW_TITLE: &str = "柚伴設定";
 const PAGE_FLAG: &str = "--page";
 const PREVIEW_COUNT: usize = 5;
 const AUTOSTART_FLAG: &str = "--autostart";
+/// 畫面讀桌寵圖檔用的網址開頭（WebView2 上自訂的 `pet://` 長這樣）；`tauri.conf.json` 的 CSP 要放行它。
+const PET_SCHEME: &str = "pet";
+const PET_FILE_ORIGIN: &str = "http://pet.localhost";
 
 struct Init {
     page: Option<String>,
@@ -134,20 +137,65 @@ fn preview(reminder: Reminder, overrides: BTreeMap<NaiveDate, DayKind>) -> Vec<P
 fn list_pets() -> Vec<PetInfo> {
     let Some(dir) = paths::pets_dir() else { return Vec::new() };
     let companions = CompanionFile::load(&paths::companion_file()).unwrap_or_default();
-    let mut out: Vec<PetInfo> = std::fs::read_dir(dir)
+    let mut out: Vec<PetInfo> = std::fs::read_dir(&dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let id = e.file_name().to_str()?.to_owned();
             let p = pack::load(&e.path()).ok()?;
-            let image = data_url(&std::fs::read(&p.states[states::IDLE].variants[0].frames[0]).ok()?);
+            let image = pet_file_url(&dir, &p.states[states::IDLE].variants[0].frames[0])?;
             let days = companions.days(&id);
             Some(PetInfo { id, name: p.name, image, editable: p.editable, days })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+/// 桌寵資料夾裡的圖給畫面用的網址：畫面直接讀檔（`serve_pet_file`），不用轉成 base64 從指令傳過去 ——
+/// 五隻桌寵的站姿圖加起來超過 1 MB，轉碼加傳送會讓設定頁晚 0.3 秒以上才畫得出來。
+fn pet_file_url(root: &std::path::Path, file: &std::path::Path) -> Option<String> {
+    let rel = file.strip_prefix(root).ok()?;
+    let parts: Vec<String> = rel.components().map(|c| percent_encode(&c.as_os_str().to_string_lossy())).collect();
+    Some(format!("{PET_FILE_ORIGIN}/{}", parts.join("/")))
+}
+
+fn percent_encode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+fn percent_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && let Some(v) = b.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+/// `pet://` 的請求：只給桌寵資料夾裡的檔案（`..` 繞出去的一律 404）。
+fn serve_pet_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    let not_found = || tauri::http::Response::builder().status(404).body(Vec::new()).expect("static response");
+    let Ok(root) = pets_root().and_then(|r| r.canonicalize().map_err(err)) else { return not_found() };
+    let rel = String::from_utf8_lossy(&percent_decode(request.uri().path().trim_start_matches('/'))).into_owned();
+    let Ok(path) = root.join(rel).canonicalize() else { return not_found() };
+    if !path.starts_with(&root) {
+        return not_found();
+    }
+    match std::fs::read(&path) {
+        Ok(bytes) => tauri::http::Response::builder().header("Content-Type", "image/png").body(bytes).expect("static response"),
+        Err(_) => not_found(),
+    }
 }
 
 fn data_url(png: &[u8]) -> String {
@@ -455,8 +503,24 @@ fn main() {
             autostart_status,
             set_autostart,
         ])
+        .register_uri_scheme_protocol(PET_SCHEME, |_, request| serve_pet_file(&request))
+        .setup(|app| {
+            paint_background(app);
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running settings");
+}
+
+/// 視窗底色先塗成畫面的底色：瀏覽器核心還沒畫出東西前，不會先閃一片白（深色模式下特別刺眼）。
+fn paint_background(app: &tauri::App) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window("main") else { return };
+    let dark = window.theme().is_ok_and(|t| t == tauri::Theme::Dark);
+    let tokens = tokens();
+    let hex = tokens["color"][if dark { "dark" } else { "light" }]["surface"].as_str().unwrap_or_default().trim_start_matches('#').to_owned();
+    let Ok(rgb) = u32::from_str_radix(&hex, 16) else { return };
+    let _ = window.set_background_color(Some(tauri::window::Color((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255)));
 }
 
 #[cfg(test)]
@@ -465,6 +529,26 @@ mod tests {
 
     thread_local! {
         pub static PETS_ROOT: std::cell::RefCell<Option<std::path::PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+
+    #[test]
+    fn pet_files_are_served_only_from_the_pets_folder() {
+        let base = std::env::temp_dir().join(format!("petsettings-serve-{}", std::process::id()));
+        let root = base.join("pets");
+        std::fs::create_dir_all(root.join("my cat")).unwrap();
+        std::fs::write(root.join("my cat/idle_01.png"), b"png").unwrap();
+        std::fs::write(base.join("secret.txt"), b"secret").unwrap();
+        PETS_ROOT.with(|r| *r.borrow_mut() = Some(root.clone()));
+        let get = |url: &str| serve_pet_file(&tauri::http::Request::builder().uri(url).body(Vec::new()).unwrap());
+
+        let url = pet_file_url(&root, &root.join("my cat/idle_01.png")).unwrap();
+        let ok = get(&url);
+        assert_eq!((ok.status().as_u16(), ok.body().as_slice()), (200, &b"png"[..]), "{url}");
+        assert_eq!(get(&format!("{PET_FILE_ORIGIN}/..%2Fsecret.txt")).status().as_u16(), 404);
+        assert_eq!(get(&format!("{PET_FILE_ORIGIN}/%2E%2E/secret.txt")).status().as_u16(), 404);
+
+        PETS_ROOT.with(|r| *r.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// 白底上畫幾個描邊方塊（大小不同才分得出順序），轉成畫面送進來的 data URL。
