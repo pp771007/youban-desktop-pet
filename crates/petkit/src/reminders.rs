@@ -33,10 +33,21 @@ pub struct Reminder {
     pub holiday: HolidayPolicy,
     /// 單次提醒的日期；重複提醒從這天開始算。
     pub start_date: NaiveDate,
+    #[serde(default)]
+    pub style: Style,
 }
 
 fn enabled_default() -> bool {
     true
+}
+
+/// 時間到怎麼提醒：跳一張要按「完成」的卡片，或跳一張過一會兒自己消失的卡片（不用按）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Style {
+    #[default]
+    Card,
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -318,6 +329,7 @@ mod tests {
             repeat,
             holiday,
             start_date: d(2026, 1, 1),
+            style: Style::Card,
         }
     }
 

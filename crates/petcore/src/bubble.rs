@@ -40,6 +40,8 @@ const SPEECH_BALANCE_STEP_DIP: f32 = 6.0;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Card {
     Reminder { title: String, time: String, snooze_open: bool },
+    /// 不用按的提醒：跟提醒卡同樣子但沒有按鈕，過一會兒自己消失、點一下也收掉。
+    Nudge { title: String, time: String },
     Missed { rows: Vec<(String, String)>, more: usize },
     Info { title: String, detail: Option<String>, tone: Tone },
     /// 新版下載好了：「現在更新」= `Done`，「下次啟動時」= `Dismiss`。
@@ -51,7 +53,7 @@ pub enum Card {
 impl Card {
     /// 點卡片任何地方都會收掉（沒有按鈕要按）。
     fn tap_to_dismiss(&self) -> bool {
-        matches!(self, Card::Info { .. } | Card::Speech { .. })
+        matches!(self, Card::Info { .. } | Card::Speech { .. } | Card::Nudge { .. })
     }
 }
 
@@ -261,6 +263,15 @@ impl CardPainter {
                 };
                 button_row(y, items, &mut buttons);
                 y += BUTTON_HEIGHT_DIP * s;
+                (Icon::BellRing, Tint::Accent)
+            }
+            Card::Nudge { title, time } => {
+                let (t, _, h) = self.text(time, &caption, text_w, Some(1.0))?;
+                texts.push((t, Vector2 { X: text_left, Y: y }, Ink::Muted));
+                y += h;
+                let (t, _, h) = self.text(title, &title_fmt, text_w, Some(TITLE_MAX_LINES))?;
+                texts.push((t, Vector2 { X: text_left, Y: y }, Ink::Text));
+                y = (y + h).max(tile_rect.bottom);
                 (Icon::BellRing, Tint::Accent)
             }
             Card::Missed { rows, more } => {

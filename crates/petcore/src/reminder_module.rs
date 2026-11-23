@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use chrono::{Duration, NaiveDateTime};
 use petkit::config::{load_json, write_atomic};
 use petkit::holidays::{self, Calendar};
-use petkit::reminders::{Reminder, ReminderFile};
+use petkit::reminders::{Reminder, ReminderFile, Style};
 use serde::{Deserialize, Serialize};
 
 use crate::bubble::{Card, CardAction, MISSED_MAX_ROWS};
@@ -26,6 +26,16 @@ const STATE_SAVE_SECS: i64 = 60;
 const MISSED_KEY: &str = "missed";
 const TIME_FORMAT: &str = "%H:%M";
 const DATE_TIME_FORMAT: &str = "%-m/%-d %H:%M";
+
+/// 時間到：照這則提醒的方式跳要按完成的卡，或會自己消失的卡。
+fn fire(ctx: &mut Ctx, id: &str, r: &Reminder, at: NaiveDateTime) {
+    let (title, time) = (r.title.clone(), at.format(TIME_FORMAT).to_string());
+    let card = match r.style {
+        Style::Card => Card::Reminder { title, time, snooze_open: false },
+        Style::Auto => Card::Nudge { title, time },
+    };
+    ctx.card(id, card);
+}
 
 pub struct Paths {
     pub reminders: PathBuf,
@@ -180,7 +190,7 @@ impl Module for ReminderModule {
         for id in due {
             let Some(r) = self.find(&id) else { continue };
             let fired_at = self.next[&id];
-            ctx.card(id.clone(), Card::Reminder { title: r.title.clone(), time: fired_at.format(TIME_FORMAT).to_string(), snooze_open: false });
+            fire(ctx, &id, r, fired_at);
             match r.next_after(now, &self.calendar) {
                 Some(next) => self.next.insert(id, next),
                 None => self.next.remove(&id),
@@ -191,7 +201,7 @@ impl Module for ReminderModule {
         for id in snoozed {
             self.state.snoozes.remove(&id);
             if let Some(r) = self.find(&id) {
-                ctx.card(id.clone(), Card::Reminder { title: r.title.clone(), time: now.format(TIME_FORMAT).to_string(), snooze_open: false });
+                fire(ctx, &id, r, now);
             }
             self.save_state(now);
         }
@@ -249,7 +259,17 @@ mod tests {
             repeat: Repeat::Daily,
             holiday: HolidayPolicy::Normal,
             start_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            style: Style::Card,
         }
+    }
+
+    #[test]
+    fn an_auto_reminder_shows_a_card_that_goes_away_by_itself() {
+        let mut r = daily("a", 9);
+        r.style = Style::Auto;
+        let (mut m, _) = setup(vec![r]);
+        tick(&mut m, dt(2, 8, 59));
+        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), vec![("a".into(), Card::Nudge { title: "提醒a".into(), time: "09:00".into() })]);
     }
 
     fn tick(m: &mut ReminderModule, now: NaiveDateTime) -> Vec<Request> {

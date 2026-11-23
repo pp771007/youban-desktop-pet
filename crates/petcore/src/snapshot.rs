@@ -210,6 +210,7 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     let s = dpi as f32 / BASE_DPI;
     let samples = [
         (Card::Reminder { title: "喝水時間".into(), time: "14:00".into(), snooze_open: false }, Some(0)),
+        (Card::Nudge { title: "看看遠方，讓眼睛休息".into(), time: "14:30".into() }, None),
         (Card::Reminder { title: "繳信用卡費：這個月記得用網銀轉帳，順便確認自動扣款有沒有設定成功".into(), time: "10:30".into(), snooze_open: true }, None),
         (
             Card::Missed {

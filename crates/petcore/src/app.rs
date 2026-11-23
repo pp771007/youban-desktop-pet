@@ -133,6 +133,8 @@ const MILESTONE_AFTER_SECS: f64 = 10.0;
 const MILESTONE_SAY_SECS: f32 = 6.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
 const MODULE_SAY_SECS: f32 = 4.0;
+/// 會自己消失的提醒卡留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
+const NUDGE_SECS: f64 = 15.0;
 
 /// `windows` crate 把它放在 Controls 功能底下（為了一個常數不值得開那整包）。
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -1793,10 +1795,14 @@ impl App {
             self.speech = None;
             self.pet.stop_talking(now);
         }
-        if let Some(front) = self.cards.front()
-            && matches!(front.card, Card::Info { .. })
+        let linger = self.cards.front().and_then(|q| match q.card {
+            Card::Info { .. } => Some(INFO_SECS),
+            Card::Nudge { .. } => Some(NUDGE_SECS),
+            _ => None,
+        });
+        if let Some(secs) = linger
             && self.shown_card
-            && self.bubble.shown_for(now) >= INFO_SECS
+            && self.bubble.shown_for(now) >= secs
         {
             self.cards.pop_front();
             self.shown_card = false;
@@ -1805,7 +1811,7 @@ impl App {
             Some(q) => {
                 if !self.shown_card || self.bubble.card() != Some(&q.card) {
                     let animate = !self.shown_card;
-                    if animate && self.config.reminder_sound && matches!(q.card, Card::Reminder { .. } | Card::Missed { .. }) {
+                    if animate && self.config.reminder_sound && matches!(q.card, Card::Reminder { .. } | Card::Nudge { .. } | Card::Missed { .. }) {
                         play_reminder_sound();
                     }
                     self.bubble.show(q.card.clone(), now, animate);

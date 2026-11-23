@@ -10,6 +10,15 @@ const HOLIDAY_POLICIES = [['normal', '照常'], ['skip', '跳過'], ['nextWorkda
 const MONTHLY_KINDS = [['day', '第幾號'], ['lastDay', '月底'], ['nthWeekday', '第幾個星期幾']];
 const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後一個'];
 const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
+/** 時間到怎麼提醒（`petkit::reminders::Style`）。 */
+const STYLE_CHOICES = [['card', '要按完成'], ['auto', '自己消失']];
+/** 新增提醒時一鍵套用：上班時間每隔一陣子提醒一下（自己消失，不用按）。`label` 是按鈕上的字，`title` 是套用後的提醒內容。 */
+const TEMPLATES = [
+  { label: '喝水', title: '喝水', everyMinutes: 60 },
+  { label: '伸展', title: '起來伸展一下', everyMinutes: 90 },
+  { label: '看遠方', title: '看看遠方，讓眼睛休息', everyMinutes: 30 },
+];
+const TEMPLATE_HOURS = ['09:00', '18:00'];
 const NEVER_SLEEP_SECS = 365 * 24 * 3600;
 const SLEEP_CHOICES = [[60, '1 分'], [180, '3 分'], [300, '5 分'], [600, '10 分'], [1800, '30 分'], [NEVER_SLEEP_SECS, '不睡']];
 const SIZE_LABELS = ['小', '中', '大'];
@@ -114,7 +123,7 @@ function repeatSummary(r) {
       return `每月${NTH_LABELS[rule.nth - 1]}星期${WEEKDAYS[rule.weekday - 1]}`;
     }
     case 'workdays': return '工作日';
-    case 'interval': return `每 ${rep.everyMinutes} 分鐘 · 到 ${rep.until}${rep.workdaysOnly ? ' · 上班日' : ''}`;
+    case 'interval': return `${r.time}～${rep.until} 每 ${rep.everyMinutes} 分鐘${rep.workdaysOnly ? ' · 上班日' : ''}`;
     default: return '';
   }
 }
@@ -256,6 +265,7 @@ function reminderRow(r) {
       h('div', { class: 'row-title' }, r.title),
       h('div', { class: 'row-meta' },
         h('span', { class: 'tag' }, icon('clock'), repeatSummary(r)),
+        r.style === 'auto' ? h('span', { class: 'tag' }, '自己消失') : null,
         usesHolidayPolicy(r) && r.holiday !== 'normal' ? h('span', { class: 'tag tag-accent' }, icon('calendar-off'), `遇假日${holidayLabel(r.holiday)}`) : null)),
     toggle);
 }
@@ -298,6 +308,7 @@ function newReminder() {
     repeat: { kind: 'daily' },
     holiday: 'normal',
     startDate: isoDate(now),
+    style: 'card',
   };
 }
 
@@ -394,13 +405,18 @@ function drawEditor() {
         rule.kind === 'nthWeekday' ? h('div', { class: 'row' }, nthSelect, wdSelect) : null);
     }
     if (rep.kind === 'interval') {
-      return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '間隔'),
+      // 開始、結束、間隔放在同一塊：上面那格「時間」選定時時不出現，開始時間就在這裡。
+      return h('div', { class: 'field' }, h('span', { class: 'field-label' }, '時段'),
+        h('div', { class: 'row' },
+          '從',
+          h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, 'aria-label': '從幾點', onchange: (e) => { r.time = e.target.value; edited(); } }),
+          '到',
+          h('input', { class: 'input input-time', type: 'time', value: rep.until, 'aria-label': '到幾點', onchange: (e) => { rep.until = e.target.value; edited(); } })),
         h('div', { class: 'row' },
           '每',
           h('select', { class: 'select', 'aria-label': '每幾分鐘', onchange: (e) => { rep.everyMinutes = Number(e.target.value); changed(); } },
             INTERVAL_CHOICES.map((m) => h('option', { value: m, selected: rep.everyMinutes === m }, `${m} 分鐘`))),
-          '到',
-          h('input', { class: 'input input-time', type: 'time', value: rep.until, 'aria-label': '到幾點', onchange: (e) => { rep.until = e.target.value; edited(); } })),
+          '一次'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: rep.workdaysOnly, onchange: (e) => { rep.workdaysOnly = e.target.checked; changed(); } }), '只在上班日'));
     }
     return null;
@@ -429,14 +445,24 @@ function drawEditor() {
       h('h2', {}, editor.isNew ? '新增提醒' : '編輯提醒'),
       h('button', { class: 'btn btn-ghost btn-small', 'aria-label': '關閉', onclick: closeEditor }, icon('x'))),
     h('div', { class: 'drawer-body' },
+      editor.isNew ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, '常用'),
+        h('div', { class: 'row' }, TEMPLATES.map((t) => h('button', { type: 'button', class: 'btn btn-secondary btn-small', onclick: () => {
+          r.title = t.title;
+          r.time = TEMPLATE_HOURS[0];
+          r.repeat = { kind: 'interval', everyMinutes: t.everyMinutes, until: TEMPLATE_HOURS[1], workdaysOnly: true };
+          r.style = 'auto';
+          changed();
+        } }, t.label)))) : null,
       field('提醒內容', h('input', { id: 'title', class: 'input', placeholder: '例：喝水、繳卡費', value: r.title, maxlength: 60,
         oninput: (e) => { r.title = e.target.value; document.getElementById('save-btn').disabled = !editorValid(r); } }), 'title'),
-      field('時間', h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, onchange: (e) => { r.time = e.target.value; edited(); } }), 'time'),
+      r.repeat.kind === 'interval' ? null : field('時間', h('input', { id: 'time', class: 'input input-time', type: 'time', value: r.time, onchange: (e) => { r.time = e.target.value; edited(); } }), 'time'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '重複'),
         segmented(REPEAT_KINDS, r.repeat.kind, (k) => { r.repeat = repeatDefaults(k, r); changed(); })),
       repeatExtra,
       usesHolidayPolicy(r) ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, '遇到假日'),
         segmented(HOLIDAY_POLICIES, r.holiday, (p) => { r.holiday = p; changed(); })) : null,
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '卡片'),
+        segmented(STYLE_CHOICES, r.style || 'card', (s) => { r.style = s; changed(); })),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '接下來'), h('div', { class: 'preview', id: 'preview' }))),
     h('div', { class: 'drawer-foot' },
       deleteBtn,

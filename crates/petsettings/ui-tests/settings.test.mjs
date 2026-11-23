@@ -144,6 +144,9 @@ for (const scheme of ['light', 'dark']) {
     await page.keyboard.type('0930', { delay: 50 });
     const typedTime = await page.locator('#time').inputValue();
     check(typedTime.endsWith(':30'), `typing a time digit by digit keeps every digit (got ${typedTime})`);
+    // 定時：開始時間跟結束時間、間隔放在同一塊（上面那格「時間」不出現）
+    await page.getByRole('button', { name: '定時' }).click();
+    check(await page.getByLabel('從幾點').isVisible() && await page.getByLabel('到幾點').isVisible() && !(await page.getByText('時間', { exact: true }).isVisible()), 'interval shows start and end time together');
     await page.getByRole('button', { name: '工作日' }).click();
     check(!(await page.getByText('遇到假日').isVisible()), 'workdays hides holiday policy');
     await page.getByRole('button', { name: '每週' }).click();
@@ -158,13 +161,24 @@ for (const scheme of ['light', 'dark']) {
     const saved = await page.evaluate(() => window.__mock.file.reminders.find((r) => r.title === '站起來走走'));
     check(saved && saved.repeat.kind === 'weekly' && saved.holiday === 'skip' && saved.repeat.days.length >= 1, 'new reminder saved with weekly + skip');
 
+    // 常用範本：一鍵填好「伸展」、上班時間每 90 分鐘、自己消失
+    await page.getByRole('button', { name: '新增提醒' }).first().click();
+    await page.waitForFunction(() => document.activeElement?.id === 'title');
+    await page.getByRole('button', { name: '伸展', exact: true }).click();
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-template-light.png') });
+    await page.locator('#save-btn').click();
+    await page.waitForSelector('.drawer:not(.open)');
+    const stretch = await page.evaluate(() => window.__mock.file.reminders.find((r) => r.title === '起來伸展一下'));
+    check(stretch && stretch.repeat.kind === 'interval' && stretch.repeat.everyMinutes === 90 && stretch.time === '09:00' && stretch.repeat.until === '18:00' && stretch.style === 'auto', 'template fills an interval reminder that goes away by itself');
+    await page.waitForFunction(() => !document.getElementById('drawer').getBoundingClientRect().width || document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
+
     // 刪除要按兩次
     await page.locator('.list-row', { hasText: '站起來走走' }).click();
     await page.getByRole('button', { name: '刪除' }).click();
-    check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'first delete click only asks');
+    check(await page.evaluate(() => window.__mock.file.reminders.length) === 4, 'first delete click only asks');
     await page.getByRole('button', { name: '確定刪除' }).click();
     await page.waitForSelector('.drawer:not(.open)');
-    check(await page.evaluate(() => window.__mock.file.reminders.length) === 2, 'second click deletes');
+    check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'second click deletes');
 
     // 特別日子
     await page.locator('input[type=date][aria-label="日期"]').fill('2027-07-29');
