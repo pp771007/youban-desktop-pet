@@ -33,7 +33,7 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, autoUpdate: true, announceNewWindows: true, allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -121,10 +121,14 @@ for (const scheme of ['light', 'dark']) {
     check(rows[1].includes('已暫停') && rows[1].includes('遇假日提前'), 'paused reminder shows paused and holiday policy');
     await page.getByRole('checkbox', { name: '提醒音' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.reminderSound) === false, 'reminder sound switch writes config');
+    await page.getByRole('checkbox', { name: '全螢幕時照樣跳出來' }).click({ force: true });
+    check(await page.evaluate(() => window.__mock.config.remindInFullscreen) === true, 'remind-in-fullscreen switch writes config');
 
     // 新增：沒填內容不能存；工作日沒有「遇到假日」；存檔寫出正確的 JSON
     await page.getByRole('button', { name: '新增提醒' }).first().click();
     await page.waitForSelector('.drawer.open');
+    // 抽屜打開後焦點會稍晚才落到「提醒內容」：先等它，不然後面打字打到一半焦點被搶走。
+    await page.waitForFunction(() => document.activeElement?.id === 'title');
     check(await page.locator('#save-btn').isDisabled(), 'save disabled until title filled');
     await page.locator('#title').fill('站起來走走');
     check(await page.locator('#save-btn').isEnabled(), 'save enabled after title');

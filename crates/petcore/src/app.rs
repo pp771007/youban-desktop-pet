@@ -61,6 +61,8 @@ const MIN_ALLOWED_HEIGHTS: f32 = 1.5;
 const SAY_ALLOWED_SET: &str = "這裡就是我的地盤了～";
 const SAY_FORBIDDEN_SET: &str = "知道了，那裡我不去～";
 const SAY_AREA_SECS: f32 = 3.0;
+/// 桌寵躲起來時，提醒卡離螢幕右下角多遠（DIP）。
+const HIDDEN_CARD_INSET_DIP: f32 = 24.0;
 
 pub fn pet_class() -> PCWSTR {
     PCWSTR(PET_CLASS_NAME.as_ptr())
@@ -1073,7 +1075,7 @@ impl App {
         }
     }
 
-    /// 全螢幕程式（影片、簡報、遊戲）在前面時躲起來；提醒卡留在佇列裡，離開全螢幕才出現。
+    /// 全螢幕程式（影片、簡報、遊戲）在前面時躲起來；提醒卡留在佇列裡，離開全螢幕才出現（除非設定成照樣跳）。
     /// 回傳 `true` = 現在是躲起來的狀態，這一格不用畫。
     fn update_hidden(&mut self, now: f64) -> bool {
         if now - self.last_busy_check >= BUSY_CHECK_SECS {
@@ -1090,8 +1092,6 @@ impl App {
                 }
                 if busy {
                     self.glow.hide(self.glow_hwnd);
-                }
-                if busy {
                     self.bubble.hide();
                     self.shown_card = false;
                 }
@@ -1256,6 +1256,9 @@ impl App {
         }
         self.drive_soak(now)?;
         if self.update_hidden(now) {
+            if self.config.remind_in_fullscreen {
+                self.update_cards(now)?;
+            }
             return Ok(());
         }
         self.reload_if_dpi_changed()?;
@@ -1626,8 +1629,14 @@ impl App {
         let attention = self.cards.front().is_some_and(|q| matches!(q.card, Card::Reminder { .. } | Card::Missed { .. }));
         self.pet.set_attention(attention, now);
 
-        let head = Vector2 { X: self.pet.x, Y: self.pet.y - self.sprites.base_height };
         let work = work_area(monitor_at(self.pet.x, self.pet.y));
+        let head = if self.hidden {
+            // 桌寵躲起來了（全螢幕時照樣跳提醒）：卡片放在螢幕右下角，跟系統通知同一個地方。
+            let inset = HIDDEN_CARD_INSET_DIP * self.dpi_scale();
+            Vector2 { X: work.right as f32 - inset, Y: work.bottom as f32 - inset }
+        } else {
+            Vector2 { X: self.pet.x, Y: self.pet.y - self.sprites.base_height }
+        };
         self.bubble.update(now, head, work, self.dpi_scale(), &self.palette)
     }
 

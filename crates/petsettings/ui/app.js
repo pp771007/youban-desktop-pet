@@ -234,6 +234,7 @@ function renderReminders(page) {
     h('h2', {}, '提醒方式'),
     h('div', { class: 'card' },
       settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
+      settingRow('全螢幕時照樣跳出來', configSwitch('remindInFullscreen', '全螢幕時照樣跳出來')),
       settingRow('提醒卡', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是提醒卡的樣子' } }) }, icon('play'), '看看樣子')))));
   page.append(renderSpecialDays());
 }

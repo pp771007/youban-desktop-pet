@@ -35,6 +35,8 @@ pub struct Config {
     pub hide_in_fullscreen: bool,
     /// 提醒卡跳出來時響一聲（用 Windows 音效配置裡的「提醒」音效）。
     pub reminder_sound: bool,
+    /// 全螢幕時桌寵躲起來了，提醒卡照樣跳（放在螢幕右下角）；關著就等離開全螢幕才跳。
+    pub remind_in_fullscreen: bool,
     /// 每天看一次有沒有新版，有就自動下載、找空檔換上。
     pub auto_update: bool,
     /// 視窗歸位自動記下新開的視窗時，桌寵說一聲。
@@ -133,6 +135,7 @@ impl Default for Config {
             stand_on_windows: true,
             hide_in_fullscreen: true,
             reminder_sound: true,
+            remind_in_fullscreen: false,
             auto_update: true,
             announce_new_windows: true,
             features: Features::default(),
