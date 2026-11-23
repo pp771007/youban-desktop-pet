@@ -163,12 +163,12 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '大' }).click();
     check(await page.evaluate(() => window.__mock.config.sizeDip) === 176, 'size choice writes config');
     await page.getByRole('button', { name: '安靜' }).click();
-    await page.getByRole('button', { name: '只在附近' }).click();
+    await page.getByRole('button', { name: '避開這些地方' }).click();
     await page.getByRole('button', { name: '常講' }).click();
     await page.getByRole('checkbox', { name: '站到視窗上' }).click({ force: true });
     await page.getByRole('button', { name: '10 分' }).click();
     const cfg = await page.evaluate(() => window.__mock.config);
-    check(cfg.activity === 'calm' && cfg.roam === 'nearby' && cfg.talk === 'often' && cfg.standOnWindows === false && cfg.sleepAfterSecs === 600, 'behavior settings write config');
+    check(cfg.activity === 'calm' && cfg.roam === 'avoid' && cfg.talk === 'often' && cfg.standOnWindows === false && cfg.sleepAfterSecs === 600, 'behavior settings write config');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-pets-light.png') });
 
     // 新增桌寵：選一張圖 → 看到整理好的樣子 → 取名字 → 完成就換過去

@@ -14,7 +14,7 @@ const NEVER_SLEEP_SECS = 365 * 24 * 3600;
 const SLEEP_CHOICES = [[60, '1 分'], [180, '3 分'], [300, '5 分'], [600, '10 分'], [1800, '30 分'], [NEVER_SLEEP_SECS, '不睡']];
 const SIZE_LABELS = ['小', '中', '大'];
 const ACTIVITY_CHOICES = [['lively', '活潑'], ['normal', '普通'], ['calm', '安靜']];
-const ROAM_CHOICES = [['screen', '整個螢幕'], ['nearby', '只在附近']];
+const ROAM_CHOICES = [['screen', '整個螢幕'], ['inside', '只在範圍內'], ['avoid', '避開這些地方']];
 const TALK_CHOICES = [['often', '常講'], ['sometimes', '偶爾'], ['never', '不講']];
 const DAY_KINDS = [['holiday', '視同放假'], ['workday', '視同上班']];
 /** 動作速度：以規範預設為基準的倍率。 */

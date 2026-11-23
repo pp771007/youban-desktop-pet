@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Instant, SystemTime};
 
 use petkit::companion::{self, CompanionFile};
-use petkit::config::{Config, Roam, Talk, load_json, write_atomic};
+use petkit::config::{Area, Config, Roam, Talk, load_json, write_atomic};
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
 use petkit::states;
@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Error, HSTRING, PCWSTR, Result, w};
 use windows_numerics::Vector2;
 
-use crate::behavior::{Emote, Env, Happening, Input, ItemView, Pet, Platform};
+use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::chatter::{self, Chatter, Say};
 use crate::platforms;
@@ -67,8 +67,6 @@ const FPS_HIDDEN: u32 = 2;
 /// 多久重新找一次可以站的視窗頂端、多久看一次有沒有全螢幕程式。
 const PLATFORM_SCAN_SECS: f64 = 0.25;
 const BUSY_CHECK_SECS: f64 = 0.5;
-/// 「只在附近」：以最後放下的位置為中心，左右各幾個桌寵身高。
-const NEARBY_RADIUS_HEIGHTS: f32 = 3.0;
 /// 視窗頂端露出來的部分要至少這麼寬（站姿寬度的倍數）才站得上去。
 const PLATFORM_MIN_WIDTH_RATIO: f32 = 0.8;
 /// 一格最多推進多久；電腦睡眠醒來時不要一口氣算幾小時的物理。
@@ -253,9 +251,6 @@ struct App {
     effects: Effects,
     platforms: Vec<Platform>,
     last_platform_scan: f64,
-    /// 「只在附近」的中心：使用者最後一次放下桌寵的位置。
-    home_x: f32,
-    user_dropped: bool,
     /// 有全螢幕程式在前面，桌寵躲起來了。
     hidden: bool,
     last_busy_check: f64,
@@ -350,8 +345,6 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         effects: Effects::default(),
         platforms: Vec::new(),
         last_platform_scan: f64::NEG_INFINITY,
-        home_x: x,
-        user_dropped: false,
         hidden: false,
         last_busy_check: f64::NEG_INFINITY,
         // 先把種子打散：種子只有低 32 位元有值，xorshift 前幾次輸出的高位元幾乎都是 0，
@@ -423,6 +416,10 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
         window_restore::ID => Box::new(WindowRestore::new(paths::window_layout_file())),
         _ => unreachable!("unknown module {id}"),
     }
+}
+
+fn area_rect(a: Area) -> Rect {
+    Rect { left: a.left as f32, top: a.top as f32, right: a.right as f32, bottom: a.bottom as f32 }
 }
 
 fn px_height(config: &Config, dpi: u32) -> f32 {
@@ -740,7 +737,6 @@ impl App {
                     self.pet.input(Input::PointerMove { x, y }, now, &env);
                 }
                 Event::PointerUp => {
-                    self.user_dropped |= self.pet.is_dragging();
                     self.pet.input(Input::PointerUp, now, &env);
                 }
                 Event::Hover => {
@@ -883,7 +879,6 @@ impl App {
                     self.pet.input(Input::PointerDown { x: px, y: py }, now, &env);
                     self.pet.input(Input::PointerMove { x: x as f32, y: y as f32 - self.sprites.base_height / 2.0 }, now, &env);
                     self.pet.input(Input::PointerUp, now, &env);
-                    self.user_dropped = true;
                 }
             }
             ipc::CMD_TEST_MEMORY_ALERT => {
@@ -1093,7 +1088,7 @@ impl App {
     fn env(&self) -> Env {
         let rect = work_area(monitor_at(self.pet.x, self.pet.y));
         let half = self.idle_width() / 2.0;
-        Env {
+        let mut env = Env {
             ground_y: rect.bottom as f32,
             min_x: rect.left as f32 + half,
             max_x: (rect.right as f32 - half).max(rect.left as f32 + half),
@@ -1103,6 +1098,7 @@ impl App {
             walk_speed_dip: self.pack.states.get(states::WALK).and_then(|s| s.speed),
             cursor: Some(cursor()),
             pet_height: self.sprites.base_height,
+            pet_half_width: half,
             platforms: if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() },
             activity: self.config.activity,
             wall_left: rect.left as f32,
@@ -1115,14 +1111,29 @@ impl App {
                 grounded: t.toy.grounded(),
                 wanted: t.toy.kind.is_food() || t.toy.kicks < BALL_MAX_KICKS,
             }),
-            roam: match self.config.roam {
-                Roam::Screen => None,
-                Roam::Nearby => {
-                    let r = self.sprites.base_height * NEARBY_RADIUS_HEIGHTS;
-                    Some((self.home_x - r, self.home_x + r))
+            blocks: Vec::new(),
+        };
+        match self.config.roam {
+            Roam::Screen => {}
+            Roam::Inside => {
+                if let Some(area) = self.config.allowed_area {
+                    env.confine_to(area_rect(area));
                 }
-            },
+            }
+            Roam::Avoid => {
+                env.blocks = self.forbidden_rects();
+                env.platforms.extend(behavior::block_platforms(&env.blocks, env.ceiling, env.pet_height));
+            }
         }
+        env
+    }
+
+    /// 「避開這些地方」開著時的禁止範圍。
+    fn forbidden_rects(&self) -> Vec<Rect> {
+        if self.config.roam != Roam::Avoid {
+            return Vec::new();
+        }
+        self.config.forbidden_areas.iter().map(|a| area_rect(*a)).collect()
     }
 
     fn idle_width(&self) -> f32 {
@@ -1148,9 +1159,6 @@ impl App {
 
         let env = self.env();
         if self.pet.update(now, dt, &env) {
-            if std::mem::take(&mut self.user_dropped) {
-                self.home_x = self.pet.x;
-            }
             self.save_state();
         }
         for happening in self.pet.drain_happenings() {
@@ -1236,10 +1244,13 @@ impl App {
 
     /// 點心／球的物理、什麼時候收掉、畫出來。
     fn update_toy(&mut self, now: f64, dt: f32) -> Result<()> {
+        let blocks = self.forbidden_rects();
         let Some(slot) = self.toy.as_mut() else { return Ok(()) };
         let rect = work_area(monitor_at(slot.toy.x, slot.toy.y - 1.0));
-        let platforms = if self.config.stand_on_windows { self.platforms.as_slice() } else { &[] };
-        let world = toy::World { ground_y: rect.bottom as f32, wall_left: rect.left as f32, wall_right: rect.right as f32, platforms, px_per_dip: self.sprites.dpi as f32 / BASE_DPI as f32 };
+        let mut platforms = if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() };
+        // 禁止範圍的頂端也接得住東西（掉進範圍裡，桌寵就拿不到了）。
+        platforms.extend(behavior::block_platforms(&blocks, rect.top as f32, self.sprites.base_height));
+        let world = toy::World { ground_y: rect.bottom as f32, wall_left: rect.left as f32, wall_right: rect.right as f32, platforms: &platforms, px_per_dip: self.sprites.dpi as f32 / BASE_DPI as f32 };
         let landed = slot.toy.update(dt, &world);
         if landed {
             self.effects.spawn(Emote::Dust, now);

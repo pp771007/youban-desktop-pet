@@ -24,6 +24,10 @@ pub struct Config {
     pub sleep_after_secs: u64,
     pub activity: Activity,
     pub roam: Roam,
+    /// `Roam::Inside` 用的範圍（只有一個框）。
+    pub allowed_area: Option<Area>,
+    /// `Roam::Avoid` 用的範圍：碰到就爬上去、從頂端走過去。
+    pub forbidden_areas: Vec<Area>,
     pub talk: Talk,
     /// 掉下來時可以落在視窗頂端、在上面散步。
     pub stand_on_windows: bool,
@@ -70,10 +74,39 @@ pub enum Activity {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Roam {
+    /// 舊版的「只在附近」拿掉了，讀到就當整個螢幕。
     #[default]
+    #[serde(alias = "nearby")]
     Screen,
-    /// 只在使用者最後放下它的位置附近。
-    Nearby,
+    /// 只在 `allowed_area` 裡面活動。
+    Inside,
+    /// 不進 `forbidden_areas`。
+    Avoid,
+}
+
+/// 使用者在螢幕上畫的一個框（螢幕實體像素，多螢幕時是整個虛擬桌面的座標）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Area {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+impl Area {
+    /// 從兩個角（拖曳的起點與終點，順序不拘）組成一個框。
+    pub fn from_corners((x0, y0): (i32, i32), (x1, y1): (i32, i32)) -> Self {
+        Self { left: x0.min(x1), top: y0.min(y1), right: x0.max(x1), bottom: y0.max(y1) }
+    }
+
+    pub fn width(&self) -> i32 {
+        self.right - self.left
+    }
+
+    pub fn height(&self) -> i32 {
+        self.bottom - self.top
+    }
 }
 
 /// 講話頻率。
@@ -94,6 +127,8 @@ impl Default for Config {
             sleep_after_secs: DEFAULT_SLEEP_AFTER_SECS,
             activity: Activity::default(),
             roam: Roam::default(),
+            allowed_area: None,
+            forbidden_areas: Vec::new(),
             talk: Talk::default(),
             stand_on_windows: true,
             hide_in_fullscreen: true,
@@ -148,6 +183,8 @@ mod tests {
         assert!(!c.features.window_restore, "window restore starts off");
         let c: Config = serde_json::from_str(r#"{ "features": { "windowRestore": true } }"#).unwrap();
         assert_eq!(c.features, Features { reminders: true, window_restore: true });
+        let c: Config = serde_json::from_str(r#"{ "roam": "nearby" }"#).unwrap();
+        assert_eq!(c.roam, Roam::Screen, "the removed 'nearby' choice reads as the whole screen");
     }
 
     #[test]

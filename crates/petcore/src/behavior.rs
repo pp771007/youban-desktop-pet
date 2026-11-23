@@ -18,11 +18,15 @@ const TUMBLE_DEG_PER_SPEED: f32 = 0.012;
 const MAX_TUMBLE_DEG: f32 = 22.0;
 /// 腳底離平台（視窗頂端）這麼近就算站在上面。
 const PLATFORM_SNAP_PX: f32 = 3.0;
+/// 身體跟禁止範圍重疊超過這麼多像素才算碰到（貼著邊站、爬邊時不算）。
+const BLOCK_TOUCH_PX: f32 = 0.5;
+/// 禁止範圍的頂端當成平台時用的「視窗代碼」：從這裡往下數（真的視窗代碼都是正的）。
+const BLOCK_WINDOW_BASE: isize = -1;
 /// 站著的視窗一格內移動超過這麼多像素，算「被載著走」（講話系統會想喊一聲）。
 const RIDE_NOTICE_PX: f32 = 6.0;
 /// 「被載著走」最快多久通知一次。
 const RIDE_NOTICE_EVERY_SECS: f64 = 8.0;
-/// 走到螢幕邊時去爬牆的機率（安靜、只在附近時不爬）。
+/// 走到螢幕邊（或活動範圍的左右邊）時去爬牆的機率（安靜時不爬）。
 const CLIMB_CHANCE: f32 = 0.5;
 const CLIMB_CHANCE_LIVELY: f32 = 0.8;
 /// 爬牆速度是走路速度的幾倍。
@@ -183,6 +187,30 @@ pub struct ItemView {
     pub wanted: bool,
 }
 
+/// 螢幕上的一個框（實體像素）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Rect {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+/// 禁止範圍的頂端：可以站、可以走過去（頂端上方留不下一個身高的不算，會被螢幕上緣切掉）。
+pub fn block_platforms(blocks: &[Rect], ceiling: f32, pet_height: f32) -> Vec<Platform> {
+    blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.top - pet_height >= ceiling)
+        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left })
+        .collect()
+}
+
+/// 這個平台是不是禁止範圍的頂端；是的話回傳它在 `Env::blocks` 裡的位置。
+pub fn block_index(window: isize) -> Option<usize> {
+    (window <= BLOCK_WINDOW_BASE).then(|| (BLOCK_WINDOW_BASE - window) as usize)
+}
+
 /// 每一格由平台層算好的環境。
 #[derive(Debug, Clone)]
 pub struct Env {
@@ -199,18 +227,37 @@ pub struct Env {
     pub walk_speed_dip: Option<f32>,
     /// 滑鼠位置（螢幕實體像素）。
     pub cursor: Option<(f32, f32)>,
-    /// 桌寵站姿身高（實體像素）。
+    /// 桌寵站姿身高、半個身寬（實體像素）。
     pub pet_height: f32,
+    pub pet_half_width: f32,
     /// 視窗頂端（空的 = 不站到視窗上）。
     pub platforms: Vec<Platform>,
     pub activity: Activity,
-    /// 「只在附近」的左右範圍；`None` = 整個螢幕。
-    pub roam: Option<(f32, f32)>,
+    /// 不能進去的地方：走進去前會爬上去、從頂端走過去（頂端要另外放進 `platforms`，見 `block_platforms`）。
+    pub blocks: Vec<Rect>,
     /// 工作區域的左右邊與頂端（爬牆用）。
     pub wall_left: f32,
     pub wall_right: f32,
     pub ceiling: f32,
     pub item: Option<ItemView>,
+}
+
+impl Env {
+    /// 只在 `area` 裡面活動：框的底邊是地板、左右是牆、頂端是天花板，框外的視窗頂不能站。
+    pub fn confine_to(&mut self, area: Rect) {
+        self.ground_y = self.ground_y.min(area.bottom);
+        self.ceiling = self.ceiling.max(area.top);
+        self.wall_left = self.wall_left.max(area.left);
+        self.wall_right = self.wall_right.min(area.right);
+        self.min_x = self.wall_left + self.pet_half_width;
+        self.max_x = (self.wall_right - self.pet_half_width).max(self.min_x);
+        let (top, bottom, left, right) = (self.ceiling + self.pet_height, self.ground_y, self.wall_left, self.wall_right);
+        self.platforms.retain_mut(|p| {
+            p.left = p.left.max(left);
+            p.right = p.right.min(right);
+            p.y >= top && p.y < bottom && p.right > p.left
+        });
+    }
 }
 
 /// 旋轉的軸心。
@@ -312,6 +359,8 @@ enum Mode {
     Climb { side: f32, target_y: f32 },
     /// 爬到定點，貼在牆上停一下。
     Cling { side: f32, until: f64 },
+    /// 爬禁止範圍的邊（`side` 同 `Climb`：範圍在牠的哪一邊），爬到頂端 `top` 就翻上去、往前走過寬 `across` 的頂端。
+    ClimbOver { side: f32, top: f32, across: f32 },
     /// 講話（頭上有對話泡泡）。
     Talk { until: f64 },
     Spin,
@@ -450,7 +499,7 @@ impl Pet {
             Mode::Hop => states::HOP,
             Mode::Look => states::LOOK,
             Mode::Stretch => states::WAKE,
-            Mode::Climb { .. } | Mode::Cling { .. } => states::CLIMB,
+            Mode::Climb { .. } | Mode::Cling { .. } | Mode::ClimbOver { .. } => states::CLIMB,
             Mode::Doze => states::DOZE,
             Mode::Yawn => states::YAWN,
             Mode::Sit { .. } => states::SIT,
@@ -504,7 +553,7 @@ impl Pet {
 
     /// 開心地跳一下（紀念日）。
     pub fn cheer(&mut self, now: f64) {
-        if !matches!(self.mode, Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. }) {
+        if !matches!(self.mode, Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } | Mode::ClimbOver { .. }) {
             self.emote(Emote::Hearts);
             self.set_mode(Mode::Happy, now);
         }
@@ -542,6 +591,7 @@ impl Pet {
                 | Mode::Petted
                 | Mode::Climb { .. }
                 | Mode::Cling { .. }
+                | Mode::ClimbOver { .. }
                 | Mode::Talk { .. }
                 | Mode::Spin
                 | Mode::Roll { .. }
@@ -656,7 +706,12 @@ impl Pet {
             Mode::Idle { until } => {
                 self.stand(env, now);
                 self.look_at_cursor(env);
-                if self.should_sleep(env) {
+                if matches!(self.mode, Mode::Idle { .. })
+                    && let Some(b) = self.block_at(self.x, self.y, env)
+                {
+                    // 被放進禁止範圍裡：走出去。
+                    self.walk_out_of(b, env, now);
+                } else if self.should_sleep(env) {
                     self.set_mode(Mode::Sleep, now);
                 } else if now >= until {
                     self.pick_next_activity(now, env);
@@ -681,9 +736,23 @@ impl Pet {
             }
             Mode::Walk { dir, until, speed_mul } => {
                 self.stand(env, now);
+                if !matches!(self.mode, Mode::Walk { .. }) {
+                    return false;
+                }
                 let ease = walk_ease(t, (until - now) as f32);
                 let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * speed_mul * ease;
+                let prev_x = self.x;
                 self.x += dir * speed * dt;
+                if let Some(b) = self.entering_block(prev_x, env) {
+                    if self.start_climb_over(b, dir, env, now) {
+                        return false;
+                    }
+                    // 頂端上面沒空間翻過去：當成牆，轉頭。
+                    self.x = prev_x;
+                    self.mode = Mode::Walk { dir: -dir, until, speed_mul };
+                    self.facing_left = dir > 0.0;
+                    return false;
+                }
                 let (lo, hi) = walk_bounds(env);
                 let mut dir = dir;
                 let mut hit_wall = None;
@@ -697,9 +766,7 @@ impl Pet {
                     hit_wall = (hi >= env.max_x).then_some(1.0);
                 }
                 self.facing_left = dir < 0.0;
-                if matches!(self.mode, Mode::Walk { .. }) {
-                    self.mode = Mode::Walk { dir, until, speed_mul };
-                }
+                self.mode = Mode::Walk { dir, until, speed_mul };
                 if let Some(side) = hit_wall
                     && self.may_climb(env)
                 {
@@ -730,11 +797,23 @@ impl Pet {
                 }
             }
             Mode::Fall { vx, vy } => {
-                let prev_y = self.y;
+                let (prev_x, prev_y) = (self.x, self.y);
                 let vy = vy + GRAVITY_DIP * env.px_per_dip * dt;
                 let mut vx = vx * (1.0 - AIR_DRAG * dt).max(0.0);
                 self.y += vy * dt;
                 self.x += vx * dt;
+                // 從側面撞上禁止範圍就彈回來；從頂端邊緣走下去時腳已經離開頂端、半個身體還壓在上面，
+                // 整個推到範圍外再往下掉（正上方掉下來會落在頂端，下面的平台判斷處理）。
+                if self.block_at(prev_x, prev_y, env).is_none()
+                    && let Some(b) = self.block_at(self.x, self.y, env)
+                {
+                    if prev_y > b.top {
+                        self.x = prev_x;
+                        vx = -vx * WALL_BOUNCE;
+                    } else if self.x < b.left || self.x > b.right {
+                        self.x = if self.x < b.left { b.left - env.pet_half_width } else { b.right + env.pet_half_width };
+                    }
+                }
                 // 往螢幕邊飛就反彈；從牆上往外跳時人在邊界外但正在往內飛，不算撞牆。
                 if (self.x < env.min_x && vx < 0.0) || (self.x > env.max_x && vx > 0.0) {
                     self.x = self.x.clamp(env.min_x, env.max_x);
@@ -760,7 +839,7 @@ impl Pet {
             }
             Mode::Roll { dir } => {
                 let (lo, hi) = walk_bounds(env);
-                self.x = (self.x + dir * ROLL_DIST_HEIGHTS * env.pet_height / ROLL_SECS * dt).clamp(lo, hi);
+                self.slide_to((self.x + dir * ROLL_DIST_HEIGHTS * env.pet_height / ROLL_SECS * dt).clamp(lo, hi), env);
                 self.stand(env, now);
                 if matches!(self.mode, Mode::Roll { .. }) {
                     self.finish_after(t, ROLL_SECS, now);
@@ -784,12 +863,11 @@ impl Pet {
                             let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * CHASE_SPEED_MUL;
                             let (lo, hi) = walk_bounds(env);
                             let x = (self.x + dir * speed * dt).clamp(lo, hi);
-                            if x == self.x {
-                                // 滑鼠在走不到的地方（範圍外）：放棄。
+                            if x == self.x || !self.slide_to(x, env) {
+                                // 滑鼠在走不到的地方（範圍外、隔著禁止範圍）：放棄。
                                 self.emote(Emote::Question);
                                 self.set_idle(now);
                             }
-                            self.x = x;
                         }
                     }
                     _ => {
@@ -802,7 +880,7 @@ impl Pet {
                 let p = t / POUNCE_SECS;
                 if (JUMP_CROUCH..1.0 - JUMP_LAND).contains(&p) {
                     let (lo, hi) = walk_bounds(env);
-                    self.x = (self.x + dir * POUNCE_SPEED_HEIGHTS * env.pet_height * dt).clamp(lo, hi);
+                    self.slide_to((self.x + dir * POUNCE_SPEED_HEIGHTS * env.pet_height * dt).clamp(lo, hi), env);
                 }
                 self.stand(env, now);
                 if matches!(self.mode, Mode::Pounce { .. }) && t >= POUNCE_SECS {
@@ -879,6 +957,19 @@ impl Pet {
                     self.y = target_y;
                     let until = now + self.rand_range(CLING_SECS) as f64;
                     self.set_mode(Mode::Cling { side, until }, now);
+                }
+            }
+            Mode::ClimbOver { side, top, across } => {
+                let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip;
+                self.y -= speed * CLIMB_SPEED_MUL * dt;
+                if self.y <= top {
+                    // 翻上去：站到頂端靠邊的地方，接著往前走過整個頂端（走到另一頭會掉下去 = 翻過去了）。
+                    self.y = top;
+                    self.x += side * env.pet_half_width;
+                    self.riding = None;
+                    self.facing_left = side < 0.0;
+                    let secs = (across + env.pet_half_width) / speed + 2.0 * WALK_EASE_SECS;
+                    self.set_mode(Mode::Walk { dir: side, until: now + secs as f64, speed_mul: 1.0 }, now);
                 }
             }
             Mode::Cling { side, until } => {
@@ -1058,7 +1149,7 @@ impl Pet {
                     jump_pose(&mut pose, (cycle * 4.0).fract(), 0.08, 0.06);
                 }
             }
-            Mode::Climb { side, .. } => {
+            Mode::Climb { side, .. } | Mode::ClimbOver { side, .. } => {
                 pose.climb = Some(side);
                 pose.lift = -0.03 * (pi * t * STEPS_PER_SEC).sin().abs();
             }
@@ -1087,8 +1178,55 @@ impl Pet {
             Activity::Normal => CLIMB_CHANCE,
             Activity::Lively => CLIMB_CHANCE_LIVELY,
         };
-        // 只在地面上的螢幕邊爬（站在視窗上走到邊是掉下去）；「只在附近」時不爬。
-        env.roam.is_none() && (self.y - env.ground_y).abs() < 1.0 && self.rand01() < chance
+        // 只在地面上的螢幕邊爬（站在視窗上走到邊是掉下去）。
+        (self.y - env.ground_y).abs() < 1.0 && self.rand01() < chance
+    }
+
+    /// 身體站在 `(x, y)` 時會碰到的禁止範圍。
+    fn block_at(&self, x: f32, y: f32, env: &Env) -> Option<Rect> {
+        let (hw, h, e) = (env.pet_half_width, env.pet_height, BLOCK_TOUCH_PX);
+        env.blocks.iter().copied().find(|b| x + hw > b.left + e && x - hw < b.right - e && y > b.top + e && y - h < b.bottom - e)
+    }
+
+    /// 從 `prev_x` 走到現在的位置，是不是剛走進某個禁止範圍（本來就在裡面的不算，讓牠走得出來）。
+    fn entering_block(&self, prev_x: f32, env: &Env) -> Option<Rect> {
+        if self.block_at(prev_x, self.y, env).is_some() {
+            return None;
+        }
+        self.block_at(self.x, self.y, env)
+    }
+
+    /// 水平移動到 `x`；會走進禁止範圍就不動，回傳 `false`。
+    fn slide_to(&mut self, x: f32, env: &Env) -> bool {
+        let prev_x = self.x;
+        self.x = x;
+        if self.entering_block(prev_x, env).is_some() {
+            self.x = prev_x;
+            return false;
+        }
+        true
+    }
+
+    /// 往 `dir` 走進了禁止範圍 `b`：貼著它的邊往上爬。頂端上方留不下一個身高就爬不過去，回傳 `false`。
+    fn start_climb_over(&mut self, b: Rect, dir: f32, env: &Env, now: f64) -> bool {
+        if b.top - env.pet_height < env.ceiling {
+            return false;
+        }
+        let side = dir.signum();
+        self.x = if side > 0.0 { b.left } else { b.right };
+        self.riding = None;
+        self.set_mode(Mode::ClimbOver { side, top: b.top, across: b.right - b.left }, now);
+        true
+    }
+
+    /// 被放進禁止範圍裡：往比較近的那一邊走出去。
+    fn walk_out_of(&mut self, b: Rect, env: &Env, now: f64) {
+        let (to_left, to_right) = (self.x - b.left, b.right - self.x);
+        let (dir, dist) = if to_left <= to_right { (-1.0, to_left) } else { (1.0, to_right) };
+        let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip;
+        let secs = (dist + env.pet_half_width) / speed + 2.0 * WALK_EASE_SECS;
+        self.facing_left = dir < 0.0;
+        self.set_mode(Mode::Walk { dir, until: now + secs as f64, speed_mul: 1.0 }, now);
     }
 
     /// 動畫預覽工具用：直接開始某個動作（平常這些是隨機或由輸入觸發的）。
@@ -1183,8 +1321,10 @@ impl Pet {
         if (same_level || !item.grounded) && dx.abs() > reach * 0.5 {
             let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * FETCH_SPEED_MUL;
             let (lo, hi) = walk_bounds(env);
-            self.x = (self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi);
-            return;
+            // 隔著禁止範圍就過不去，跟搆不到一樣等一下就放棄。
+            if self.slide_to((self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi), env) {
+                return;
+            }
         }
         if item.grounded && now - since >= FETCH_PATIENCE_SECS {
             self.emote(Emote::Question);
@@ -1197,7 +1337,7 @@ impl Pet {
     fn cursor_reachable(&self, (cx, cy): (f32, f32), env: &Env, max_dx: f32) -> bool {
         let h = env.pet_height;
         let (lo, hi) = walk_bounds(env);
-        cy <= self.y + h * 0.5 && cy >= self.y - h * CHASE_MAX_ABOVE_HEIGHTS && (cx - self.x).abs() <= max_dx && cx >= lo - h && cx <= hi + h
+        cy <= self.y + h * 0.5 && cy >= self.y - h * CHASE_MAX_ABOVE_HEIGHTS && (cx - self.x).abs() <= max_dx && cx >= lo - h && cx <= hi + h && self.block_at(cx, self.y, env).is_none()
     }
 
     fn finish_after(&mut self, t: f32, secs: f32, now: f64) {
@@ -1371,16 +1511,9 @@ fn jump_pose(pose: &mut Pose, p: f32, height: f32, squash: f32) {
     pose.scale_x = 1.0 + (1.0 - scale_y) * 0.7;
 }
 
-/// 散步能走的左右範圍：螢幕範圍，再套上「只在附近」的限制。
+/// 散步能走的左右範圍（腳底中心點）。
 fn walk_bounds(env: &Env) -> (f32, f32) {
-    match env.roam {
-        Some((lo, hi)) => {
-            let lo = lo.max(env.min_x);
-            let hi = hi.min(env.max_x).max(lo);
-            (lo, hi)
-        }
-        None => (env.min_x, env.max_x),
-    }
+    (env.min_x, env.max_x)
 }
 
 #[cfg(test)]
@@ -1400,9 +1533,10 @@ mod tests {
             walk_speed_dip: None,
             cursor: None,
             pet_height: 128.0,
+            pet_half_width: 50.0,
             platforms: Vec::new(),
             activity: Activity::Normal,
-            roam: None,
+            blocks: Vec::new(),
             wall_left: 36.0,
             wall_right: 1864.0,
             ceiling: 0.0,
@@ -1706,32 +1840,69 @@ mod tests {
     }
 
     #[test]
-    fn calm_or_nearby_never_climbs() {
-        for (activity, roam) in [(Activity::Calm, None), (Activity::Lively, Some((36.0, 600.0)))] {
-            let mut env = env();
-            env.activity = activity;
-            env.roam = roam;
-            let mut now = 0.0;
-            let mut pet = Pet::new(150.0, 1000.0, now, 17);
-            for _ in 0..(600.0 / DT) as usize {
-                now += DT as f64;
-                pet.update(now, DT, &env);
-                assert_ne!(pet.state(), states::CLIMB);
-            }
+    fn calm_never_climbs() {
+        let mut env = env();
+        env.activity = Activity::Calm;
+        let mut now = 0.0;
+        let mut pet = Pet::new(150.0, 1000.0, now, 17);
+        for _ in 0..(600.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            assert_ne!(pet.state(), states::CLIMB);
         }
     }
 
     #[test]
-    fn nearby_roam_keeps_it_close() {
+    fn stays_inside_an_allowed_area_standing_on_its_bottom_edge() {
         let mut env = env();
-        env.roam = Some((400.0, 700.0));
+        env.activity = Activity::Lively;
+        env.platforms = vec![
+            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0 },
+            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0 },
+        ];
+        let area = Rect { left: 400.0, top: 300.0, right: 1000.0, bottom: 800.0 };
+        env.confine_to(area);
+        assert_eq!(env.platforms.len(), 1, "window tops outside the area are not offered");
         let mut now = 0.0;
-        let mut pet = Pet::new(500.0, 1000.0, now, 21);
+        let mut pet = Pet::new(600.0, 800.0, now, 21);
         for _ in 0..(600.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            assert!((400.0..=700.0).contains(&pet.x), "x = {}", pet.x);
+            assert!((area.left..=area.right).contains(&pet.x) && pet.y <= area.bottom, "left the area at ({}, {})", pet.x, pet.y);
         }
+        assert!(pet.y == area.bottom || pet.y == 600.0, "stands on the area's bottom edge or the window top inside it, y = {}", pet.y);
+    }
+
+    /// 地上一塊禁止範圍：散步走過去會爬上去、從頂端走過，身體從來不會跑進去。
+    #[test]
+    fn climbs_over_a_forbidden_area_instead_of_walking_into_it() {
+        let mut env = env();
+        let block = Rect { left: 600.0, top: 850.0, right: 800.0, bottom: 1000.0 };
+        env.blocks = vec![block];
+        env.platforms = block_platforms(&env.blocks, env.ceiling, env.pet_height);
+        let mut now = 0.0;
+        let mut pet = Pet::new(450.0, 1000.0, now, 3);
+        pet.start_demo(Demo::Walk { secs: 30.0 }, now, &env);
+        let (mut climbed, mut on_top, mut beyond) = (false, false, false);
+        for _ in 0..(40.0 / DT) as usize {
+            now += DT as f64;
+            pet.update(now, DT, &env);
+            assert!(pet.block_at(pet.x, pet.y, &env).is_none() || pet.state() == states::CLIMB, "inside the forbidden area at ({}, {}) while {}", pet.x, pet.y, pet.state());
+            climbed |= pet.state() == states::CLIMB;
+            on_top |= pet.y == block.top && pet.riding_window().and_then(block_index) == Some(0);
+            beyond |= on_top && pet.x > block.right && pet.y == env.ground_y;
+        }
+        assert!(climbed && on_top && beyond, "climbed {climbed}, walked on top {on_top}, got down the far side {beyond}");
+    }
+
+    #[test]
+    fn dropped_inside_a_forbidden_area_walks_out() {
+        let mut env = env();
+        env.blocks = vec![Rect { left: 400.0, top: 700.0, right: 900.0, bottom: 1000.0 }];
+        let mut now = 0.0;
+        let mut pet = Pet::new(500.0, 1000.0, now, 8);
+        run(&mut pet, &mut now, 10.0, &env);
+        assert!(pet.block_at(pet.x, pet.y, &env).is_none(), "still inside at x = {}", pet.x);
     }
 
     #[test]
