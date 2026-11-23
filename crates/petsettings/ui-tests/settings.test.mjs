@@ -33,7 +33,7 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, autoUpdate: true, announceNewWindows: true, features: { reminders: true, windowRestore: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, autoUpdate: true, announceNewWindows: true, allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -169,6 +169,15 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '10 分' }).click();
     const cfg = await page.evaluate(() => window.__mock.config);
     check(cfg.activity === 'calm' && cfg.roam === 'avoid' && cfg.talk === 'often' && cfg.standOnWindows === false && cfg.sleepAfterSecs === 600, 'behavior settings write config');
+    // 避開這些地方：列出畫好的框、可以刪、按新增請核心在螢幕上畫
+    check(await page.getByText('600 × 140').isVisible(), 'forbidden areas are listed with their size');
+    await page.getByRole('button', { name: '新增禁止範圍' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'drawArea' && c.kind === 'forbidden')), 'adding a forbidden area asks the core to draw one');
+    await page.getByRole('button', { name: '刪除禁止範圍 1' }).click();
+    check(await page.evaluate(() => window.__mock.config.forbiddenAreas.length) === 0, 'deleting a forbidden area writes config');
+    await page.getByRole('button', { name: '只在範圍內' }).click();
+    await page.getByRole('button', { name: '畫範圍' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'drawArea' && c.kind === 'allowed')), 'drawing the allowed area asks the core');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-pets-light.png') });
 
     // 新增桌寵：選一張圖 → 看到整理好的樣子 → 取名字 → 完成就換過去

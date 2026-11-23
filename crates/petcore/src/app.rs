@@ -20,7 +20,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::System::Threading::{CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, INFINITE, SetWaitableTimer, TIMER_ALL_ACCESS};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, GetLastInputInfo, LASTINPUTINFO, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, GetLastInputInfo, LASTINPUTINFO, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Error, HSTRING, PCWSTR, Result, w};
 use windows_numerics::Vector2;
@@ -28,6 +28,7 @@ use windows_numerics::Vector2;
 use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::glow::{GlowPainter, GlowStyle};
+use crate::area_editor::{AreaEditor, AreaInput, AreaKind, Outcome};
 use crate::chatter::{self, Chatter, Say};
 use crate::platforms;
 use crate::bubble::{Bubble, Card, CardAction, Pointer};
@@ -51,6 +52,15 @@ static PET_CLASS_NAME: LazyLock<HSTRING> = LazyLock::new(|| HSTRING::from(ipc::P
 const CARD_CLASS: PCWSTR = w!("YoubanDesktopPet.Card");
 const TOY_CLASS: PCWSTR = w!("YoubanDesktopPet.Toy");
 const GLOW_CLASS: PCWSTR = w!("YoubanDesktopPet.Glow");
+const AREA_CLASS: PCWSTR = w!("YoubanDesktopPet.Area");
+/// 畫範圍時，框要至少這麼大才算：禁止範圍（DIP）、活動範圍（站姿寬的幾倍 × 身高的幾倍，要能在裡面走動）。
+const MIN_FORBIDDEN_DIP: f32 = 16.0;
+const MIN_ALLOWED_WIDTHS: f32 = 2.0;
+const MIN_ALLOWED_HEIGHTS: f32 = 1.5;
+/// 畫好範圍後桌寵說的話。
+const SAY_ALLOWED_SET: &str = "這裡就是我的地盤了～";
+const SAY_FORBIDDEN_SET: &str = "知道了，那裡我不去～";
+const SAY_AREA_SECS: f32 = 3.0;
 
 pub fn pet_class() -> PCWSTR {
     PCWSTR(PET_CLASS_NAME.as_ptr())
@@ -144,6 +154,8 @@ enum Event {
     Card(Pointer, f32, f32),
     /// 使用者點了桌面上的點心／球。
     ToyPoke,
+    /// 畫範圍的畫面上的滑鼠與鍵盤。
+    Area(AreaInput),
 }
 
 /// 桌面上的點心或球，與它自己的視窗。
@@ -168,7 +180,7 @@ static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 fn push(event: Event) {
     EVENTS.with_borrow_mut(|q| {
         // 連續的滑鼠移動只留最後一筆，佇列不會因為滑鼠狂動而長大。
-        let is_move = |e: &Event| matches!(e, Event::PointerMove | Event::Hover | Event::Card(Pointer::Move, ..));
+        let is_move = |e: &Event| matches!(e, Event::PointerMove | Event::Hover | Event::Card(Pointer::Move, ..) | Event::Area(AreaInput::Move(..)));
         if is_move(&event) && q.last().is_some_and(|last| std::mem::discriminant(last) == std::mem::discriminant(&event) && is_move(last)) {
             q.pop();
         }
@@ -272,6 +284,9 @@ struct App {
     toy_painter: ToyPainter,
     glow_hwnd: HWND,
     glow: GlowPainter,
+    gfx: Gfx,
+    /// 正在畫範圍（設定程式按了「畫範圍」）。
+    area_editor: Option<AreaEditor>,
 }
 
 pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
@@ -366,6 +381,8 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         toy_painter: ToyPainter::new(&gfx)?,
         glow_hwnd,
         glow: GlowPainter::new(&gfx)?,
+        gfx: gfx.clone(),
+        area_editor: None,
     };
     app.resize_window()?;
     if after_update {
@@ -503,6 +520,7 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
     register_class(CARD_CLASS, Some(card_proc), IDC_ARROW)?;
     register_class(TOY_CLASS, Some(toy_proc), IDC_HAND)?;
     register_class(GLOW_CLASS, Some(glow_proc), IDC_ARROW)?;
+    register_class(AREA_CLASS, Some(area_proc), IDC_CROSS)?;
     unsafe { TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed) };
     let pet = create_layered(pet_class(), w!("柚伴"), instance)?;
     let card = create_layered(CARD_CLASS, w!("柚伴提醒"), instance)?;
@@ -521,6 +539,26 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND)> {
 
 extern "system" fn glow_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+extern "system" fn area_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let (x, y) = client_xy(lparam);
+    let (x, y) = (x as i32, y as i32);
+    let input = match msg {
+        WM_LBUTTONDOWN => Some(AreaInput::Down(x, y)),
+        WM_MOUSEMOVE => Some(AreaInput::Move(x, y)),
+        WM_LBUTTONUP => Some(AreaInput::Up(x, y)),
+        WM_RBUTTONUP => Some(AreaInput::Cancel),
+        WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => Some(AreaInput::Cancel),
+        _ => None,
+    };
+    match input {
+        Some(i) => {
+            push(Event::Area(i));
+            LRESULT(0)
+        }
+        None => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
 }
 
 extern "system" fn toy_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -769,6 +807,7 @@ impl App {
                 Event::UpdateReady => self.update_ready = true,
                 Event::SettingChanged => self.palette = theme::with_accent(theme::current(), self.pack.accent.as_deref()),
                 Event::Command(text) => self.command(&text)?,
+                Event::Area(input) => self.area_input(input)?,
                 Event::ToyPoke => {
                     let jitter = self.rand01() * 2.0 - 1.0;
                     let s = self.dpi_scale();
@@ -882,6 +921,10 @@ impl App {
             ipc::CMD_OPEN_SETTINGS => self.open_settings(v["page"].as_str()),
             ipc::CMD_DUMP_STATUS => self.dump_status(),
             ipc::CMD_TOY => self.spawn_toy(v["kind"].as_str() == Some("ball")),
+            ipc::CMD_DRAW_AREA => {
+                let kind = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) { AreaKind::Allowed } else { AreaKind::Forbidden };
+                self.open_area_editor(kind)?;
+            }
             ipc::CMD_SAY => {
                 let text = v["text"].as_str().unwrap_or("測試講話").to_owned();
                 let secs = v["secs"].as_f64().unwrap_or(4.0) as f32;
@@ -1147,6 +1190,47 @@ impl App {
             }
         }
         env
+    }
+
+    fn open_area_editor(&mut self, kind: AreaKind) -> Result<()> {
+        self.area_editor = None;
+        let s = self.dpi_scale();
+        let (existing, min, color) = match kind {
+            AreaKind::Allowed => (self.config.allowed_area.into_iter().collect(), (self.idle_width() * MIN_ALLOWED_WIDTHS, self.sprites.base_height * MIN_ALLOWED_HEIGHTS), self.palette.accent.d2d()),
+            AreaKind::Forbidden => (self.config.forbidden_areas.clone(), (MIN_FORBIDDEN_DIP * s, MIN_FORBIDDEN_DIP * s), self.palette.danger.d2d()),
+        };
+        let min = (min.0.ceil() as i32, min.1.ceil() as i32);
+        self.area_editor = Some(AreaEditor::open(&self.gfx, AREA_CLASS, kind, existing, min, s, color)?);
+        Ok(())
+    }
+
+    /// 畫範圍的畫面收到滑鼠或鍵盤：畫好就寫進設定檔（設定程式回到前景時會重新讀）。
+    fn area_input(&mut self, input: AreaInput) -> Result<()> {
+        let Some(editor) = self.area_editor.as_mut() else { return Ok(()) };
+        let kind = editor.kind;
+        let Some(outcome) = editor.input(input)? else { return Ok(()) };
+        self.area_editor = None;
+        let Outcome::Done(area) = outcome else { return Ok(()) };
+        log!("{kind:?} area drawn: {area:?}");
+        let text = match kind {
+            AreaKind::Allowed => {
+                self.config.allowed_area = Some(area);
+                SAY_ALLOWED_SET
+            }
+            AreaKind::Forbidden => {
+                self.config.forbidden_areas.push(area);
+                SAY_FORBIDDEN_SET
+            }
+        };
+        let path = paths::config_file();
+        if let Err(e) = self.config.save(&path) {
+            log!("save config failed: {e}");
+        }
+        self.config_stamp = stamp(&path);
+        if self.config.talk != Talk::Never {
+            self.say(Say { text: text.to_owned(), emote: Some(Emote::Note), secs: SAY_AREA_SECS }, self.now());
+        }
+        Ok(())
     }
 
     /// 「避開這些地方」開著時的禁止範圍。

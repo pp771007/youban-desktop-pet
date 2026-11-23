@@ -21,7 +21,7 @@ use tauri::State;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SW_RESTORE, SendMessageW, SetForegroundWindow, ShowWindow, WM_COPYDATA};
+use windows::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SendMessageW, SetForegroundWindow, ShowWindow, WM_COPYDATA};
 use windows::core::{HSTRING, PCWSTR, w};
 
 /// 也用來找已經開著的設定視窗（只開一個）；跟 `tauri.conf.json` 的視窗 title、`ui/index.html` 的 `<title>` 一致。
@@ -341,6 +341,8 @@ fn send_core(command: serde_json::Value) -> CmdResult<()> {
     let text = command.to_string();
     let data = COPYDATASTRUCT { dwData: 0, cbData: text.len() as u32, lpData: text.as_ptr() as *mut _ };
     unsafe {
+        // 核心可能要把自己的畫面拉到最前面（畫範圍要收得到 Esc）：前景權在按按鈕的設定程式手上，先讓出來。
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
         SendMessageW(hwnd, WM_COPYDATA, Some(WPARAM(0)), Some(LPARAM(&data as *const _ as isize)));
     }
     Ok(())

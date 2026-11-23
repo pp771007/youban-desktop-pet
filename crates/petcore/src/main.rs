@@ -23,6 +23,7 @@ mod sprites;
 mod theme;
 mod toy;
 mod glow;
+mod area_editor;
 mod tray;
 mod updater;
 mod window_restore;

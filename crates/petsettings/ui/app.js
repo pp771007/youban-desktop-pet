@@ -765,6 +765,26 @@ function promptPanel(s, example) {
       example.length ? h('button', { class: 'btn btn-secondary btn-small', onclick: () => invoke('save_example', { state: s, label: ACTIONS[s].label }).then(() => toast('範例圖已存到「下載」')).catch((err) => toast(String(err))) }, icon('download'), '下載範例圖') : null));
 }
 
+/** 活動範圍選了「只在範圍內」或「避開這些地方」時，底下列出畫好的框。框由核心在螢幕上畫，畫好寫進設定檔。 */
+function areaRows() {
+  const draw = (kind) => invoke('send_core', { command: { cmd: 'drawArea', kind } });
+  const size = (a) => h('span', { class: 'tag' }, `${a.right - a.left} × ${a.bottom - a.top}`);
+  const drawButton = (kind, glyph, label) => h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => draw(kind) }, icon(glyph), label);
+  if (state.config.roam === 'inside') {
+    const a = state.config.allowedArea;
+    return [settingRow('範圍', h('div', { class: 'row' }, a ? size(a) : null, a ? drawButton('allowed', 'rotate-ccw', '重畫') : drawButton('allowed', 'plus', '畫範圍')))];
+  }
+  if (state.config.roam === 'avoid') {
+    const remove = async (i) => { state.config.forbiddenAreas.splice(i, 1); await saveConfig(); render(); };
+    return [
+      ...state.config.forbiddenAreas.map((a, i) => settingRow(`禁止範圍 ${i + 1}`, h('div', { class: 'row' }, size(a),
+        h('button', { class: 'btn btn-secondary btn-small', 'aria-label': `刪除禁止範圍 ${i + 1}`, onclick: () => remove(i) }, icon('trash-2'), '刪除')))),
+      settingRow('', drawButton('forbidden', 'plus', '新增禁止範圍')),
+    ];
+  }
+  return [];
+}
+
 function renderBehavior() {
   const set = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
   return h('section', { class: 'section' },
@@ -772,6 +792,7 @@ function renderBehavior() {
     h('div', { class: 'card' },
       settingRow('活潑程度', segmented(ACTIVITY_CHOICES, state.config.activity, (v) => set('activity', v))),
       settingRow('活動範圍', segmented(ROAM_CHOICES, state.config.roam, (v) => set('roam', v))),
+      ...areaRows(),
       settingRow('講話', segmented(TALK_CHOICES, state.config.talk, (v) => set('talk', v))),
       settingRow('沒碰電腦多久就睡覺', segmented(SLEEP_CHOICES, state.config.sleepAfterSecs, (v) => set('sleepAfterSecs', v))),
       settingRow('站到視窗上', configSwitch('standOnWindows', '站到視窗上')),
@@ -888,6 +909,14 @@ async function main() {
   document.getElementById('drawer-backdrop').addEventListener('click', closeEditor);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && editor) closeEditor(); });
   document.getElementById('start-core').addEventListener('click', async () => { await invoke('start_core'); setTimeout(pollCore, 800); });
+  // 核心也會寫設定檔（畫好範圍、從托盤換桌寵）：回到這個視窗時重新讀，畫面才不會停在舊的。
+  window.addEventListener('focus', async () => {
+    const config = await invoke('load_config');
+    if (JSON.stringify(config) !== JSON.stringify(state.config)) {
+      state.config = config;
+      render();
+    }
+  });
   await pollCore();
   await go((await invoke('initial_page')) || DEFAULT_PAGE);
   setInterval(pollCore, CORE_POLL_MS);

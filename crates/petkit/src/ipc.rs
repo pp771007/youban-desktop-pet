@@ -19,3 +19,7 @@ pub const CMD_TEST_MEMORY_ALERT: &str = "testMemoryAlert";
 pub const CMD_SAY: &str = "say";
 /// 丟一個點心或球 `{"kind": "food" | "ball"}`（跟右鍵選單一樣）。
 pub const CMD_TOY: &str = "toy";
+/// 在螢幕上畫一個範圍 `{"kind": "allowed" | "forbidden"}`：畫好由核心寫進設定檔。
+pub const CMD_DRAW_AREA: &str = "drawArea";
+pub const AREA_ALLOWED: &str = "allowed";
+pub const AREA_FORBIDDEN: &str = "forbidden";
