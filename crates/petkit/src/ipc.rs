@@ -1,4 +1,4 @@
-//! 設定程式 → 核心的指令：用 WM_COPYDATA 送一段 JSON `{"cmd": "...", ...}` 給核心的桌寵視窗。
+//! 設定程式（傳話則是任何程式）→ 核心的指令：用 WM_COPYDATA 送一段 JSON `{"cmd": "...", ...}` 給核心的桌寵視窗。
 
 /// 核心桌寵視窗的類別名稱（設定程式靠它找到核心）。
 pub const PET_WINDOW_CLASS: &str = "YoubanDesktopPet.Pet";
@@ -34,3 +34,16 @@ pub const CMD_DRAW_AREA: &str = "drawArea";
 pub const CMD_PREVIEW_AREA: &str = "previewArea";
 pub const AREA_ALLOWED: &str = "allowed";
 pub const AREA_FORBIDDEN: &str = "forbidden";
+/// 傳話：指令的其他欄位是一個 `Relay`。
+pub const CMD_RELAY: &str = "relay";
+
+/// 一則傳話（用詞見 `CONTEXT.md`）。`from` + `id` 一樣的，後來的更新前一則，不另外疊一則。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Relay {
+    pub style: crate::reminders::Style,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}

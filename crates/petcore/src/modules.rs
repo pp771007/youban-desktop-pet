@@ -51,7 +51,7 @@ impl Ctx<'_> {
 pub enum ModuleEvent<'a> {
     /// 使用者點了這個模組提供的選單項目（模組自己的編號）。
     Menu(u32),
-    /// 使用者在這個模組丟出的卡片上按了按鈕。
+    /// 這個模組丟出的卡片上按了按鈕；自己消失的卡時間到也算一次 `Dismiss`。
     Card { key: &'a str, action: CardAction },
     /// 螢幕接上／拔掉／改解析度。
     DisplayChanged,

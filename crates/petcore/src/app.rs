@@ -55,6 +55,7 @@ use crate::modules::{ModuleEvent, ModuleHost, Request};
 use crate::paths;
 use crate::platforms;
 use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
+use crate::relay_module::{self, RelayModule};
 use crate::reminder_module::{self, ReminderModule};
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::soak::{Action, Soak};
@@ -602,6 +603,7 @@ fn enabled_modules(config: &Config) -> Vec<&'static str> {
         (f.reminders, reminder_module::ID),
         (f.window_restore, window_restore::ID),
         (f.focus, focus_module::ID),
+        (f.relay, relay_module::ID),
     ]
     .into_iter()
     .filter(|(on, _)| *on)
@@ -622,6 +624,7 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
             &paths::focus_status_file(),
             local_now(),
         ))),
+        relay_module::ID => Box::new(RelayModule::new(paths::relay_state_file())),
         _ => unreachable!("unknown module {id}"),
     }
 }
@@ -1292,6 +1295,11 @@ impl App {
             }
             return;
         }
+        self.card_closed(&q, action);
+    }
+
+    /// 卡片收掉了（按了按鈕，或時間到自己消失）：告訴丟出它的模組。
+    fn card_closed(&mut self, q: &Queued, action: CardAction) {
         let mut out = Vec::new();
         self.modules.send(
             q.owner,
@@ -2575,8 +2583,9 @@ impl App {
             && self.shown_card
             && self.bubble.shown_for(now) >= secs
         {
-            self.cards.pop_front();
+            let q = self.cards.pop_front().expect("front exists");
             self.shown_card = false;
+            self.card_closed(&q, CardAction::Dismiss);
         }
         match self.cards.front() {
             Some(q) => {

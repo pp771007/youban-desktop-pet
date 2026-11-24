@@ -20,6 +20,7 @@ mod paths;
 mod platforms;
 mod popup_menu;
 mod preview;
+mod relay_module;
 mod reminder_module;
 mod render;
 mod slicer;
@@ -32,6 +33,7 @@ mod tray;
 mod updater;
 mod window_restore;
 
+use petkit::reminders::Style;
 use windows::Win32::Foundation::{
     ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WAIT_ABANDONED, WAIT_OBJECT_0, WPARAM,
 };
@@ -51,6 +53,18 @@ const SLICE_FLAG: &str = "--slice";
 const SEND_FLAG: &str = "--send";
 /// 叫執行中的柚伴結束（解除安裝程式在刪檔前用；不用自己組 JSON）。
 const QUIT_FLAG: &str = "--quit";
+/// 傳話（給 AI 和其他程式用，用詞見 `CONTEXT.md`）：`--confirm` 跳確認框、`--notice` 跳提示框。
+const CONFIRM_FLAG: &str = "--confirm";
+const NOTICE_FLAG: &str = "--notice";
+const RELAY_FROM_OPT: &str = "--from";
+const RELAY_ID_OPT: &str = "--id";
+const RELAY_USAGE: &str =
+    "用法：Youban.exe --confirm|--notice <要說的話> [--from <誰傳的>] [--id <同一件事的代號>]";
+/// 傳話的結束碼：送程式的那一方靠它知道使用者有沒有收到。
+const RELAY_EXIT_SENT: i32 = 0;
+const RELAY_EXIT_NOT_RUNNING: i32 = 1;
+const RELAY_EXIT_USAGE: i32 = 2;
+const RELAY_EXIT_DISABLED: i32 = 3;
 const SOAK_FLAG: &str = "--soak";
 const AUTOSTART_FLAG: &str = "--autostart";
 const SNAPSHOT_DEFAULT_DPI: u32 = 96;
@@ -122,6 +136,7 @@ fn main() {
             }
         }
         Some(SEND_FLAG) => std::process::exit(if send(arg(2).unwrap_or("{}")) { 0 } else { 1 }),
+        Some(flag @ (CONFIRM_FLAG | NOTICE_FLAG)) => std::process::exit(relay(flag, &args[2..])),
         Some(QUIT_FLAG) => std::process::exit(
             if send(&serde_json::json!({ "cmd": petkit::ipc::CMD_QUIT }).to_string()) {
                 0
@@ -175,6 +190,56 @@ fn run_app(soak_secs: Option<u64>, after_update: bool) {
 }
 
 /// 把一段 JSON 指令送給正在跑的桌寵（設定程式與自動測試用）。
+fn relay(flag: &str, rest: &[String]) -> i32 {
+    let usage = || {
+        eprintln!("{RELAY_USAGE}");
+        RELAY_EXIT_USAGE
+    };
+    let (mut title, mut from, mut id) = (None, None, None);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        let slot = match a.as_str() {
+            RELAY_FROM_OPT => &mut from,
+            RELAY_ID_OPT => &mut id,
+            _ if title.is_none() => {
+                title = Some(a.clone());
+                continue;
+            }
+            _ => return usage(),
+        };
+        let Some(value) = it.next() else {
+            return usage();
+        };
+        *slot = Some(value.clone());
+    }
+    let Some(title) = title.filter(|t| !t.trim().is_empty()) else {
+        return usage();
+    };
+    let config = petkit::config::Config::load(&petkit::paths::config_file()).unwrap_or_default();
+    if !config.features.relay {
+        eprintln!("傳話在柚伴的設定裡關掉了");
+        return RELAY_EXIT_DISABLED;
+    }
+    let style = if flag == CONFIRM_FLAG {
+        Style::Confirm
+    } else {
+        Style::Notice
+    };
+    let mut v = serde_json::to_value(petkit::ipc::Relay {
+        style,
+        title,
+        from,
+        id,
+    })
+    .expect("relay serializes");
+    v["cmd"] = petkit::ipc::CMD_RELAY.into();
+    if send(&v.to_string()) {
+        RELAY_EXIT_SENT
+    } else {
+        RELAY_EXIT_NOT_RUNNING
+    }
+}
+
 fn send(json: &str) -> bool {
     unsafe {
         let Ok(hwnd) = FindWindowW(app::pet_class(), PCWSTR::null()) else {

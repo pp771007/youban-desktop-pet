@@ -22,6 +22,10 @@ pub fn reminder_state_file() -> PathBuf {
     local_dir().join("reminder-state.json")
 }
 
+pub fn relay_state_file() -> PathBuf {
+    local_dir().join("relay-state.json")
+}
+
 pub fn settings_exe() -> Option<PathBuf> {
     sibling_exe(SETTINGS_EXE)
 }

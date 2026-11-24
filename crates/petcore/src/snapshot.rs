@@ -241,6 +241,8 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         (Card::Notice { title: "已經連續用電腦 50 分鐘了，起來走走吧".into(), time: "15:20".into(), icon: Icon::Cup }, None),
         (Card::Confirm { title: "再 3 天就是媽媽生日囉～".into(), time: "5/21（四） · 農曆四月初五 · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake }, None),
         (Card::Confirm { title: "繳信用卡費：這個月記得用網銀轉帳，順便確認自動扣款有沒有設定成功".into(), time: "10:30".into(), snooze_open: true, icon: Icon::BellRing }, None),
+        (Card::Confirm { title: "PR 有 2 則新留言，要你看一下".into(), time: "Claude・柚伴 · 14:02".into(), snooze_open: false, icon: Icon::MessageDots }, None),
+        (Card::Notice { title: "測試全部通過了".into(), time: "Codex・網站 · 14:05".into(), icon: Icon::MessageDots }, None),
         (
             Card::Missed {
                 rows: vec![("喝水".into(), "14:00（3 次）".into()), ("站起來走走".into(), "15:30".into()), ("週報".into(), "11/20 17:00".into())],

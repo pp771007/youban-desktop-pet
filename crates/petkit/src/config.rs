@@ -93,6 +93,8 @@ pub struct Features {
     pub window_restore: bool,
     /// 專注（番茄鐘）：沒有開始就什麼都不做，只有右鍵選單多一項。
     pub focus: bool,
+    /// 傳話：沒有程式送來就什麼都不做。
+    pub relay: bool,
 }
 
 impl Default for Features {
@@ -101,6 +103,7 @@ impl Default for Features {
             reminders: true,
             window_restore: false,
             focus: true,
+            relay: true,
         }
     }
 }
@@ -290,7 +293,8 @@ mod tests {
             Features {
                 reminders: true,
                 window_restore: true,
-                focus: true
+                focus: true,
+                relay: true
             }
         );
         let c: Config = serde_json::from_str(r#"{ "roam": "nearby" }"#).unwrap();
