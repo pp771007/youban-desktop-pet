@@ -18,6 +18,7 @@ use petkit::reminders::{Reminder, ReminderFile, Style};
 use serde::{Deserialize, Serialize};
 
 use crate::bubble::{Card, CardAction, MISSED_MAX_ROWS};
+use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent};
 
@@ -119,11 +120,11 @@ impl ReminderModule {
         let (title, time) = (r.title.clone(), at.format(TIME_FORMAT).to_string());
         match r.style {
             Style::Card => {
-                ctx.card(id, Card::Reminder { title, time, snooze_open: false });
+                ctx.card(id, Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing });
                 self.state.pending.insert(id.to_owned(), Pending::Reminder { at });
             }
             Style::Auto => {
-                ctx.card(id, Card::Nudge { title, time });
+                ctx.card(id, Card::Nudge { title, time, icon: Icon::BellRing });
                 self.state.pending.remove(id);
             }
         }
@@ -149,7 +150,7 @@ impl ReminderModule {
             Pending::Reminder { at } => {
                 let Some(r) = self.file.reminders.iter().find(|r| &r.id == id).filter(|r| r.style == Style::Card) else { return false };
                 let time = if at.date() == now.date() { at.format(TIME_FORMAT) } else { at.format(DATE_TIME_FORMAT) }.to_string();
-                ctx.card(id, Card::Reminder { title: r.title.clone(), time, snooze_open: false });
+                ctx.card(id, Card::Reminder { title: r.title.clone(), time, snooze_open: false, icon: Icon::BellRing });
                 true
             }
             Pending::Missed { rows, more } => {
@@ -325,7 +326,7 @@ mod tests {
         r.style = Style::Auto;
         let (mut m, _) = setup(vec![r]);
         tick(&mut m, dt(2, 8, 59));
-        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), vec![("a".into(), Card::Nudge { title: "提醒a".into(), time: "09:00".into() })]);
+        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), vec![("a".into(), Card::Nudge { title: "提醒a".into(), time: "09:00".into(), icon: Icon::BellRing })]);
     }
 
     fn tick(m: &mut ReminderModule, now: NaiveDateTime) -> Vec<Request> {
@@ -348,7 +349,7 @@ mod tests {
         let (mut m, _) = setup(vec![daily("a", 9)]);
         assert!(tick(&mut m, dt(2, 8, 59)).is_empty());
         let out = cards(&tick(&mut m, dt(2, 9, 0)));
-        assert_eq!(out, vec![("a".into(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false })]);
+        assert_eq!(out, vec![("a".into(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false, icon: Icon::BellRing })]);
         assert!(cards(&tick(&mut m, dt(2, 9, 0))).is_empty(), "same minute does not fire twice");
     }
 
@@ -406,7 +407,7 @@ mod tests {
         tick(&mut m, dt(2, 9, 0));
         // 響了還沒按就被關掉：重開時照原本的時間再跳一次。
         let mut m = restart(&dir);
-        let shown = vec![("a".to_string(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false })];
+        let shown = vec![("a".to_string(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false, icon: Icon::BellRing })];
         assert_eq!(cards(&tick(&mut m, dt(2, 9, 1))), shown);
         // 再重開一次還在；按了完成之後就不再跳。
         let mut m = restart(&dir);
@@ -449,6 +450,6 @@ mod tests {
         let out = tick(&mut m, dt(2, 8, 1));
         assert!(out.contains(&Request::Withdraw { key: "a".into() }));
         assert!(out.contains(&Request::Withdraw { key: "b".into() }));
-        assert_eq!(cards(&tick(&mut m, dt(3, 8, 0))), vec![("c".into(), Card::Reminder { title: "提醒c".into(), time: "08:00".into(), snooze_open: false })]);
+        assert_eq!(cards(&tick(&mut m, dt(3, 8, 0))), vec![("c".into(), Card::Reminder { title: "提醒c".into(), time: "08:00".into(), snooze_open: false, icon: Icon::BellRing })]);
     }
 }

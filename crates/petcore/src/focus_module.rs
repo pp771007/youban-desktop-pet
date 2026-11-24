@@ -90,8 +90,8 @@ impl FocusModule {
     fn card(ctx: &mut Ctx, title: String) {
         let time = ctx.now.format(TIME_FORMAT).to_string();
         let card = match ctx.config.focus_style {
-            Style::Card => Card::Reminder { title, time, snooze_open: false },
-            Style::Auto => Card::Nudge { title, time },
+            Style::Card => Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing },
+            Style::Auto => Card::Nudge { title, time, icon: Icon::BellRing },
         };
         ctx.card(CARD_KEY, card);
     }

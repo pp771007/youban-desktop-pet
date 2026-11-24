@@ -113,6 +113,8 @@ const UPDATE_CHECK_SECS: f64 = 3600.0;
 const UPDATE_CARD_KEY: &str = "update";
 /// 休息提醒的卡（核心自己的，按「稍後」時核心自己處理）。
 const REST_CARD_KEY: &str = "rest";
+/// 休息提醒卡左邊的圖示：跟專注休息時的倒數同一個杯子（一般提醒是鈴鐺）。
+const REST_CARD_ICON: Icon = Icon::Cup;
 /// 換桌寵：舊的縮小消失、新的彈出來。
 const SWITCH_OUT_SECS: f64 = 0.18;
 const SWITCH_IN_SECS: f64 = 0.36;
@@ -1051,7 +1053,7 @@ impl App {
         };
         log!("command: {text}");
         match v["cmd"].as_str().unwrap_or_default() {
-            ipc::CMD_TEST_REMINDER => self.enqueue("core", "test".into(), Card::Reminder { title: v["title"].as_str().unwrap_or("測試提醒").to_owned(), time: local_now().format("%H:%M").to_string(), snooze_open: false }),
+            ipc::CMD_TEST_REMINDER => self.enqueue("core", "test".into(), Card::Reminder { title: v["title"].as_str().unwrap_or("測試提醒").to_owned(), time: local_now().format("%H:%M").to_string(), snooze_open: false, icon: Icon::BellRing }),
             ipc::CMD_CARD_ACTION => {
                 let action = match v["action"].as_str().unwrap_or_default() {
                     "done" => Some(CardAction::Done),
@@ -1680,8 +1682,8 @@ impl App {
         {
             let time = local_now().format("%H:%M").to_string();
             let card = match self.config.rest_style {
-                Style::Card => Card::Reminder { title: text, time, snooze_open: false },
-                Style::Auto => Card::Nudge { title: text, time },
+                Style::Card => Card::Reminder { title: text, time, snooze_open: false, icon: REST_CARD_ICON },
+                Style::Auto => Card::Nudge { title: text, time, icon: REST_CARD_ICON },
             };
             self.enqueue("core", REST_CARD_KEY.into(), card);
         }
@@ -1789,7 +1791,7 @@ impl App {
                     self.begin_switch(pet.id.clone(), false);
                 }
             }
-            Action::ShowCard => self.enqueue("core", "test".into(), Card::Reminder { title: "壓力測試提醒".into(), time: "12:00".into(), snooze_open: false }),
+            Action::ShowCard => self.enqueue("core", "test".into(), Card::Reminder { title: "壓力測試提醒".into(), time: "12:00".into(), snooze_open: false, icon: Icon::BellRing }),
             Action::OpenSnooze => self.card_action(CardAction::OpenSnooze),
             Action::Done => self.card_action(CardAction::Done),
             Action::ShowInfo => self.enqueue("core", "info".into(), Card::success("壓力測試通知", Some("第二行說明".into()))),
