@@ -45,7 +45,11 @@ const SHOW_BASE_SECS: f32 = 2.2;
 const SHOW_PER_CHAR_SECS: f32 = 0.12;
 const SHOW_MAX_SECS: f32 = 7.0;
 
-const MORNING: &[&str] = &["早安！今天也一起加油吧", "早安～睡得好嗎？", "早！先喝杯水再開始吧"];
+const MORNING: &[&str] = &[
+    "早安！今天也一起加油吧",
+    "早安～睡得好嗎？",
+    "早！先喝杯水再開始吧",
+];
 const MONDAY_MORNING: &[&str] = &["星期一早安！慢慢來就好", "早安～新的一週開始了"];
 const DAY_OFF: &[&str] = &["今天放假！好好休息吧", "放假還來看我，好開心", "假日愉快～"];
 const NOON: &[&str] = &["午安！吃飽了嗎？", "午安～"];
@@ -53,18 +57,39 @@ const AFTERNOON: &[&str] = &["下午好！", "嗨～下午也要打起精神喔"
 const EVENING: &[&str] = &["晚上好～今天過得怎麼樣？", "晚上好！今天辛苦了"];
 const LATE_NIGHT: &[&str] = &["這麼晚了還在忙呀？", "夜貓子你好"];
 
-const WELCOME_BACK: &[&str] = &["你回來了！", "歡迎回來～", "等你好久了", "啊，你回來了！我剛剛睡得好香", "好想你喔！"];
+const WELCOME_BACK: &[&str] = &[
+    "你回來了！",
+    "歡迎回來～",
+    "等你好久了",
+    "啊，你回來了！我剛剛睡得好香",
+    "好想你喔！",
+];
 const CLICKED: &[&str] = &["嗯？", "找我嗎？", "怎麼了？", "嘿！", "在這裡～"];
 const POKED: &[&str] = &["不要一直戳我啦！", "好啦好啦，我在這", "會癢啦～"];
-const PETTED: &[&str] = &["好舒服～", "嘿嘿", "再摸一下", "最喜歡你了", "我最喜歡被你摸頭了"];
+const PETTED: &[&str] = &[
+    "好舒服～",
+    "嘿嘿",
+    "再摸一下",
+    "最喜歡你了",
+    "我最喜歡被你摸頭了",
+];
 const THROWN: &[&str] = &["哇啊啊——", "飛起來了！", "呀——"];
 const DIZZY: &[&str] = &["頭好暈…", "不要再丟了啦…", "世界在轉圈圈…"];
 const ATE: &[&str] = &["好好吃！", "謝謝招待～", "還有嗎？", "嗯～好香"];
 const KICKED: &[&str] = &["看我的！", "接球～", "好好玩！"];
-const RIDING: &[&str] = &["哇～坐車車！", "要載我去哪裡？", "搖搖晃晃的～", "慢一點啦！"];
+const RIDING: &[&str] = &[
+    "哇～坐車車！",
+    "要載我去哪裡？",
+    "搖搖晃晃的～",
+    "慢一點啦！",
+];
 
 /// `{m}` 換成連續使用的分鐘數。
-const REST: &[&str] = &["已經連續用電腦 {m} 分鐘了，起來走走吧", "{m} 分鐘沒休息了，喝口水、伸個懶腰吧", "眼睛累了吧？看看遠方休息一下"];
+const REST: &[&str] = &[
+    "已經連續用電腦 {m} 分鐘了，起來走走吧",
+    "{m} 分鐘沒休息了，喝口水、伸個懶腰吧",
+    "眼睛累了吧？看看遠方休息一下",
+];
 const IDLE_CHAT: &[&str] = &[
     "今天也辛苦了",
     "要記得喝水喔",
@@ -84,7 +109,13 @@ const IDLE_CHAT: &[&str] = &[
     "不管多忙，我都在這裡",
 ];
 /// 取了名字才會講、用名字自稱的閒聊；`{name}` 換成名字。
-const NAMED_IDLE_CHAT: &[&str] = &["{name}肚子有點餓了～", "{name}想被摸摸頭～", "{name}今天也會乖乖陪你喔", "嘿嘿，{name}在這裡喔～", "{name}最喜歡你了～"];
+const NAMED_IDLE_CHAT: &[&str] = &[
+    "{name}肚子有點餓了～",
+    "{name}想被摸摸頭～",
+    "{name}今天也會乖乖陪你喔",
+    "嘿嘿，{name}在這裡喔～",
+    "{name}最喜歡你了～",
+];
 const NAME_SLOT: &str = "{name}";
 /// 閒聊時改用名字自稱的機率：偶爾才講才可愛，太常會膩。
 const NAMED_CHAT_CHANCE: f32 = 0.25;
@@ -125,11 +156,46 @@ struct MomentRule {
 }
 
 const MOMENTS: &[MomentRule] = &[
-    MomentRule { moment: Moment::Lunch, from: (11, 45), to: (12, 30), workday_only: false, weekday: None, lines: &["快中午了，今天想吃什麼？", "肚子咕嚕咕嚕叫了，去吃飯吧"] },
-    MomentRule { moment: Moment::Snack, from: (15, 0), to: (15, 40), workday_only: false, weekday: None, lines: &["下午三點了，來點點心吧", "休息一下，喝杯飲料？"] },
-    MomentRule { moment: Moment::Friday, from: (16, 0), to: (17, 30), workday_only: true, weekday: Some(Weekday::Fri), lines: &["明天就放假了！", "星期五了，再撐一下下"] },
-    MomentRule { moment: Moment::OffWork, from: (17, 55), to: (18, 40), workday_only: true, weekday: None, lines: &["下班時間到了！今天辛苦了", "可以下班了嗎？"] },
-    MomentRule { moment: Moment::Late, from: (23, 0), to: (3, 0), workday_only: false, weekday: None, lines: &["已經很晚了，早點休息吧", "熬夜對身體不好喔"] },
+    MomentRule {
+        moment: Moment::Lunch,
+        from: (11, 45),
+        to: (12, 30),
+        workday_only: false,
+        weekday: None,
+        lines: &["快中午了，今天想吃什麼？", "肚子咕嚕咕嚕叫了，去吃飯吧"],
+    },
+    MomentRule {
+        moment: Moment::Snack,
+        from: (15, 0),
+        to: (15, 40),
+        workday_only: false,
+        weekday: None,
+        lines: &["下午三點了，來點點心吧", "休息一下，喝杯飲料？"],
+    },
+    MomentRule {
+        moment: Moment::Friday,
+        from: (16, 0),
+        to: (17, 30),
+        workday_only: true,
+        weekday: Some(Weekday::Fri),
+        lines: &["明天就放假了！", "星期五了，再撐一下下"],
+    },
+    MomentRule {
+        moment: Moment::OffWork,
+        from: (17, 55),
+        to: (18, 40),
+        workday_only: true,
+        weekday: None,
+        lines: &["下班時間到了！今天辛苦了", "可以下班了嗎？"],
+    },
+    MomentRule {
+        moment: Moment::Late,
+        from: (23, 0),
+        to: (3, 0),
+        workday_only: false,
+        weekday: None,
+        lines: &["已經很晚了，早點休息吧", "熬夜對身體不好喔"],
+    },
 ];
 
 impl MomentRule {
@@ -139,7 +205,11 @@ impl MomentRule {
         }
         let m = clock.hour() * 60 + clock.minute();
         let (from, to) = (self.from.0 * 60 + self.from.1, self.to.0 * 60 + self.to.1);
-        if from <= to { (from..to).contains(&m) } else { m >= from || m < to }
+        if from <= to {
+            (from..to).contains(&m)
+        } else {
+            m >= from || m < to
+        }
     }
 }
 
@@ -177,7 +247,10 @@ pub struct Ctx {
 /// 打招呼、歡迎回來時叫使用者的名字：「小明，早安！」。
 fn address(say: Say, ctx: &Ctx) -> Say {
     match ctx.user_name.as_deref() {
-        Some(user) => Say { text: format!("{user}，{}", say.text), ..say },
+        Some(user) => Say {
+            text: format!("{user}，{}", say.text),
+            ..say
+        },
         None => say,
     }
 }
@@ -218,7 +291,9 @@ impl Chatter {
     /// `now` 是這次執行的秒數、`clock` 是同一刻的牆上時鐘（兩個一起才換算得回存起來的時間）。
     pub fn new(now: f64, seed: u64, saved: ChatterSaved, clock: NaiveDateTime) -> Self {
         let secs_ago = |t: NaiveDateTime| (clock - t).num_milliseconds() as f64 / 1000.0;
-        let away_too_long = saved.saved_at.is_none_or(|t| secs_ago(t) > f64::from(BREAK_SECS));
+        let away_too_long = saved
+            .saved_at
+            .is_none_or(|t| secs_ago(t) > f64::from(BREAK_SECS));
         Self {
             rng: seed | 1,
             started: now,
@@ -230,14 +305,21 @@ impl Chatter {
             moments_day: saved.moments_day,
             moments_done: saved.moments_done,
             pokes: VecDeque::new(),
-            active_since: saved.active_since.filter(|_| !away_too_long).map(|t| now - secs_ago(t)),
-            last_rest: saved.last_rest.map_or(f64::NEG_INFINITY, |t| now - secs_ago(t)),
+            active_since: saved
+                .active_since
+                .filter(|_| !away_too_long)
+                .map(|t| now - secs_ago(t)),
+            last_rest: saved
+                .last_rest
+                .map_or(f64::NEG_INFINITY, |t| now - secs_ago(t)),
         }
     }
 
     /// 要存的那份（`now`、`clock` 同 `new`）。
     pub fn saved(&self, now: f64, clock: NaiveDateTime) -> ChatterSaved {
-        let at = |t: f64| (t.is_finite()).then(|| clock - Duration::milliseconds(((now - t) * 1000.0) as i64));
+        let at = |t: f64| {
+            (t.is_finite()).then(|| clock - Duration::milliseconds(((now - t) * 1000.0) as i64))
+        };
         ChatterSaved {
             greeted_on: self.greeted_on,
             moments_day: self.moments_day,
@@ -263,7 +345,9 @@ impl Chatter {
                 self.react(CLICKED, None, ctx, false)
             }
             Happening::Petted => self.react(PETTED, None, ctx, false),
-            Happening::Thrown { speed_dip } if speed_dip >= THROW_SPEED_DIP => self.react(THROWN, None, ctx, false),
+            Happening::Thrown { speed_dip } if speed_dip >= THROW_SPEED_DIP => {
+                self.react(THROWN, None, ctx, false)
+            }
             Happening::Thrown { .. } => None,
             Happening::Dizzy => self.react(DIZZY, None, ctx, true),
             Happening::Riding => self.react(RIDING, Some(Emote::Note), ctx, false),
@@ -271,7 +355,13 @@ impl Chatter {
             Happening::Ate => self.react(ATE, None, ctx, true),
             Happening::Kicked { .. } => self.react(KICKED, None, ctx, false),
             // 今天還沒打招呼的話，接下來的 `tick` 會打招呼，這裡不搶。
-            Happening::Woke { slept_secs } if slept_secs >= WELCOME_BACK_SECS && self.greeted_on == Some(day_of(ctx.clock)) => self.react(WELCOME_BACK, Some(Emote::Hearts), ctx, true).map(|s| address(s, ctx)),
+            Happening::Woke { slept_secs }
+                if slept_secs >= WELCOME_BACK_SECS
+                    && self.greeted_on == Some(day_of(ctx.clock)) =>
+            {
+                self.react(WELCOME_BACK, Some(Emote::Hearts), ctx, true)
+                    .map(|s| address(s, ctx))
+            }
             Happening::Woke { .. } => None,
         }
     }
@@ -291,21 +381,36 @@ impl Chatter {
             self.active_since = Some(now - ctx.idle_input_secs as f64);
         }
 
-        if ctx.talk == Talk::Never || !ctx.can_speak || ctx.asleep || ctx.idle_input_secs >= PRESENT_SECS || now - self.started < GREET_DELAY_SECS {
+        if ctx.talk == Talk::Never
+            || !ctx.can_speak
+            || ctx.asleep
+            || ctx.idle_input_secs >= PRESENT_SECS
+            || now - self.started < GREET_DELAY_SECS
+        {
             return None;
         }
         if self.greeted_on != Some(today) {
             self.greeted_on = Some(today);
-            return Some(address(self.say(greeting_lines(ctx.clock, ctx.workday), None, now), ctx));
+            return Some(address(
+                self.say(greeting_lines(ctx.clock, ctx.workday), None, now),
+                ctx,
+            ));
         }
         if now - self.last_said < MIN_GAP_SECS {
             return None;
         }
-        if let Some(rule) = MOMENTS.iter().find(|r| !self.moments_done.contains(&r.moment) && r.matches(ctx.clock, ctx.workday)) {
+        if let Some(rule) = MOMENTS
+            .iter()
+            .find(|r| !self.moments_done.contains(&r.moment) && r.matches(ctx.clock, ctx.workday))
+        {
             self.moments_done.push(rule.moment);
             return Some(self.say(rule.lines, None, now));
         }
-        let range = if ctx.talk == Talk::Often { IDLE_CHAT_OFTEN_SECS } else { IDLE_CHAT_SOMETIMES_SECS };
+        let range = if ctx.talk == Talk::Often {
+            IDLE_CHAT_OFTEN_SECS
+        } else {
+            IDLE_CHAT_SOMETIMES_SECS
+        };
         match self.next_idle {
             None => self.next_idle = Some(now + self.rand_range(range) as f64),
             Some(at) if now >= at => {
@@ -314,7 +419,10 @@ impl Chatter {
                     && self.rand01() < NAMED_CHAT_CHANCE
                 {
                     let say = self.say(NAMED_IDLE_CHAT, None, now);
-                    return Some(Say { text: say.text.replace(NAME_SLOT, name), ..say });
+                    return Some(Say {
+                        text: say.text.replace(NAME_SLOT, name),
+                        ..say
+                    });
                 }
                 return Some(self.say(IDLE_CHAT, None, now));
             }
@@ -324,16 +432,29 @@ impl Chatter {
     }
 
     /// 回應使用者的動作；`always` = 一定回（抗議、頭暈），否則看機率。
-    fn react(&mut self, lines: &[&'static str], emote: Option<Emote>, ctx: &Ctx, always: bool) -> Option<Say> {
+    fn react(
+        &mut self,
+        lines: &[&'static str],
+        emote: Option<Emote>,
+        ctx: &Ctx,
+        always: bool,
+    ) -> Option<Say> {
         if !ctx.can_speak || (!always && ctx.now - self.last_react < REACT_GAP_SECS) {
             return None;
         }
-        let chance = if ctx.talk == Talk::Often { REACT_CHANCE_OFTEN } else { REACT_CHANCE_SOMETIMES };
+        let chance = if ctx.talk == Talk::Often {
+            REACT_CHANCE_OFTEN
+        } else {
+            REACT_CHANCE_SOMETIMES
+        };
         if !always && self.rand01() >= chance {
             return None;
         }
         self.last_react = ctx.now;
-        Some(Say { reply: true, ..self.say(lines, emote, ctx.now) })
+        Some(Say {
+            reply: true,
+            ..self.say(lines, emote, ctx.now)
+        })
     }
 
     /// 休息提醒（跟「講話」設定無關，每秒問一次）：連續用電腦滿 `every_secs` 而且離上次提醒也滿了，
@@ -345,7 +466,11 @@ impl Chatter {
         }
         self.last_rest = now;
         let minutes = ((now - since) / 60.0).round() as i64;
-        Some(self.say(REST, None, now).text.replace("{m}", &minutes.to_string()))
+        Some(
+            self.say(REST, None, now)
+                .text
+                .replace("{m}", &minutes.to_string()),
+        )
     }
 
     /// 休息提醒按了「稍後」：`minutes` 分鐘後再提醒一次。
@@ -354,8 +479,16 @@ impl Chatter {
     }
 
     fn say(&mut self, lines: &[&'static str], emote: Option<Emote>, now: f64) -> Say {
-        let fresh: Vec<&'static str> = lines.iter().copied().filter(|l| !self.recent.contains(l)).collect();
-        let pool = if fresh.is_empty() { lines.to_vec() } else { fresh };
+        let fresh: Vec<&'static str> = lines
+            .iter()
+            .copied()
+            .filter(|l| !self.recent.contains(l))
+            .collect();
+        let pool = if fresh.is_empty() {
+            lines.to_vec()
+        } else {
+            fresh
+        };
         let line = pool[(self.rand01() * pool.len() as f32) as usize % pool.len()];
         if self.recent.len() >= RECENT_MAX {
             self.recent.pop_front();
@@ -363,7 +496,12 @@ impl Chatter {
         self.recent.push_back(line);
         self.last_said = now;
         let chars = line.chars().count() as f32;
-        Say { text: line.to_owned(), emote, secs: (SHOW_BASE_SECS + SHOW_PER_CHAR_SECS * chars).min(SHOW_MAX_SECS), reply: false }
+        Say {
+            text: line.to_owned(),
+            emote,
+            secs: (SHOW_BASE_SECS + SHOW_PER_CHAR_SECS * chars).min(SHOW_MAX_SECS),
+            reply: false,
+        }
     }
 
     fn rand01(&mut self) -> f32 {
@@ -406,21 +544,43 @@ mod tests {
     use super::*;
 
     fn at(y: i32, m: u32, d: u32, h: u32, min: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap()
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(h, min, 0)
+            .unwrap()
     }
 
     /// 這天已經打過招呼（測別的不會被招呼插隊）。
     fn greeted(y: i32, m: u32, d: u32) -> ChatterSaved {
-        ChatterSaved { greeted_on: NaiveDate::from_ymd_opt(y, m, d), ..ChatterSaved::default() }
+        ChatterSaved {
+            greeted_on: NaiveDate::from_ymd_opt(y, m, d),
+            ..ChatterSaved::default()
+        }
     }
 
     /// 2026-11-23 是星期一。
     fn ctx(now: f64, clock: NaiveDateTime) -> Ctx {
-        Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false, name: None, user_name: None }
+        Ctx {
+            now,
+            clock,
+            idle_input_secs: 0.0,
+            talk: Talk::Sometimes,
+            workday: true,
+            can_speak: true,
+            asleep: false,
+            name: None,
+            user_name: None,
+        }
     }
 
     /// 從 `now` 開始每秒 tick 一次，跑 `secs` 秒（時鐘跟著走），收集講過的話。
-    fn run(c: &mut Chatter, now: &mut f64, clock: &mut NaiveDateTime, secs: u32, edit: impl Fn(&mut Ctx)) -> Vec<String> {
+    fn run(
+        c: &mut Chatter,
+        now: &mut f64,
+        clock: &mut NaiveDateTime,
+        secs: u32,
+        edit: impl Fn(&mut Ctx),
+    ) -> Vec<String> {
         let mut said = Vec::new();
         for _ in 0..secs {
             *now += 1.0;
@@ -440,25 +600,49 @@ mod tests {
         let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
         let said = run(&mut c, &mut now, &mut clock, 10, |_| {});
         assert_eq!(said.len(), 1);
-        assert!(MONDAY_MORNING.contains(&said[0].as_str()), "Monday morning greeting, got {said:?}");
+        assert!(
+            MONDAY_MORNING.contains(&said[0].as_str()),
+            "Monday morning greeting, got {said:?}"
+        );
 
         let mut restarted = Chatter::new(0.0, 8, c.saved(now, clock), clock);
         now = 0.0;
-        assert!(run(&mut restarted, &mut now, &mut clock, 10, |_| {}).is_empty(), "same day after restart: no second greeting");
+        assert!(
+            run(&mut restarted, &mut now, &mut clock, 10, |_| {}).is_empty(),
+            "same day after restart: no second greeting"
+        );
 
         let mut next_day = at(2026, 11, 24, 9, 0);
         let said = run(&mut restarted, &mut now, &mut next_day, 10, |_| {});
-        assert!(said.iter().any(|s| MORNING.contains(&s.as_str())), "next morning greets again, got {said:?}");
+        assert!(
+            said.iter().any(|s| MORNING.contains(&s.as_str())),
+            "next morning greets again, got {said:?}"
+        );
     }
 
     #[test]
     fn stays_quiet_when_nobody_is_there_or_talk_is_off() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 12, 0));
         let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
-        assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.idle_input_secs = 600.0).is_empty(), "away from the computer");
-        assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.talk = Talk::Never).is_empty(), "talk off");
-        assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.can_speak = false).is_empty(), "a reminder card is up");
-        assert_eq!(run(&mut c, &mut now, &mut clock, 120, |_| {}).len(), 2, "back: greeting, then lunch after the gap");
+        assert!(
+            run(&mut c, &mut now, &mut clock, 120, |x| x.idle_input_secs =
+                600.0)
+            .is_empty(),
+            "away from the computer"
+        );
+        assert!(
+            run(&mut c, &mut now, &mut clock, 120, |x| x.talk = Talk::Never).is_empty(),
+            "talk off"
+        );
+        assert!(
+            run(&mut c, &mut now, &mut clock, 120, |x| x.can_speak = false).is_empty(),
+            "a reminder card is up"
+        );
+        assert_eq!(
+            run(&mut c, &mut now, &mut clock, 120, |_| {}).len(),
+            2,
+            "back: greeting, then lunch after the gap"
+        );
     }
 
     #[test]
@@ -466,21 +650,40 @@ mod tests {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 11, 40));
         let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
         let said = run(&mut c, &mut now, &mut clock, 60 * 60, |_| {});
-        let lunch = MOMENTS.iter().find(|r| r.moment == Moment::Lunch).unwrap().lines;
-        assert_eq!(said.iter().filter(|s| lunch.contains(&s.as_str())).count(), 1, "lunch exactly once, got {said:?}");
+        let lunch = MOMENTS
+            .iter()
+            .find(|r| r.moment == Moment::Lunch)
+            .unwrap()
+            .lines;
+        assert_eq!(
+            said.iter().filter(|s| lunch.contains(&s.as_str())).count(),
+            1,
+            "lunch exactly once, got {said:?}"
+        );
     }
 
     #[test]
     fn a_restart_inside_a_moment_window_does_not_say_it_again() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 11, 50));
         let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
-        let lunch = MOMENTS.iter().find(|r| r.moment == Moment::Lunch).unwrap().lines;
-        assert!(run(&mut c, &mut now, &mut clock, 60, |_| {}).iter().any(|s| lunch.contains(&s.as_str())));
+        let lunch = MOMENTS
+            .iter()
+            .find(|r| r.moment == Moment::Lunch)
+            .unwrap()
+            .lines;
+        assert!(
+            run(&mut c, &mut now, &mut clock, 60, |_| {})
+                .iter()
+                .any(|s| lunch.contains(&s.as_str()))
+        );
         // 12:00 關掉再開（自動更新也會這樣）：午餐那句不再講。
         let mut c = Chatter::new(0.0, 8, c.saved(now, clock), clock);
         now = 0.0;
         let said = run(&mut c, &mut now, &mut clock, 20 * 60, |_| {});
-        assert!(!said.iter().any(|s| lunch.contains(&s.as_str())), "{said:?}");
+        assert!(
+            !said.iter().any(|s| lunch.contains(&s.as_str())),
+            "{said:?}"
+        );
     }
 
     #[test]
@@ -504,7 +707,11 @@ mod tests {
             quick.tick(&x);
             due.extend(quick.rest_due(t, EVERY));
         }
-        assert_eq!(due.len(), 1, "rest reminder about 9 minutes after the restart");
+        assert_eq!(
+            due.len(),
+            1,
+            "rest reminder about 9 minutes after the restart"
+        );
         // 關了十分鐘才打開：當作休息過了，重新算。
         let mut long = Chatter::new(0.0, 8, saved, clock + Duration::minutes(10));
         assert!(long.rest_due(25.0 * 60.0, EVERY).is_none() && long.active_since.is_none());
@@ -512,11 +719,20 @@ mod tests {
 
     #[test]
     fn off_work_only_on_workdays() {
-        let off = MOMENTS.iter().find(|r| r.moment == Moment::OffWork).unwrap();
+        let off = MOMENTS
+            .iter()
+            .find(|r| r.moment == Moment::OffWork)
+            .unwrap();
         assert!(off.matches(at(2026, 11, 23, 18, 0), true));
-        assert!(!off.matches(at(2026, 11, 23, 18, 0), false), "national holiday on a weekday");
+        assert!(
+            !off.matches(at(2026, 11, 23, 18, 0), false),
+            "national holiday on a weekday"
+        );
         let late = MOMENTS.iter().find(|r| r.moment == Moment::Late).unwrap();
-        assert!(late.matches(at(2026, 11, 23, 1, 0), true), "late-night window crosses midnight");
+        assert!(
+            late.matches(at(2026, 11, 23, 1, 0), true),
+            "late-night window crosses midnight"
+        );
     }
 
     #[test]
@@ -541,18 +757,29 @@ mod tests {
         };
         assert!(run_rest(&mut c, 29 * 60, 0.0).is_empty());
         let due = run_rest(&mut c, 2 * 60, 0.0);
-        assert_eq!(due.len(), 1, "rest reminder at 30 minutes even with talking off, got {due:?}");
+        assert_eq!(
+            due.len(),
+            1,
+            "rest reminder at 30 minutes even with talking off, got {due:?}"
+        );
         assert!(due[0].contains("30") || due[0].contains("遠方"), "{due:?}");
 
         run_rest(&mut c, 6 * 60, 360.0);
-        assert!(run_rest(&mut c, 25 * 60, 0.0).is_empty(), "a 6-minute break restarts the count");
+        assert!(
+            run_rest(&mut c, 25 * 60, 0.0).is_empty(),
+            "a 6-minute break restarts the count"
+        );
 
         // 稍後 5 分鐘：5 分鐘後再一次。
         let due = run_rest(&mut c, 6 * 60, 0.0);
         assert_eq!(due.len(), 1);
         c.snooze_rest(now.get(), 5, EVERY);
         assert!(run_rest(&mut c, 4 * 60, 0.0).is_empty());
-        assert_eq!(run_rest(&mut c, 2 * 60, 0.0).len(), 1, "snoozed rest reminder comes back after 5 minutes");
+        assert_eq!(
+            run_rest(&mut c, 2 * 60, 0.0).len(),
+            1,
+            "snoozed rest reminder comes back after 5 minutes"
+        );
     }
 
     #[test]
@@ -563,21 +790,44 @@ mod tests {
         for i in 0..5 {
             said.extend(c.on(Happening::Clicked, &ctx(100.0 + i as f64, clock)));
         }
-        assert!(said.last().is_some_and(|s| POKED.contains(&s.text.as_str())), "fifth poke complains, got {said:?}");
-        assert!(said.iter().all(|s| s.reply), "reacting to a poke is a reply: it still speaks while focusing");
-        assert_eq!(c.on(Happening::Thrown { speed_dip: 300.0 }, &ctx(300.0, clock)), None, "a gentle drop is not a throw");
+        assert!(
+            said.last()
+                .is_some_and(|s| POKED.contains(&s.text.as_str())),
+            "fifth poke complains, got {said:?}"
+        );
+        assert!(
+            said.iter().all(|s| s.reply),
+            "reacting to a poke is a reply: it still speaks while focusing"
+        );
+        assert_eq!(
+            c.on(Happening::Thrown { speed_dip: 300.0 }, &ctx(300.0, clock)),
+            None,
+            "a gentle drop is not a throw"
+        );
     }
 
     #[test]
     fn greets_and_welcomes_back_by_the_users_name() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 9, 0));
         let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
-        let said = run(&mut c, &mut now, &mut clock, 10, |x| x.user_name = Some("小明".into()));
+        let said = run(&mut c, &mut now, &mut clock, 10, |x| {
+            x.user_name = Some("小明".into())
+        });
         assert!(said.len() == 1 && said[0].starts_with("小明，"), "{said:?}");
         let mut x = ctx(now + 100.0, clock);
         x.user_name = Some("小明".into());
-        let back = c.on(Happening::Woke { slept_secs: WELCOME_BACK_SECS }, &x).unwrap();
-        assert!(back.text.starts_with("小明，") && WELCOME_BACK.iter().any(|l| back.text.ends_with(l)), "{back:?}");
+        let back = c
+            .on(
+                Happening::Woke {
+                    slept_secs: WELCOME_BACK_SECS,
+                },
+                &x,
+            )
+            .unwrap();
+        assert!(
+            back.text.starts_with("小明，") && WELCOME_BACK.iter().any(|l| back.text.ends_with(l)),
+            "{back:?}"
+        );
     }
 
     #[test]
@@ -593,18 +843,32 @@ mod tests {
         };
         let named = chat(Some("圓圓"));
         let with_name = named.iter().filter(|s| s.contains("圓圓")).count();
-        assert!(with_name > 0 && with_name < named.len(), "sometimes, not always: {named:?}");
+        assert!(
+            with_name > 0 && with_name < named.len(),
+            "sometimes, not always: {named:?}"
+        );
         assert!(named.iter().all(|s| !s.contains(NAME_SLOT)), "{named:?}");
         let unnamed = chat(None);
-        assert!(unnamed.iter().all(|s| IDLE_CHAT.contains(&s.as_str())), "{unnamed:?}");
-        assert_eq!(milestone_line(100, Some("圓圓")), "圓圓陪你 100 天了！謝謝你一直陪著我～");
-        assert_eq!(milestone_line(100, None), "我們一起過了 100 天了！謝謝你一直陪著我");
+        assert!(
+            unnamed.iter().all(|s| IDLE_CHAT.contains(&s.as_str())),
+            "{unnamed:?}"
+        );
+        assert_eq!(
+            milestone_line(100, Some("圓圓")),
+            "圓圓陪你 100 天了！謝謝你一直陪著我～"
+        );
+        assert_eq!(
+            milestone_line(100, None),
+            "我們一起過了 100 天了！謝謝你一直陪著我"
+        );
     }
 
     #[test]
     fn idle_chat_does_not_repeat_recent_lines() {
         let mut c = Chatter::new(0.0, 7, ChatterSaved::default(), at(2026, 11, 23, 10, 0));
-        let lines: Vec<String> = (0..IDLE_CHAT.len()).map(|i| c.say(IDLE_CHAT, None, i as f64).text).collect();
+        let lines: Vec<String> = (0..IDLE_CHAT.len())
+            .map(|i| c.say(IDLE_CHAT, None, i as f64).text)
+            .collect();
         let mut unique = lines.clone();
         unique.sort();
         unique.dedup();

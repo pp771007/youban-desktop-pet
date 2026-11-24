@@ -1,9 +1,13 @@
 //! 找出桌寵可以站的地方：每個視窗「頂端露出來的那一段」，以及有沒有全螢幕程式在前面。
 
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+};
 use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::Win32::UI::Shell::{QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState};
+use windows::Win32::UI::Shell::{
+    QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::BOOL;
 
@@ -28,7 +32,10 @@ struct Shown {
 /// 跟 Windows 通知在這些情況下暫停的規則一致。
 pub fn user_is_busy() -> bool {
     match unsafe { SHQueryUserNotificationState() } {
-        Ok(state) => matches!(state, QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE),
+        Ok(state) => matches!(
+            state,
+            QUNS_BUSY | QUNS_RUNNING_D3D_FULL_SCREEN | QUNS_PRESENTATION_MODE
+        ),
         Err(_) => false,
     }
 }
@@ -43,13 +50,34 @@ pub fn is_click_through(hwnd: HWND) -> bool {
 fn frame_bounds(hwnd: HWND) -> Option<RECT> {
     let mut r = RECT::default();
     // 用 DWM 的實際外框：GetWindowRect 會多算一圈看不見的調整大小邊框（約 7 像素），桌寵會浮在半空中。
-    let ok = unsafe { DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &mut r as *mut _ as *mut _, size_of::<RECT>() as u32) }.is_ok();
-    if ok || unsafe { GetWindowRect(hwnd, &mut r) }.is_ok() { Some(r) } else { None }
+    let ok = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut r as *mut _ as *mut _,
+            size_of::<RECT>() as u32,
+        )
+    }
+    .is_ok();
+    if ok || unsafe { GetWindowRect(hwnd, &mut r) }.is_ok() {
+        Some(r)
+    } else {
+        None
+    }
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {
     let mut cloaked: u32 = 0;
-    unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as *mut _, size_of::<u32>() as u32) }.is_ok() && cloaked != 0
+    unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            &mut cloaked as *mut _ as *mut _,
+            size_of::<u32>() as u32,
+        )
+    }
+    .is_ok()
+        && cloaked != 0
 }
 
 /// 這個螢幕工作區域裡、可以站的視窗頂端（實體像素）。
@@ -77,9 +105,18 @@ pub fn scan(work: RECT, min_width: f32, pet_height: f32) -> Vec<Platform> {
                 continue;
             }
             let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            let Some(rect) = frame_bounds(hwnd) else { continue };
-            let standable = !IsZoomed(hwnd).as_bool() && ex & WS_EX_TOOLWINDOW.0 == 0 && GetWindowTextLengthW(hwnd) > 0;
-            shown.push(Shown { id: hwnd.0 as isize, rect, standable, see_through: is_click_through(hwnd) });
+            let Some(rect) = frame_bounds(hwnd) else {
+                continue;
+            };
+            let standable = !IsZoomed(hwnd).as_bool()
+                && ex & WS_EX_TOOLWINDOW.0 == 0
+                && GetWindowTextLengthW(hwnd) > 0;
+            shown.push(Shown {
+                id: hwnd.0 as isize,
+                rect,
+                standable,
+                see_through: is_click_through(hwnd),
+            });
         }
     }
     platforms_of(&shown, work, min_width, pet_height)
@@ -99,13 +136,38 @@ fn platforms_of(shown: &[Shown], work: RECT, min_width: f32, pet_height: f32) ->
             }
             // 側邊從頂端往下露到哪：前面的視窗蓋住這條邊的最高處以下都看不到，桌寵不該沿著那截爬。
             let reach = |x: f32| {
-                above.iter().filter(|o| (o.left as f32) < x && x < o.right as f32 && o.top < r.bottom && o.bottom > r.top).map(|o| o.top as f32).fold(r.bottom as f32, f32::min)
+                above
+                    .iter()
+                    .filter(|o| {
+                        (o.left as f32) < x
+                            && x < o.right as f32
+                            && o.top < r.bottom
+                            && o.bottom > r.top
+                    })
+                    .map(|o| o.top as f32)
+                    .fold(r.bottom as f32, f32::min)
             };
-            out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| {
-                // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
-                let sides = ((left == r.left as f32).then(|| reach(left)), (right == r.right as f32).then(|| reach(right)));
-                Platform { left, right, y: r.top as f32, window: w.id, window_left: r.left as f32, sides, bottom: r.bottom as f32 }
-            }));
+            out.extend(
+                segments
+                    .into_iter()
+                    .filter(|(l, rr)| rr - l >= min_width)
+                    .map(|(left, right)| {
+                        // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
+                        let sides = (
+                            (left == r.left as f32).then(|| reach(left)),
+                            (right == r.right as f32).then(|| reach(right)),
+                        );
+                        Platform {
+                            left,
+                            right,
+                            y: r.top as f32,
+                            window: w.id,
+                            window_left: r.left as f32,
+                            sides,
+                            bottom: r.bottom as f32,
+                        }
+                    }),
+            );
         }
         if (r.right - r.left).min(r.bottom - r.top) >= min_thickness {
             above.push(r);
@@ -119,7 +181,11 @@ fn platforms_of(shown: &[Shown], work: RECT, min_width: f32, pet_height: f32) ->
 pub fn window_origin(window: isize) -> Option<(f32, f32)> {
     let hwnd = HWND(window as *mut _);
     unsafe {
-        if !IsWindow(Some(hwnd)).as_bool() || !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || is_cloaked(hwnd) {
+        if !IsWindow(Some(hwnd)).as_bool()
+            || !IsWindowVisible(hwnd).as_bool()
+            || IsIconic(hwnd).as_bool()
+            || is_cloaked(hwnd)
+        {
             return None;
         }
     }
@@ -150,47 +216,136 @@ mod tests {
 
     #[test]
     fn a_thin_shadow_window_hugging_the_top_does_not_hide_it() {
-        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let rect = |left, top, right, bottom| RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
         let work = rect(0, 0, 3840, 2112);
         // LINE：主視窗上面貼一條 11 像素的陰影視窗（排在主視窗前面）。
         let shown = [
-            Shown { id: 1, rect: rect(2793, 1050, 3789, 1061), standable: false, see_through: false },
-            Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false },
+            Shown {
+                id: 1,
+                rect: rect(2793, 1050, 3789, 1061),
+                standable: false,
+                see_through: false,
+            },
+            Shown {
+                id: 2,
+                rect: rect(2793, 1061, 3789, 1951),
+                standable: true,
+                see_through: false,
+            },
         ];
         let p = platforms_of(&shown, work, 100.0, 256.0);
         assert_eq!(p.len(), 1, "{p:?}");
-        assert_eq!((p[0].left, p[0].right, p[0].y, p[0].sides), (2793.0, 3789.0, 1061.0, (Some(1951.0), Some(1951.0))));
+        assert_eq!(
+            (p[0].left, p[0].right, p[0].y, p[0].sides),
+            (2793.0, 3789.0, 1061.0, (Some(1951.0), Some(1951.0)))
+        );
         // 真的蓋在上面的視窗照樣擋住那一段。
-        let shown = [Shown { id: 3, rect: rect(3000, 900, 3400, 1500), standable: true, see_through: false }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false }];
-        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| (p.left, p.right)).collect();
+        let shown = [
+            Shown {
+                id: 3,
+                rect: rect(3000, 900, 3400, 1500),
+                standable: true,
+                see_through: false,
+            },
+            Shown {
+                id: 2,
+                rect: rect(2793, 1061, 3789, 1951),
+                standable: true,
+                see_through: false,
+            },
+        ];
+        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0)
+            .into_iter()
+            .filter(|p| p.window == 2)
+            .map(|p| (p.left, p.right))
+            .collect();
         assert_eq!(p, vec![(2793.0, 3000.0), (3400.0, 3789.0)]);
     }
 
     #[test]
     fn a_side_covered_by_a_window_in_front_is_only_climbable_above_it() {
-        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let rect = |left, top, right, bottom| RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
         let work = rect(0, 0, 3840, 2112);
         // 前面的視窗頂端比後面的低一點，蓋住後面視窗左邊那條邊的下半截；右邊那條沒被蓋到。
-        let shown = [Shown { id: 1, rect: rect(500, 1100, 1300, 1900), standable: true, see_through: false }, Shown { id: 2, rect: rect(1000, 1000, 2000, 1900), standable: true, see_through: false }];
-        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| p.sides).collect();
+        let shown = [
+            Shown {
+                id: 1,
+                rect: rect(500, 1100, 1300, 1900),
+                standable: true,
+                see_through: false,
+            },
+            Shown {
+                id: 2,
+                rect: rect(1000, 1000, 2000, 1900),
+                standable: true,
+                see_through: false,
+            },
+        ];
+        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0)
+            .into_iter()
+            .filter(|p| p.window == 2)
+            .map(|p| p.sides)
+            .collect();
         assert_eq!(p, vec![(Some(1100.0), Some(1900.0))]);
     }
 
     #[test]
     fn click_through_overlay_covering_the_screen_does_not_hide_window_tops() {
-        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let rect = |left, top, right, bottom| RECT {
+            left,
+            top,
+            right,
+            bottom,
+        };
         let work = rect(0, 0, 3840, 2112);
         // 觸控鍵盤的手寫圖層：最上層、蓋滿整個螢幕、滑鼠點得穿。
-        let shown = [Shown { id: 1, rect: rect(0, 0, 3840, 2160), standable: false, see_through: true }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false }];
+        let shown = [
+            Shown {
+                id: 1,
+                rect: rect(0, 0, 3840, 2160),
+                standable: false,
+                see_through: true,
+            },
+            Shown {
+                id: 2,
+                rect: rect(2793, 1061, 3789, 1951),
+                standable: true,
+                see_through: false,
+            },
+        ];
         let p = platforms_of(&shown, work, 100.0, 256.0);
-        assert_eq!(p.iter().map(|p| (p.window, p.left, p.right)).collect::<Vec<_>>(), vec![(2, 2793.0, 3789.0)]);
+        assert_eq!(
+            p.iter()
+                .map(|p| (p.window, p.left, p.right))
+                .collect::<Vec<_>>(),
+            vec![(2, 2793.0, 3789.0)]
+        );
     }
 
     #[test]
     fn covered_part_of_a_window_top_is_removed() {
-        assert_eq!(subtract(vec![(0.0, 100.0)], 30.0, 60.0), vec![(0.0, 30.0), (60.0, 100.0)]);
-        assert_eq!(subtract(vec![(0.0, 100.0)], -10.0, 40.0), vec![(40.0, 100.0)]);
+        assert_eq!(
+            subtract(vec![(0.0, 100.0)], 30.0, 60.0),
+            vec![(0.0, 30.0), (60.0, 100.0)]
+        );
+        assert_eq!(
+            subtract(vec![(0.0, 100.0)], -10.0, 40.0),
+            vec![(40.0, 100.0)]
+        );
         assert_eq!(subtract(vec![(0.0, 100.0)], -10.0, 140.0), vec![]);
-        assert_eq!(subtract(vec![(0.0, 100.0)], 200.0, 300.0), vec![(0.0, 100.0)]);
+        assert_eq!(
+            subtract(vec![(0.0, 100.0)], 200.0, 300.0),
+            vec![(0.0, 100.0)]
+        );
     }
 }

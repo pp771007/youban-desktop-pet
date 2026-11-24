@@ -33,7 +33,12 @@ impl FocusStatus {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        write_atomic(path, serde_json::to_string(self).map_err(io::Error::other)?.as_bytes())
+        write_atomic(
+            path,
+            serde_json::to_string(self)
+                .map_err(io::Error::other)?
+                .as_bytes(),
+        )
     }
 
     /// 沒在專注：把檔案拿掉。
@@ -54,7 +59,11 @@ impl FocusStatus {
     }
 
     pub fn stop_label(&self, now: NaiveDateTime) -> String {
-        format!("停止專注（{}還剩 {} 分）", if self.focusing { "" } else { "休息" }, self.minutes_left(now))
+        format!(
+            "停止專注（{}還剩 {} 分）",
+            if self.focusing { "" } else { "休息" },
+            self.minutes_left(now)
+        )
     }
 }
 

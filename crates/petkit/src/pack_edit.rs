@@ -15,7 +15,11 @@ const STATES_KEY: &str = "states";
 
 pub fn frame_name(state: &str, variant: &str, index: usize) -> String {
     let n = index + 1;
-    if variant == DEFAULT_VARIANT { format!("{state}_{n:02}.png") } else { format!("{state}-{variant}_{n:02}.png") }
+    if variant == DEFAULT_VARIANT {
+        format!("{state}_{n:02}.png")
+    } else {
+        format!("{state}-{variant}_{n:02}.png")
+    }
 }
 
 /// 某個動作某一組的圖，依播放順序。
@@ -52,7 +56,11 @@ pub fn variants(pet_dir: &Path, state: &str) -> io::Result<Vec<String>> {
 /// 把檔案照 `order` 的順序重新編號（先全部改成暫存名，避免 02 改成 01 時撞到還沒搬走的 01）。
 fn renumber(pet_dir: &Path, state: &str, variant: &str, order: &[PathBuf]) -> io::Result<()> {
     let frames = pet_dir.join(FRAMES_DIR);
-    let temps: Vec<PathBuf> = order.iter().enumerate().map(|(i, _)| frames.join(format!("{TEMP_PREFIX}{i}.png"))).collect();
+    let temps: Vec<PathBuf> = order
+        .iter()
+        .enumerate()
+        .map(|(i, _)| frames.join(format!("{TEMP_PREFIX}{i}.png")))
+        .collect();
     for (from, tmp) in order.iter().zip(&temps) {
         fs::rename(from, tmp)?;
     }
@@ -69,7 +77,10 @@ pub fn append(pet_dir: &Path, state: &str, variant: &str, pngs: &[Vec<u8>]) -> i
     let existing = list(pet_dir, state, variant)?;
     renumber(pet_dir, state, variant, &existing)?;
     for (i, png) in pngs.iter().enumerate() {
-        fs::write(frames.join(frame_name(state, variant, existing.len() + i)), png)?;
+        fs::write(
+            frames.join(frame_name(state, variant, existing.len() + i)),
+            png,
+        )?;
     }
     Ok(())
 }
@@ -84,7 +95,13 @@ pub fn remove(pet_dir: &Path, state: &str, variant: &str, index: usize) -> io::R
 }
 
 /// 把第 `from` 張搬到第 `to` 的位置（拖曳排序）。
-pub fn move_to(pet_dir: &Path, state: &str, variant: &str, from: usize, to: usize) -> io::Result<()> {
+pub fn move_to(
+    pet_dir: &Path,
+    state: &str,
+    variant: &str,
+    from: usize,
+    to: usize,
+) -> io::Result<()> {
     let mut files = list(pet_dir, state, variant)?;
     if from >= files.len() || to >= files.len() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "沒有這一張"));
@@ -106,9 +123,19 @@ fn manifest_json(pet_dir: &Path) -> io::Result<serde_json::Value> {
 /// 設定某個動作每秒播幾張；`None` = 拿掉設定、回到預設。pet.json 其他內容原封不動。
 pub fn set_fps(pet_dir: &Path, state: &str, fps: Option<f32>) -> io::Result<()> {
     let mut m = manifest_json(pet_dir)?;
-    let states = m.as_object_mut().ok_or_else(|| io::Error::other("pet.json 不是物件"))?.entry(STATES_KEY).or_insert_with(|| serde_json::json!({}));
-    let entry = states.as_object_mut().ok_or_else(|| io::Error::other("states 不是物件"))?.entry(state).or_insert_with(|| serde_json::json!({}));
-    let obj = entry.as_object_mut().ok_or_else(|| io::Error::other("動作設定不是物件"))?;
+    let states = m
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("pet.json 不是物件"))?
+        .entry(STATES_KEY)
+        .or_insert_with(|| serde_json::json!({}));
+    let entry = states
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("states 不是物件"))?
+        .entry(state)
+        .or_insert_with(|| serde_json::json!({}));
+    let obj = entry
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("動作設定不是物件"))?;
     match fps {
         Some(f) => {
             obj.insert(FPS_KEY.into(), serde_json::json!(f));
@@ -117,7 +144,12 @@ pub fn set_fps(pet_dir: &Path, state: &str, fps: Option<f32>) -> io::Result<()> 
             obj.remove(FPS_KEY);
         }
     }
-    write_atomic(&pet_dir.join(MANIFEST_FILE), serde_json::to_string_pretty(&m).map_err(io::Error::other)?.as_bytes())
+    write_atomic(
+        &pet_dir.join(MANIFEST_FILE),
+        serde_json::to_string_pretty(&m)
+            .map_err(io::Error::other)?
+            .as_bytes(),
+    )
 }
 
 #[cfg(test)]
@@ -132,20 +164,38 @@ mod tests {
     }
 
     fn contents(dir: &Path, state: &str, variant: &str) -> Vec<String> {
-        list(dir, state, variant).unwrap().iter().map(|p| fs::read_to_string(p).unwrap()).collect()
+        list(dir, state, variant)
+            .unwrap()
+            .iter()
+            .map(|p| fs::read_to_string(p).unwrap())
+            .collect()
     }
 
     #[test]
     fn append_remove_and_reorder_keep_numbering_tight() {
         let dir = temp_pet("order");
-        append(&dir, "walk", DEFAULT_VARIANT, &[b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]).unwrap();
+        append(
+            &dir,
+            "walk",
+            DEFAULT_VARIANT,
+            &[b"a".to_vec(), b"b".to_vec(), b"c".to_vec()],
+        )
+        .unwrap();
         assert_eq!(contents(&dir, "walk", DEFAULT_VARIANT), ["a", "b", "c"]);
         move_to(&dir, "walk", DEFAULT_VARIANT, 2, 0).unwrap();
         assert_eq!(contents(&dir, "walk", DEFAULT_VARIANT), ["c", "a", "b"]);
         remove(&dir, "walk", DEFAULT_VARIANT, 1).unwrap();
         assert_eq!(contents(&dir, "walk", DEFAULT_VARIANT), ["c", "b"]);
-        let names: Vec<String> = list(&dir, "walk", DEFAULT_VARIANT).unwrap().iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-        assert_eq!(names, ["walk_01.png", "walk_02.png"], "no gaps after removing");
+        let names: Vec<String> = list(&dir, "walk", DEFAULT_VARIANT)
+            .unwrap()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["walk_01.png", "walk_02.png"],
+            "no gaps after removing"
+        );
         append(&dir, "walk", DEFAULT_VARIANT, &[b"d".to_vec()]).unwrap();
         assert_eq!(contents(&dir, "walk", DEFAULT_VARIANT), ["c", "b", "d"]);
         let _ = fs::remove_dir_all(dir);
@@ -155,12 +205,22 @@ mod tests {
     fn idle_variants_are_separate_groups() {
         let dir = temp_pet("variants");
         append(&dir, "idle", DEFAULT_VARIANT, &[b"stand".to_vec()]).unwrap();
-        append(&dir, "idle", "2", &[b"scratch1".to_vec(), b"scratch2".to_vec()]).unwrap();
+        append(
+            &dir,
+            "idle",
+            "2",
+            &[b"scratch1".to_vec(), b"scratch2".to_vec()],
+        )
+        .unwrap();
         assert_eq!(variants(&dir, "idle").unwrap(), [DEFAULT_VARIANT, "2"]);
         assert!(dir.join(FRAMES_DIR).join("idle-2_02.png").is_file());
         remove(&dir, "idle", "2", 0).unwrap();
         assert_eq!(contents(&dir, "idle", "2"), ["scratch2"]);
-        assert_eq!(contents(&dir, "idle", DEFAULT_VARIANT), ["stand"], "other group untouched");
+        assert_eq!(
+            contents(&dir, "idle", DEFAULT_VARIANT),
+            ["stand"],
+            "other group untouched"
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -174,7 +234,11 @@ mod tests {
         assert_eq!(m["states"]["sleep"]["heightRatio"], 0.7);
         assert_eq!(m["states"]["sleep"]["fps"], 3.0);
         set_fps(&dir, "sleep", None).unwrap();
-        assert!(manifest_json(&dir).unwrap()["states"]["sleep"].get("fps").is_none());
+        assert!(
+            manifest_json(&dir).unwrap()["states"]["sleep"]
+                .get("fps")
+                .is_none()
+        );
         let _ = fs::remove_dir_all(dir);
     }
 }

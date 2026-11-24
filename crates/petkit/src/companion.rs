@@ -54,7 +54,10 @@ impl CompanionFile {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        write_atomic(path, &serde_json::to_vec_pretty(self).map_err(io::Error::other)?)
+        write_atomic(
+            path,
+            &serde_json::to_vec_pretty(self).map_err(io::Error::other)?,
+        )
     }
 
     pub fn days(&self, pet: &str) -> u32 {
@@ -75,7 +78,10 @@ mod tests {
         let mut c = Companion::default();
         assert!(c.visit(day(1)));
         assert!(!c.visit(day(1)), "same day again");
-        assert!(c.visit(day(5)), "days apart still count as one more day together");
+        assert!(
+            c.visit(day(5)),
+            "days apart still count as one more day together"
+        );
         assert_eq!((c.days, c.since), (2, Some(day(1))));
     }
 

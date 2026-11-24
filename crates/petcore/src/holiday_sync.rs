@@ -30,24 +30,35 @@ const MIN_DAYS: usize = 365;
 /// 上次檢查超過 `SYNC_INTERVAL` 才真的去下載。
 pub fn due(cache: &Path) -> bool {
     let marker = cache.join(MARKER);
-    fs::metadata(marker).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_none_or(|age| age >= SYNC_INTERVAL)
+    fs::metadata(marker)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .is_none_or(|age| age >= SYNC_INTERVAL)
 }
 
 pub fn spawn(cache: PathBuf, notify: HWND) {
     let target = notify.0 as isize;
-    let spawned = thread::Builder::new().name("holiday-sync".into()).spawn(move || match sync(&cache) {
-        Ok(changed) => {
-            let _ = write_atomic(&cache.join(MARKER), b"");
-            log!("holiday sync done; {changed} year(s) updated");
-            if changed > 0 {
-                unsafe {
-                    let _ = PostMessageW(Some(HWND(target as _)), WM_HOLIDAYS_UPDATED, WPARAM(0), LPARAM(0));
+    let spawned = thread::Builder::new()
+        .name("holiday-sync".into())
+        .spawn(move || match sync(&cache) {
+            Ok(changed) => {
+                let _ = write_atomic(&cache.join(MARKER), b"");
+                log!("holiday sync done; {changed} year(s) updated");
+                if changed > 0 {
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(HWND(target as _)),
+                            WM_HOLIDAYS_UPDATED,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
                 }
             }
-        }
-        // 沒網路就算了，下次再試；內建的日曆照樣能用。
-        Err(e) => log!("holiday sync failed: {e}"),
-    });
+            // 沒網路就算了，下次再試；內建的日曆照樣能用。
+            Err(e) => log!("holiday sync failed: {e}"),
+        });
     if let Err(e) = spawned {
         log!("holiday sync thread failed to start: {e}");
     }
@@ -56,19 +67,34 @@ pub fn spawn(cache: PathBuf, notify: HWND) {
 /// 憑證用 Windows 的憑證庫驗：有 HTTPS 檢查代理的網路，代理憑證只裝在系統裡，
 /// 用內建的 Mozilla 根憑證會回 `UnknownIssuer`（實測）。
 fn agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
-    ureq::Agent::config_builder().timeout_global(Some(HTTP_TIMEOUT)).tls_config(tls).build().into()
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder()
+        .timeout_global(Some(HTTP_TIMEOUT))
+        .tls_config(tls)
+        .build()
+        .into()
 }
 
 fn sync(cache: &Path) -> Result<usize, Box<dyn std::error::Error>> {
     let agent = agent();
-    let meta: serde_json::Value = serde_json::from_str(&agent.get(DATASET_URL).call()?.body_mut().read_to_string()?)?;
+    let meta: serde_json::Value =
+        serde_json::from_str(&agent.get(DATASET_URL).call()?.body_mut().read_to_string()?)?;
     let this_year = chrono::Local::now().year();
     let mut changed = 0;
-    for dist in meta["result"]["distribution"].as_array().into_iter().flatten() {
+    for dist in meta["result"]["distribution"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
         let title = dist["resourceDescription"].as_str().unwrap_or_default();
-        let Some(url) = dist["resourceDownloadUrl"].as_str() else { continue };
-        let Some(year) = roc_year(title) else { continue };
+        let Some(url) = dist["resourceDownloadUrl"].as_str() else {
+            continue;
+        };
+        let Some(year) = roc_year(title) else {
+            continue;
+        };
         if year < this_year {
             continue;
         }
@@ -103,8 +129,14 @@ mod tests {
     #[test]
     fn picks_the_standard_csv_and_converts_roc_year() {
         assert_eq!(roc_year("116年中華民國政府行政機關辦公日曆表"), Some(2027));
-        assert_eq!(roc_year("114年中華民國政府行政機關辦公日曆表(修正版)"), Some(2025));
-        assert_eq!(roc_year("116年中華民國政府行政機關辦公日曆表_Google行事曆專用"), None);
+        assert_eq!(
+            roc_year("114年中華民國政府行政機關辦公日曆表(修正版)"),
+            Some(2025)
+        );
+        assert_eq!(
+            roc_year("116年中華民國政府行政機關辦公日曆表_Google行事曆專用"),
+            None
+        );
         assert_eq!(roc_year("其他資料"), None);
     }
 }

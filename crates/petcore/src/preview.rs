@@ -59,13 +59,36 @@ const WINDOW_FILL: [u8; 4] = [236, 232, 228, 255];
 const WINDOW_TOP_EDGE: [u8; 4] = [120, 110, 100, 255];
 
 /// 左、右兩個視窗的頂端（跳視窗劇本用）。
-fn leap_windows(stage_w: f32, ground_y: f32, h: f32, half: f32, gap_widths: f32, rise_heights: f32) -> Vec<Platform> {
+fn leap_windows(
+    stage_w: f32,
+    ground_y: f32,
+    h: f32,
+    half: f32,
+    gap_widths: f32,
+    rise_heights: f32,
+) -> Vec<Platform> {
     let top = ground_y - h * LEAP_WINDOW_TOP_HEIGHTS;
     let left_right = stage_w * LEAP_LEFT_WINDOW_RATIO;
     let right_left = left_right + gap_widths * 2.0 * half;
     vec![
-        Platform { left: 0.0, right: left_right, y: top, window: 1, window_left: 0.0, sides: (Some(ground_y), Some(ground_y)), bottom: ground_y },
-        Platform { left: right_left, right: stage_w, y: top - rise_heights * h, window: 2, window_left: right_left, sides: (Some(ground_y), Some(ground_y)), bottom: ground_y },
+        Platform {
+            left: 0.0,
+            right: left_right,
+            y: top,
+            window: 1,
+            window_left: 0.0,
+            sides: (Some(ground_y), Some(ground_y)),
+            bottom: ground_y,
+        },
+        Platform {
+            left: right_left,
+            right: stage_w,
+            y: top - rise_heights * h,
+            window: 2,
+            window_left: right_left,
+            sides: (Some(ground_y), Some(ground_y)),
+            bottom: ground_y,
+        },
     ]
 }
 
@@ -74,7 +97,11 @@ fn paint_windows(stage: &mut [u8], stage_w: usize, stage_h: usize, windows: &[Pl
     for w in windows {
         let (x0, x1) = (w.left.max(0.0) as usize, (w.right as usize).min(stage_w));
         for y in (w.y.max(0.0) as usize)..(w.bottom as usize).min(stage_h) {
-            let color = if y < w.y as usize + 2 { WINDOW_TOP_EDGE } else { WINDOW_FILL };
+            let color = if y < w.y as usize + 2 {
+                WINDOW_TOP_EDGE
+            } else {
+                WINDOW_FILL
+            };
             for x in x0..x1 {
                 let i = (y * stage_w + x) * BYTES_PER_PIXEL;
                 stage[i..i + BYTES_PER_PIXEL].copy_from_slice(&color);
@@ -100,7 +127,14 @@ fn nothing_each(_: &mut Pet, _: f64, _: &Env, _: f32, _: f32) {}
 
 /// 在身體中間按下滑鼠（拎起來的起點）。
 fn grab(p: &mut Pet, now: f64, env: &Env, h: f32) {
-    p.input(Input::PointerDown { x: p.x, y: p.y - h / 2.0 }, now, env);
+    p.input(
+        Input::PointerDown {
+            x: p.x,
+            y: p.y - h / 2.0,
+        },
+        now,
+        env,
+    );
 }
 
 fn demo(d: Demo) -> impl Fn(&mut Pet, f64, &Env) {
@@ -112,28 +146,81 @@ fn scripts() -> Vec<Script> {
         name,
         secs: LEAP_SCRIPT_SECS,
         start_x: 0.0,
-        setup: |p, n, e, _| demo(Demo::Walk { secs: LEAP_WALK_SECS })(p, n, e),
+        setup: |p, n, e, _| {
+            demo(Demo::Walk {
+                secs: LEAP_WALK_SECS,
+            })(p, n, e)
+        },
         each: nothing_each,
     });
     let mut out = vec![
         // 長到看得到一次眨眼。
-        Script { name: "01-idle", secs: 4.5, start_x: 0.5, setup: nothing, each: nothing_each },
-        Script { name: "02-walk", secs: 3.0, start_x: 0.25, setup: |p, n, e, _| demo(Demo::Walk { secs: 2.6 })(p, n, e), each: nothing_each },
-        Script { name: "03-hop", secs: 1.2, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Hop)(p, n, e), each: nothing_each },
+        Script {
+            name: "01-idle",
+            secs: 4.5,
+            start_x: 0.5,
+            setup: nothing,
+            each: nothing_each,
+        },
+        Script {
+            name: "02-walk",
+            secs: 3.0,
+            start_x: 0.25,
+            setup: |p, n, e, _| demo(Demo::Walk { secs: 2.6 })(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "03-hop",
+            secs: 1.2,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Hop)(p, n, e),
+            each: nothing_each,
+        },
         Script {
             name: "04-click",
             secs: 1.4,
             start_x: 0.5,
             setup: |p, n, e, h| {
-                p.input(Input::PointerDown { x: p.x, y: p.y - h / 2.0 }, n, e);
+                p.input(
+                    Input::PointerDown {
+                        x: p.x,
+                        y: p.y - h / 2.0,
+                    },
+                    n,
+                    e,
+                );
                 p.input(Input::PointerUp, n, e);
             },
             each: nothing_each,
         },
-        Script { name: "05-look", secs: 2.2, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Look)(p, n, e), each: nothing_each },
-        Script { name: "06-stretch", secs: 1.5, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Stretch)(p, n, e), each: nothing_each },
-        Script { name: "07-doze", secs: 3.0, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Doze)(p, n, e), each: nothing_each },
-        Script { name: "08-petted", secs: 1.8, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Petted)(p, n, e), each: nothing_each },
+        Script {
+            name: "05-look",
+            secs: 2.2,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Look)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "06-stretch",
+            secs: 1.5,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Stretch)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "07-doze",
+            secs: 3.0,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Doze)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "08-petted",
+            secs: 1.8,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Petted)(p, n, e),
+            each: nothing_each,
+        },
         Script {
             // 拎起來左右甩兩下，放開掉下來。
             name: "09-drag",
@@ -145,7 +232,14 @@ fn scripts() -> Vec<Script> {
                 if t < 2.4 {
                     let lift = (t / 0.3).min(1.0) * h * 1.3;
                     let x = cx + (std::f32::consts::TAU * t / 1.2).sin() * h * 1.2;
-                    p.input(Input::PointerMove { x, y: e.ground_y - h / 2.0 - lift }, n, e);
+                    p.input(
+                        Input::PointerMove {
+                            x,
+                            y: e.ground_y - h / 2.0 - lift,
+                        },
+                        n,
+                        e,
+                    );
                 } else if t < 2.45 {
                     p.input(Input::PointerUp, n, e);
                 }
@@ -160,13 +254,26 @@ fn scripts() -> Vec<Script> {
             each: |p, n, e, h, t| {
                 if t < 0.4 {
                     let x = e.min_x + h * 0.6 + t * h * 9.0;
-                    p.input(Input::PointerMove { x, y: e.ground_y - h * 1.6 - t * h * 2.0 }, n, e);
+                    p.input(
+                        Input::PointerMove {
+                            x,
+                            y: e.ground_y - h * 1.6 - t * h * 2.0,
+                        },
+                        n,
+                        e,
+                    );
                 } else if t < 0.45 {
                     p.input(Input::PointerUp, n, e);
                 }
             },
         },
-        Script { name: "11-climb", secs: 9.0, start_x: 0.0, setup: |p, n, e, _| demo(Demo::ClimbLeft)(p, n, e), each: nothing_each },
+        Script {
+            name: "11-climb",
+            secs: 9.0,
+            start_x: 0.0,
+            setup: |p, n, e, _| demo(Demo::ClimbLeft)(p, n, e),
+            each: nothing_each,
+        },
         Script {
             name: "12-notify",
             secs: 3.4,
@@ -174,14 +281,62 @@ fn scripts() -> Vec<Script> {
             setup: |p, n, _, _| p.set_attention(true, n),
             each: nothing_each,
         },
-        Script { name: "13-sleep", secs: 4.0, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Sleep)(p, n, e), each: nothing_each },
-        Script { name: "14-sit", secs: 3.0, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Sit)(p, n, e), each: nothing_each },
-        Script { name: "15-yawn", secs: 2.0, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Yawn)(p, n, e), each: nothing_each },
-        Script { name: "16-talk", secs: 3.0, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Talk)(p, n, e), each: nothing_each },
-        Script { name: "17-spin", secs: 1.2, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Spin)(p, n, e), each: nothing_each },
-        Script { name: "18-roll", secs: 1.4, start_x: 0.3, setup: |p, n, e, _| demo(Demo::Roll)(p, n, e), each: nothing_each },
-        Script { name: "19-dizzy", secs: 3.6, start_x: 0.5, setup: |p, n, e, _| demo(Demo::Dizzy)(p, n, e), each: nothing_each },
-        Script { name: WALL_SCRIPT, secs: 12.0, start_x: 0.1, setup: |p, n, e, _| demo(Demo::Walk { secs: 4.0 })(p, n, e), each: nothing_each },
+        Script {
+            name: "13-sleep",
+            secs: 4.0,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Sleep)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "14-sit",
+            secs: 3.0,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Sit)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "15-yawn",
+            secs: 2.0,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Yawn)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "16-talk",
+            secs: 3.0,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Talk)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "17-spin",
+            secs: 1.2,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Spin)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "18-roll",
+            secs: 1.4,
+            start_x: 0.3,
+            setup: |p, n, e, _| demo(Demo::Roll)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: "19-dizzy",
+            secs: 3.6,
+            start_x: 0.5,
+            setup: |p, n, e, _| demo(Demo::Dizzy)(p, n, e),
+            each: nothing_each,
+        },
+        Script {
+            name: WALL_SCRIPT,
+            secs: 12.0,
+            start_x: 0.1,
+            setup: |p, n, e, _| demo(Demo::Walk { secs: 4.0 })(p, n, e),
+            each: nothing_each,
+        },
     ];
     out.extend(leaps);
     out
@@ -190,7 +345,17 @@ fn scripts() -> Vec<Script> {
 /// 把一個視窗的內容疊到舞台上（預乘透明度的「疊在上面」），整張再乘上 `opacity`（跟分層視窗的整體透明度一樣）。
 // 兩張點陣圖各自的像素與寬高、貼上的位置：每個參數都是獨立的量，包成結構只會讓呼叫端更長。
 #[allow(clippy::too_many_arguments)]
-fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usize, src_h: usize, ox: i32, oy: i32, opacity: f32) {
+fn blit(
+    stage: &mut [u8],
+    stage_w: usize,
+    stage_h: usize,
+    src: &[u8],
+    src_w: usize,
+    src_h: usize,
+    ox: i32,
+    oy: i32,
+    opacity: f32,
+) {
     for y in 0..src_h {
         let sy = oy + y as i32;
         if sy < 0 || sy >= stage_h as i32 {
@@ -219,17 +384,26 @@ fn blit(stage: &mut [u8], stage_w: usize, stage_h: usize, src: &[u8], src_w: usi
 pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
     let config = Config::default();
     let pets_dir = paths::pets_dir().ok_or_else(|| Error::new(E_FAIL, "找不到 pets 資料夾"))?;
-    let pack = pack::load(&pets_dir.join(pet.unwrap_or(&config.pet))).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+    let pack = pack::load(&pets_dir.join(pet.unwrap_or(&config.pet)))
+        .map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     let gfx = Gfx::new()?;
     let wic = Wic::new()?;
     let mut renderer = PetRenderer::new(&gfx)?;
     let px_per_dip = dpi as f32 / BASE_DPI;
-    let sprites = wic.load_pet(&pack, &renderer.canvas.target(), config.size_dip as f32 * px_per_dip, dpi)?;
+    let sprites = wic.load_pet(
+        &pack,
+        &renderer.canvas.target(),
+        config.size_dip as f32 * px_per_dip,
+        dpi,
+    )?;
     let size = window_size(&sprites);
     renderer.canvas.ensure_size(size.0, size.1)?;
     let h = sprites.base_height;
     let half = sprites.states[states::IDLE].variants[0].frames[0].width / 2.0;
-    let (stage_w, stage_h) = ((h * STAGE_W_HEIGHTS) as usize, (h * STAGE_H_HEIGHTS) as usize);
+    let (stage_w, stage_h) = (
+        (h * STAGE_W_HEIGHTS) as usize,
+        (h * STAGE_H_HEIGHTS) as usize,
+    );
     let env = Env {
         ground_y: stage_h as f32 - 2.0,
         min_x: half,
@@ -255,14 +429,25 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
     let frame_dt = 1.0 / FPS;
     let anchor = anchor(size);
     let mut glow = GlowPainter::new(&gfx)?;
-    let glow_style = GlowStyle { pet_height: h, scale: px_per_dip, color: theme::current(petkit::config::ColorScheme::System).danger.d2d() };
+    let glow_style = GlowStyle {
+        pet_height: h,
+        scale: px_per_dip,
+        color: theme::current(petkit::config::ColorScheme::System)
+            .danger
+            .d2d(),
+    };
     for script in scripts() {
         let dir = out_dir.join(script.name);
         fs::create_dir_all(&dir).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
         let mut env = env.clone();
         if script.name == WALL_SCRIPT {
             let left = stage_w as f32 * WALL_LEFT_RATIO;
-            env.blocks = vec![Rect { left, top: env.ground_y - h * WALL_H_HEIGHTS, right: left + h * WALL_W_HEIGHTS, bottom: env.ground_y }];
+            env.blocks = vec![Rect {
+                left,
+                top: env.ground_y - h * WALL_H_HEIGHTS,
+                right: left + h * WALL_W_HEIGHTS,
+                bottom: env.ground_y,
+            }];
             env.platforms = behavior::block_platforms(&env.blocks, env.ceiling, h);
         }
         let x = env.min_x + (env.max_x - env.min_x) * script.start_x;
@@ -271,7 +456,12 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
         if let Some(&(_, seed, gap, rise)) = LEAP_SCRIPTS.iter().find(|s| s.0 == script.name) {
             windows = leap_windows(stage_w as f32, env.ground_y, h, half, gap, rise);
             env.platforms = windows.clone();
-            pet = Pet::new(windows[0].right - h * LEAP_START_INSET_HEIGHTS, windows[0].y, 0.0, seed);
+            pet = Pet::new(
+                windows[0].right - h * LEAP_START_INSET_HEIGHTS,
+                windows[0].y,
+                0.0,
+                seed,
+            );
         }
         let mut effects = Effects::default();
         let mut now = 0.0f64;
@@ -293,7 +483,10 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
             }
             effects.prune(now);
             let pose = pet.pose(now);
-            let res = pack.resolve(pose.state).or_else(|| pack.resolve(states::IDLE)).ok_or_else(|| Error::new(E_FAIL, "no idle frames"))?;
+            let res = pack
+                .resolve(pose.state)
+                .or_else(|| pack.resolve(states::IDLE))
+                .ok_or_else(|| Error::new(E_FAIL, "no idle frames"))?;
             let variant = &sprites.states[res.source].variants[0];
             if pose.state != last_state {
                 last_state = pose.state;
@@ -322,11 +515,39 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
             if let Some((g, opacity)) = &lit {
                 let origin = glow.render(g, &glow_style)?;
                 let (gw, gh) = glow.canvas.size();
-                blit(&mut stage, stage_w, stage_h, glow.canvas.pixels(), gw as usize, gh as usize, origin.x, origin.y, *opacity);
+                blit(
+                    &mut stage,
+                    stage_w,
+                    stage_h,
+                    glow.canvas.pixels(),
+                    gw as usize,
+                    gh as usize,
+                    origin.x,
+                    origin.y,
+                    *opacity,
+                );
             }
-            let (ox, oy) = ((pet.x - anchor.X).round() as i32, (pet.y - anchor.Y).round() as i32);
-            blit(&mut stage, stage_w, stage_h, renderer.canvas.pixels(), size.0 as usize, size.1 as usize, ox, oy, 1.0);
-            wic.save_png(&dir.join(format!("{i:03}.png")), stage_w as u32, stage_h as u32, &stage)?;
+            let (ox, oy) = (
+                (pet.x - anchor.X).round() as i32,
+                (pet.y - anchor.Y).round() as i32,
+            );
+            blit(
+                &mut stage,
+                stage_w,
+                stage_h,
+                renderer.canvas.pixels(),
+                size.0 as usize,
+                size.1 as usize,
+                ox,
+                oy,
+                1.0,
+            );
+            wic.save_png(
+                &dir.join(format!("{i:03}.png")),
+                stage_w as u32,
+                stage_h as u32,
+                &stage,
+            )?;
         }
         println!("{} ({} frames)", script.name, (script.secs * FPS) as usize);
     }

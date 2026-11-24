@@ -6,7 +6,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::manifest::{Manifest, StateSpec, SUPPORTED_SPEC, TimingSpec, VariantSpec};
+use crate::manifest::{Manifest, SUPPORTED_SPEC, StateSpec, TimingSpec, VariantSpec};
 use crate::states::{self, Fallback};
 
 pub const MANIFEST_FILE: &str = "pet.json";
@@ -23,7 +23,12 @@ pub enum PackError {
     Manifest(PathBuf, serde_json::Error),
     SpecTooNew(u32),
     MissingIdle,
-    DurationsMismatch { state: String, variant: String, frames: usize, durations: usize },
+    DurationsMismatch {
+        state: String,
+        variant: String,
+        frames: usize,
+        durations: usize,
+    },
 }
 
 impl fmt::Display for PackError {
@@ -31,9 +36,17 @@ impl fmt::Display for PackError {
         match self {
             Self::Io(p, e) => write!(f, "讀不到 {}：{e}", p.display()),
             Self::Manifest(p, e) => write!(f, "{} 格式錯誤：{e}", p.display()),
-            Self::SpecTooNew(v) => write!(f, "這個桌寵包需要較新版的程式（規範第 {v} 版，目前支援到第 {SUPPORTED_SPEC} 版）"),
+            Self::SpecTooNew(v) => write!(
+                f,
+                "這個桌寵包需要較新版的程式（規範第 {v} 版，目前支援到第 {SUPPORTED_SPEC} 版）"
+            ),
             Self::MissingIdle => write!(f, "缺少站姿圖：frames/ 裡至少要有一張 idle_01.png"),
-            Self::DurationsMismatch { state, variant, frames, durations } => write!(
+            Self::DurationsMismatch {
+                state,
+                variant,
+                frames,
+                durations,
+            } => write!(
                 f,
                 "{state}（{variant}）有 {frames} 張圖，但 durations 寫了 {durations} 個時間"
             ),
@@ -87,7 +100,11 @@ impl PetPack {
         let mut current: &str = state;
         for _ in 0..MAX_FALLBACK_HOPS {
             if let Some((key, anim)) = self.states.get_key_value(current) {
-                return Some(Resolution { source: key, anim, own: current == state });
+                return Some(Resolution {
+                    source: key,
+                    anim,
+                    own: current == state,
+                });
             }
             match states::defaults(current).fallback {
                 Some(Fallback::State(next)) => current = next,
@@ -113,7 +130,11 @@ pub fn parse_frame_name(file_name: &str) -> Option<(String, String, u32)> {
     if state.is_empty() {
         return None;
     }
-    Some((state.to_ascii_lowercase(), variant.to_ascii_lowercase(), index))
+    Some((
+        state.to_ascii_lowercase(),
+        variant.to_ascii_lowercase(),
+        index,
+    ))
 }
 
 pub fn load(dir: &Path) -> Result<PetPack, PackError> {
@@ -133,7 +154,12 @@ pub fn load(dir: &Path) -> Result<PetPack, PackError> {
         let Some((state, variant, index)) = file_name.to_str().and_then(parse_frame_name) else {
             continue;
         };
-        found.entry(state).or_default().entry(variant).or_default().push((index, entry.path()));
+        found
+            .entry(state)
+            .or_default()
+            .entry(variant)
+            .or_default()
+            .push((index, entry.path()));
     }
     if !found.contains_key(states::IDLE) {
         return Err(PackError::MissingIdle);
@@ -145,7 +171,11 @@ pub fn load(dir: &Path) -> Result<PetPack, PackError> {
         anims.insert(state.clone(), build_state(&state, &spec, variants)?);
     }
 
-    let folder = dir.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned();
+    let folder = dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_owned();
     Ok(PetPack {
         id: manifest.id.unwrap_or_else(|| folder.clone()),
         name: manifest.name.unwrap_or(folder),
@@ -177,11 +207,17 @@ fn build_state(
         let frames: Vec<PathBuf> = frames.into_iter().map(|(_, p)| p).collect();
         let vspec = find_variant_spec(spec, &id);
         // 變化款自己的設定優先，沒寫的沿用狀態層的設定。
-        let timing = vspec.map(|v| &v.timing).filter(|t| t.fps.is_some() || t.durations.is_some()).unwrap_or(&spec.timing);
+        let timing = vspec
+            .map(|v| &v.timing)
+            .filter(|t| t.fps.is_some() || t.durations.is_some())
+            .unwrap_or(&spec.timing);
         let durations_ms = durations(state, &id, timing, frames.len(), defaults.fps)?;
         out.push(Variant {
             weight: vspec.and_then(|v| v.weight).unwrap_or(DEFAULT_WEIGHT),
-            procedural: vspec.and_then(|v| v.procedural).or(spec.procedural).unwrap_or(true),
+            procedural: vspec
+                .and_then(|v| v.procedural)
+                .or(spec.procedural)
+                .unwrap_or(true),
             id,
             frames,
             durations_ms,
@@ -199,7 +235,13 @@ fn find_variant_spec<'a>(spec: &'a StateSpec, id: &str) -> Option<&'a VariantSpe
     spec.variants.iter().find(|v| v.id.eq_ignore_ascii_case(id))
 }
 
-fn durations(state: &str, variant: &str, timing: &TimingSpec, frames: usize, default_fps: f32) -> Result<Vec<u32>, PackError> {
+fn durations(
+    state: &str,
+    variant: &str,
+    timing: &TimingSpec,
+    frames: usize,
+    default_fps: f32,
+) -> Result<Vec<u32>, PackError> {
     if let Some(list) = &timing.durations {
         if list.len() != frames {
             return Err(PackError::DurationsMismatch {
@@ -230,7 +272,11 @@ mod tests {
         for entry in fs::read_dir(&pets).unwrap() {
             let dir = entry.unwrap().path();
             let pack = load(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-            assert!(!pack.name.is_empty() && pack.resolve(crate::states::IDLE).is_some_and(|r| r.own), "{}", dir.display());
+            assert!(
+                !pack.name.is_empty() && pack.resolve(crate::states::IDLE).is_some_and(|r| r.own),
+                "{}",
+                dir.display()
+            );
             count += 1;
         }
         assert!(count >= 1);
@@ -238,7 +284,9 @@ mod tests {
 
     fn temp_pack(files: &[&str], manifest: Option<&str>) -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("petkit-test-{}-{n}", std::process::id())).join("mypet");
+        let dir = std::env::temp_dir()
+            .join(format!("petkit-test-{}-{n}", std::process::id()))
+            .join("mypet");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join(FRAMES_DIR)).unwrap();
         for f in files {
@@ -252,9 +300,18 @@ mod tests {
 
     #[test]
     fn parses_frame_names() {
-        assert_eq!(parse_frame_name("idle_01.png"), Some(("idle".into(), "default".into(), 1)));
-        assert_eq!(parse_frame_name("idle-look_03.png"), Some(("idle".into(), "look".into(), 3)));
-        assert_eq!(parse_frame_name("Walk_10.png"), Some(("walk".into(), "default".into(), 10)));
+        assert_eq!(
+            parse_frame_name("idle_01.png"),
+            Some(("idle".into(), "default".into(), 1))
+        );
+        assert_eq!(
+            parse_frame_name("idle-look_03.png"),
+            Some(("idle".into(), "look".into(), 3))
+        );
+        assert_eq!(
+            parse_frame_name("Walk_10.png"),
+            Some(("walk".into(), "default".into(), 10))
+        );
         assert_eq!(parse_frame_name("reference.png"), None);
         assert_eq!(parse_frame_name("idle_01.jpg"), None);
         assert_eq!(parse_frame_name("idle-_01.png"), None);
@@ -264,7 +321,16 @@ mod tests {
     fn single_image_pack_covers_every_state() {
         let pack = load(&temp_pack(&["idle_01.png"], None)).unwrap();
         assert_eq!(pack.name, "mypet");
-        for state in [states::WALK, states::DRAG, states::FALL, states::SLEEP, states::NOTIFY, states::LAND, states::TALK, "eat"] {
+        for state in [
+            states::WALK,
+            states::DRAG,
+            states::FALL,
+            states::SLEEP,
+            states::NOTIFY,
+            states::LAND,
+            states::TALK,
+            "eat",
+        ] {
             let r = pack.resolve(state).unwrap();
             assert_eq!(r.source, states::IDLE, "{state}");
             assert!(!r.own);
@@ -275,7 +341,11 @@ mod tests {
 
     #[test]
     fn own_frames_win_over_fallback_and_chain_follows_table() {
-        let pack = load(&temp_pack(&["idle_01.png", "notify_01.png", "fall_01.png"], None)).unwrap();
+        let pack = load(&temp_pack(
+            &["idle_01.png", "notify_01.png", "fall_01.png"],
+            None,
+        ))
+        .unwrap();
         let talk = pack.resolve(states::TALK).unwrap();
         assert_eq!(talk.source, states::NOTIFY);
         let land = pack.resolve(states::LAND).unwrap();
@@ -285,7 +355,10 @@ mod tests {
 
     #[test]
     fn missing_idle_is_rejected() {
-        assert!(matches!(load(&temp_pack(&["walk_01.png"], None)), Err(PackError::MissingIdle)));
+        assert!(matches!(
+            load(&temp_pack(&["walk_01.png"], None)),
+            Err(PackError::MissingIdle)
+        ));
     }
 
     #[test]
@@ -297,11 +370,21 @@ mod tests {
                 "walk": { "fps": 10, "procedural": false, "speed": 55 }
             }
         }"#;
-        let files = ["idle_01.png", "idle_02.png", "idle-look_02.png", "idle-look_01.png", "walk_01.png"];
+        let files = [
+            "idle_01.png",
+            "idle_02.png",
+            "idle-look_02.png",
+            "idle-look_01.png",
+            "walk_01.png",
+        ];
         let pack = load(&temp_pack(&files, Some(manifest))).unwrap();
         assert_eq!(pack.name, "水豚");
         let idle = &pack.states[states::IDLE];
-        let default = idle.variants.iter().find(|v| v.id == DEFAULT_VARIANT).unwrap();
+        let default = idle
+            .variants
+            .iter()
+            .find(|v| v.id == DEFAULT_VARIANT)
+            .unwrap();
         assert_eq!(default.durations_ms, vec![500, 500]);
         assert!(default.procedural);
         let look = idle.variants.iter().find(|v| v.id == "look").unwrap();
@@ -319,7 +402,14 @@ mod tests {
     fn durations_must_match_frame_count() {
         let manifest = r#"{ "states": { "idle": { "durations": [100, 200, 300] } } }"#;
         let err = load(&temp_pack(&["idle_01.png"], Some(manifest))).unwrap_err();
-        assert!(matches!(err, PackError::DurationsMismatch { frames: 1, durations: 3, .. }));
+        assert!(matches!(
+            err,
+            PackError::DurationsMismatch {
+                frames: 1,
+                durations: 3,
+                ..
+            }
+        ));
     }
 
     #[test]

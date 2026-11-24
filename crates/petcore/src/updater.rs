@@ -44,7 +44,13 @@ const UNINSTALLER: &str = "unins000.exe";
 const SETUP_FILE: &str = "setup.exe";
 /// 不顯示畫面、不問問題；`/relaunch=1` 讓安裝程式裝完把柚伴開回來；
 /// `!desktopicon`：使用者刪掉的桌面捷徑不要每次更新又建回來（VS Code 的背景更新也這樣帶）。
-const SETUP_ARGS: [&str; 5] = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/relaunch=1", "/MERGETASKS=!desktopicon"];
+const SETUP_ARGS: [&str; 5] = [
+    "/VERYSILENT",
+    "/SUPPRESSMSGBOXES",
+    "/NORESTART",
+    "/relaunch=1",
+    "/MERGETASKS=!desktopicon",
+];
 /// 背景安裝的紀錄（放在 update 資料夾）：裝失敗、柚伴沒回來時查原因用。
 const SETUP_LOG: &str = "setup.log";
 const OLD_EXT: &str = "old";
@@ -57,23 +63,35 @@ const MAX_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
 static CHECKING: AtomicBool = AtomicBool::new(false);
 
 pub fn due(dir: &Path) -> bool {
-    fs::metadata(dir.join(MARKER)).and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_none_or(|age| age >= CHECK_INTERVAL)
+    fs::metadata(dir.join(MARKER))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .is_none_or(|age| age >= CHECK_INTERVAL)
 }
 
 /// 從 `cargo build` 的輸出資料夾跑的是開發中的版本，不要被網路上的正式版蓋掉。
 pub fn enabled_for(install_dir: &Path) -> bool {
-    std::env::var_os(URL_ENV).is_some() || !install_dir.components().any(|c| c.as_os_str() == "target")
+    std::env::var_os(URL_ENV).is_some()
+        || !install_dir.components().any(|c| c.as_os_str() == "target")
 }
 
 /// `v1.2.3` / `1.2.3` → 比目前版本新嗎（數字逐段比）。
 pub fn newer(tag: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> { s.trim_start_matches('v').split('.').map(|p| p.parse().unwrap_or(0)).collect() };
+    let parse = |s: &str| -> Vec<u64> {
+        s.trim_start_matches('v')
+            .split('.')
+            .map(|p| p.parse().unwrap_or(0))
+            .collect()
+    };
     parse(tag) > parse(current)
 }
 
 /// 解好的新版是哪一版（給卡片顯示）。
 pub fn staged_version(dir: &Path) -> Option<String> {
-    fs::read_to_string(dir.join(VERSION_FILE)).ok().map(|s| s.trim().trim_start_matches('v').to_owned())
+    fs::read_to_string(dir.join(VERSION_FILE))
+        .ok()
+        .map(|s| s.trim().trim_start_matches('v').to_owned())
 }
 
 fn installed(install_dir: &Path) -> bool {
@@ -88,29 +106,38 @@ pub fn spawn(dir: PathBuf, install_dir: &Path, notify: HWND) {
     let target = notify.0 as isize;
     let setup = installed(install_dir);
     report(&UpdateStatus::Checking);
-    let spawned = thread::Builder::new().name("updater".into()).spawn(move || {
-        let status = match check_and_stage(&dir, setup) {
-            Ok(Some(version)) => {
-                log!("update {version} staged");
-                unsafe {
-                    let _ = PostMessageW(Some(HWND(target as _)), WM_UPDATE_READY, WPARAM(0), LPARAM(0));
+    let spawned = thread::Builder::new()
+        .name("updater".into())
+        .spawn(move || {
+            let status = match check_and_stage(&dir, setup) {
+                Ok(Some(version)) => {
+                    log!("update {version} staged");
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(HWND(target as _)),
+                            WM_UPDATE_READY,
+                            WPARAM(0),
+                            LPARAM(0),
+                        );
+                    }
+                    UpdateStatus::Ready {
+                        version: version.trim_start_matches('v').to_owned(),
+                    }
                 }
-                UpdateStatus::Ready { version: version.trim_start_matches('v').to_owned() }
-            }
-            Ok(None) => {
-                log!("no update");
-                UpdateStatus::UpToDate
-            }
-            // 沒網路、GitHub 掛了就下次再試，現在的版本照樣能用。
-            Err(e) => {
-                log!("update check failed: {e}");
-                UpdateStatus::Failed
-            }
-        };
-        let _ = write_atomic(&dir.join(MARKER), b"");
-        report(&status);
-        CHECKING.store(false, Ordering::Release);
-    });
+                Ok(None) => {
+                    log!("no update");
+                    UpdateStatus::UpToDate
+                }
+                // 沒網路、GitHub 掛了就下次再試，現在的版本照樣能用。
+                Err(e) => {
+                    log!("update check failed: {e}");
+                    UpdateStatus::Failed
+                }
+            };
+            let _ = write_atomic(&dir.join(MARKER), b"");
+            report(&status);
+            CHECKING.store(false, Ordering::Release);
+        });
     if let Err(e) = spawned {
         log!("updater thread failed to start: {e}");
         report(&UpdateStatus::Failed);
@@ -150,31 +177,52 @@ pub fn apply_and_restart(staged: &Path, install_dir: &Path) -> io::Result<()> {
     let setup = staged.join(SETUP_FILE);
     if setup.is_file() {
         let log = staged.parent().unwrap_or(staged).join(SETUP_LOG);
-        std::process::Command::new(setup).args(SETUP_ARGS).arg(format!("/LOG={}", log.display())).spawn()?;
+        std::process::Command::new(setup)
+            .args(SETUP_ARGS)
+            .arg(format!("/LOG={}", log.display()))
+            .spawn()?;
         return Ok(());
     }
     apply(staged, install_dir)?;
-    std::process::Command::new(install_dir.join(CORE_EXE)).arg(AFTER_UPDATE_FLAG).spawn()?;
+    std::process::Command::new(install_dir.join(CORE_EXE))
+        .arg(AFTER_UPDATE_FLAG)
+        .spawn()?;
     Ok(())
 }
 
 fn agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
-    ureq::Agent::config_builder().timeout_global(Some(HTTP_TIMEOUT)).tls_config(tls).user_agent("youban-desktop-pet-updater").build().into()
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder()
+        .timeout_global(Some(HTTP_TIMEOUT))
+        .tls_config(tls)
+        .user_agent("youban-desktop-pet-updater")
+        .build()
+        .into()
 }
 
 fn check_and_stage(dir: &Path, setup: bool) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let agent = agent();
     let url = std::env::var(URL_ENV).unwrap_or_else(|_| LATEST_URL.to_owned());
-    let latest: serde_json::Value = serde_json::from_str(&agent.get(&url).call()?.body_mut().read_to_string()?)?;
+    let latest: serde_json::Value =
+        serde_json::from_str(&agent.get(&url).call()?.body_mut().read_to_string()?)?;
     let tag = latest["tag_name"].as_str().ok_or("no tag_name")?;
     if !newer(tag, env!("CARGO_PKG_VERSION")) {
         return Ok(None);
     }
     let asset = asset_url(&latest, setup).ok_or("release has no package for this install")?;
-    report(&UpdateStatus::Downloading { version: tag.trim_start_matches('v').to_owned() });
+    report(&UpdateStatus::Downloading {
+        version: tag.trim_start_matches('v').to_owned(),
+    });
     let mut bytes = Vec::new();
-    agent.get(asset).call()?.body_mut().as_reader().take(MAX_DOWNLOAD_BYTES).read_to_end(&mut bytes)?;
+    agent
+        .get(asset)
+        .call()?
+        .body_mut()
+        .as_reader()
+        .take(MAX_DOWNLOAD_BYTES)
+        .read_to_end(&mut bytes)?;
     let staged = dir.join(STAGED_DIR);
     if staged.exists() {
         fs::remove_dir_all(&staged)?;
@@ -195,8 +243,17 @@ fn check_and_stage(dir: &Path, setup: bool) -> Result<Option<String>, Box<dyn st
 
 /// Release 附件裡該下載哪一個：安裝版拿安裝程式，免安裝版拿 zip。
 fn asset_url(latest: &serde_json::Value, setup: bool) -> Option<&str> {
-    let (prefix, ext) = if setup { (SETUP_ASSET_PREFIX, SETUP_ASSET_EXT) } else { (ASSET_PREFIX, ASSET_EXT) };
-    latest["assets"].as_array()?.iter().find(|a| a["name"].as_str().is_some_and(|n| n.starts_with(prefix) && n.ends_with(ext)))?["browser_download_url"].as_str()
+    let (prefix, ext) = if setup {
+        (SETUP_ASSET_PREFIX, SETUP_ASSET_EXT)
+    } else {
+        (ASSET_PREFIX, ASSET_EXT)
+    };
+    latest["assets"].as_array()?.iter().find(|a| {
+        a["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with(prefix) && n.ends_with(ext))
+    })?["browser_download_url"]
+        .as_str()
 }
 
 /// 把解好的新版複製進安裝資料夾。執行中的 exe 先改名成 `.old` 讓位；中途失敗就把改名的換回來。
@@ -235,7 +292,9 @@ fn copy_tree(from: &Path, to: &Path, moved: &mut Vec<PathBuf>) -> io::Result<()>
 
 /// 上次更新留下的 `.old`（舊核心已經結束了，這時刪得掉）。
 pub fn cleanup(install_dir: &Path) {
-    let Ok(entries) = fs::read_dir(install_dir) else { return };
+    let Ok(entries) = fs::read_dir(install_dir) else {
+        return;
+    };
     for e in entries.flatten() {
         if e.path().extension().is_some_and(|x| x == OLD_EXT) {
             let _ = fs::remove_file(e.path());
@@ -282,9 +341,17 @@ mod tests {
         apply(&staged, &install).unwrap();
 
         assert_eq!(fs::read(install.join(CORE_EXE)).unwrap(), b"new");
-        assert_eq!(fs::read(install.join(CORE_EXE).with_extension(OLD_EXT)).unwrap(), b"old", "running exe moved aside, not overwritten");
+        assert_eq!(
+            fs::read(install.join(CORE_EXE).with_extension(OLD_EXT)).unwrap(),
+            b"old",
+            "running exe moved aside, not overwritten"
+        );
         assert!(install.join("pets/capybara/pet.json").is_file());
-        assert_eq!(fs::read(install.join("pets/my-cat/pet.json")).unwrap(), b"cat", "user's own pet untouched");
+        assert_eq!(
+            fs::read(install.join("pets/my-cat/pet.json")).unwrap(),
+            b"cat",
+            "user's own pet untouched"
+        );
         assert!(!staged.exists());
         cleanup(&install);
         assert!(!install.join(CORE_EXE).with_extension(OLD_EXT).exists());

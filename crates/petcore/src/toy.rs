@@ -82,7 +82,9 @@ impl ToyKind {
 
     /// 每一種（截圖工具列出全部用）。
     pub fn all() -> impl Iterator<Item = ToyKind> {
-        (0..FOOD_ART.len()).map(ToyKind::Food).chain((0..BALL_ART.len()).map(ToyKind::Ball))
+        (0..FOOD_ART.len())
+            .map(ToyKind::Food)
+            .chain((0..BALL_ART.len()).map(ToyKind::Ball))
     }
 
     pub fn is_food(self) -> bool {
@@ -127,7 +129,18 @@ pub struct Toy {
 
 impl Toy {
     pub fn new(kind: ToyKind, x: f32, y: f32, vx: f32, vy: f32, size: f32) -> Self {
-        Self { kind, x, y, vx, vy, size, spin_deg: 0.0, resting: false, kicks: 0, held: None }
+        Self {
+            kind,
+            x,
+            y,
+            vx,
+            vy,
+            size,
+            spin_deg: 0.0,
+            resting: false,
+            kicks: 0,
+            held: None,
+        }
     }
 
     /// 使用者在 `(cx, cy)` 抓起來。
@@ -173,7 +186,10 @@ impl Toy {
         let r = self.size / 2.0;
         if self.resting {
             // 腳下的視窗被拖走或關掉：掉下去。
-            let supported = (self.y - w.ground_y).abs() < 0.5 || w.platforms.iter().any(|p| (p.y - self.y).abs() <= SNAP_PX && self.x >= p.left && self.x <= p.right);
+            let supported = (self.y - w.ground_y).abs() < 0.5
+                || w.platforms.iter().any(|p| {
+                    (p.y - self.y).abs() <= SNAP_PX && self.x >= p.left && self.x <= p.right
+                });
             if supported {
                 return false;
             }
@@ -183,21 +199,45 @@ impl Toy {
         self.vy += GRAVITY_DIP * s * dt;
         self.x += self.vx * dt;
         self.y += self.vy * dt;
-        if (self.x - r < w.wall_left && self.vx < 0.0) || (self.x + r > w.wall_right && self.vx > 0.0) {
+        if (self.x - r < w.wall_left && self.vx < 0.0)
+            || (self.x + r > w.wall_right && self.vx > 0.0)
+        {
             self.x = self.x.clamp(w.wall_left + r, w.wall_right - r);
             self.vx = -self.vx * WALL_BOUNCE;
         }
-        let floor = (self.vy > 0.0).then(|| w.platforms.iter().filter(|p| p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right).map(|p| p.y).min_by(f32::total_cmp)).flatten();
+        let floor = (self.vy > 0.0)
+            .then(|| {
+                w.platforms
+                    .iter()
+                    .filter(|p| {
+                        p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right
+                    })
+                    .map(|p| p.y)
+                    .min_by(f32::total_cmp)
+            })
+            .flatten();
         let mut landed = false;
         if let Some(top) = floor.or((self.y >= w.ground_y).then_some(w.ground_y)) {
             self.y = top;
-            let bounce = if self.kind.is_food() { BOUNCE_FOOD } else { BOUNCE_BALL };
+            let bounce = if self.kind.is_food() {
+                BOUNCE_FOOD
+            } else {
+                BOUNCE_BALL
+            };
             landed = self.vy > REST_SPEED_DIP * s * 4.0;
-            self.vy = if self.vy * bounce > REST_SPEED_DIP * s * 3.0 { -self.vy * bounce } else { 0.0 };
+            self.vy = if self.vy * bounce > REST_SPEED_DIP * s * 3.0 {
+                -self.vy * bounce
+            } else {
+                0.0
+            };
             if self.vy == 0.0 {
                 // 在地上滾：摩擦減速。
                 let slow = ROLL_FRICTION_DIP * s * dt;
-                self.vx = if self.vx.abs() <= slow { 0.0 } else { self.vx - slow * self.vx.signum() };
+                self.vx = if self.vx.abs() <= slow {
+                    0.0
+                } else {
+                    self.vx - slow * self.vx.signum()
+                };
                 if self.vx.abs() < REST_SPEED_DIP * s {
                     self.vx = 0.0;
                     self.resting = true;
@@ -234,7 +274,13 @@ impl Toy {
     pub fn window(&self) -> (i32, POINT) {
         let side = (self.size * WINDOW_PER_SIZE).ceil() as i32;
         let pad = (side as f32 - self.size) / 2.0;
-        (side, POINT { x: (self.x - side as f32 / 2.0).round() as i32, y: (self.y + pad - side as f32).round() as i32 })
+        (
+            side,
+            POINT {
+                x: (self.x - side as f32 / 2.0).round() as i32,
+                y: (self.y + pad - side as f32).round() as i32,
+            },
+        )
     }
 }
 
@@ -253,15 +299,26 @@ impl ToyPainter {
     pub fn new(gfx: &Gfx) -> Result<Self> {
         let canvas = Canvas::new(gfx)?;
         let brush = unsafe { canvas.rt.CreateSolidColorBrush(&TRANSPARENT, None)? };
-        Ok(Self { canvas, wic: Wic::new()?, brush, art: None })
+        Ok(Self {
+            canvas,
+            wic: Wic::new()?,
+            brush,
+            art: None,
+        })
     }
 
     pub fn draw(&mut self, toy: &Toy) -> Result<()> {
         let (side, _) = toy.window();
         self.canvas.ensure_size(side, side)?;
         let size_key = toy.size.round() as u32;
-        if !self.art.as_ref().is_some_and(|(k, s, ..)| *k == toy.kind && *s == size_key) {
-            let (bitmap, w, h) = self.wic.load_embedded(toy.kind.art(), &self.canvas.target(), toy.size)?;
+        if !self
+            .art
+            .as_ref()
+            .is_some_and(|(k, s, ..)| *k == toy.kind && *s == size_key)
+        {
+            let (bitmap, w, h) =
+                self.wic
+                    .load_embedded(toy.kind.art(), &self.canvas.target(), toy.size)?;
             self.art = Some((toy.kind, size_key, bitmap, w, h));
         }
         let (_, _, bitmap, w, h) = self.art.as_ref().expect("just loaded");
@@ -269,19 +326,51 @@ impl ToyPainter {
         let b = &self.brush;
         let r = toy.size / 2.0;
         let pad = (side as f32 - toy.size) / 2.0;
-        let c = Vector2 { X: side as f32 / 2.0, Y: side as f32 - pad - r };
+        let c = Vector2 {
+            X: side as f32 / 2.0,
+            Y: side as f32 - pad - r,
+        };
         // 底部貼地、左右置中；扁的（鯛魚燒、馬卡龍）也是坐在地上，不會浮在半空中。
-        let dest = D2D_RECT_F { left: c.X - w / 2.0, top: c.Y + r - h, right: c.X + w / 2.0, bottom: c.Y + r };
+        let dest = D2D_RECT_F {
+            left: c.X - w / 2.0,
+            top: c.Y + r - h,
+            right: c.X + w / 2.0,
+            bottom: c.Y + r,
+        };
         unsafe {
             rt.BeginDraw();
             rt.Clear(Some(&TRANSPARENT));
             if toy.resting {
-                b.SetColor(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: SHADOW_ALPHA });
-                rt.FillEllipse(&D2D1_ELLIPSE { point: Vector2 { X: c.X, Y: c.Y + r * 0.95 }, radiusX: w * 0.4, radiusY: r * 0.16 }, b);
+                b.SetColor(&D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: SHADOW_ALPHA,
+                });
+                rt.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2 {
+                            X: c.X,
+                            Y: c.Y + r * 0.95,
+                        },
+                        radiusX: w * 0.4,
+                        radiusY: r * 0.16,
+                    },
+                    b,
+                );
             }
-            let pivot = Vector2 { X: c.X, Y: c.Y + r - h / 2.0 };
+            let pivot = Vector2 {
+                X: c.X,
+                Y: c.Y + r - h / 2.0,
+            };
             rt.SetTransform(&Matrix3x2::rotation_around(toy.spin_deg, pivot));
-            rt.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+            rt.DrawBitmap(
+                bitmap,
+                Some(&dest),
+                1.0,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
             rt.SetTransform(&Matrix3x2::identity());
             rt.EndDraw(None, None)
         }
@@ -299,7 +388,13 @@ mod tests {
     const DT: f32 = 1.0 / 60.0;
 
     fn world(platforms: &[Platform]) -> World<'_> {
-        World { ground_y: 1000.0, wall_left: 0.0, wall_right: 1920.0, platforms, px_per_dip: 1.0 }
+        World {
+            ground_y: 1000.0,
+            wall_left: 0.0,
+            wall_right: 1920.0,
+            platforms,
+            px_per_dip: 1.0,
+        }
     }
 
     fn settle(t: &mut Toy, w: &World, secs: f32) {
@@ -328,7 +423,11 @@ mod tests {
         }
         assert!(bounced >= 2, "a ball bounces, got {bounced}");
         assert!(t.resting, "comes to rest");
-        assert!(t.x + t.size / 2.0 <= 1920.0, "bounced off the right edge, x = {}", t.x);
+        assert!(
+            t.x + t.size / 2.0 <= 1920.0,
+            "bounced off the right edge, x = {}",
+            t.x
+        );
         assert_eq!(t.kicks, 1);
     }
 
@@ -348,14 +447,27 @@ mod tests {
         assert_eq!((t.x, t.y), (750.0, 700.0), "follows the hand");
         t.release(1.0);
         settle(&mut t, &w, 0.3);
-        assert!(t.x > 950.0 && t.y < 700.0, "flung up and to the right, at ({}, {})", t.x, t.y);
+        assert!(
+            t.x > 950.0 && t.y < 700.0,
+            "flung up and to the right, at ({}, {})",
+            t.x,
+            t.y
+        );
         settle(&mut t, &w, 5.0);
         assert_eq!(t.y, 1000.0, "fell back to the floor");
     }
 
     #[test]
     fn lands_on_a_window_and_falls_when_it_goes_away() {
-        let platforms = [Platform { left: 400.0, right: 700.0, y: 600.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 }];
+        let platforms = [Platform {
+            left: 400.0,
+            right: 700.0,
+            y: 600.0,
+            window: 1,
+            window_left: 400.0,
+            sides: (None, None),
+            bottom: 1000.0,
+        }];
         let mut t = Toy::new(ToyKind::Food(1), 500.0, 100.0, 0.0, 0.0, 40.0);
         settle(&mut t, &world(&platforms), 3.0);
         assert_eq!(t.y, 600.0);

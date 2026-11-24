@@ -16,7 +16,12 @@ use crate::behavior::{Pivot, Pose};
 use crate::effects::{Anchor, EffectPainter, Effects};
 use crate::sprites::Frame;
 
-pub const TRANSPARENT: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+pub const TRANSPARENT: D2D1_COLOR_F = D2D1_COLOR_F {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 0.0,
+};
 
 /// 全程式共用的繪圖與文字工廠。
 #[derive(Clone)]
@@ -65,10 +70,16 @@ impl Canvas {
     pub fn new(gfx: &Gfx) -> Result<Self> {
         let props = D2D1_RENDER_TARGET_PROPERTIES {
             r#type: D2D1_RENDER_TARGET_TYPE_SOFTWARE,
-            pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
             ..Default::default()
         };
-        Ok(Self { rt: unsafe { gfx.d2d.CreateDCRenderTarget(&props)? }, surface: None })
+        Ok(Self {
+            rt: unsafe { gfx.d2d.CreateDCRenderTarget(&props)? },
+            surface: None,
+        })
     }
 
     pub fn target(&self) -> ID2D1RenderTarget {
@@ -76,12 +87,18 @@ impl Canvas {
     }
 
     pub fn size(&self) -> (i32, i32) {
-        self.surface.as_ref().map_or((0, 0), |s| (s.width, s.height))
+        self.surface
+            .as_ref()
+            .map_or((0, 0), |s| (s.width, s.height))
     }
 
     /// 大小變了才重建點陣圖。
     pub fn ensure_size(&mut self, width: i32, height: i32) -> Result<()> {
-        if self.surface.as_ref().is_some_and(|s| s.width == width && s.height == height) {
+        if self
+            .surface
+            .as_ref()
+            .is_some_and(|s| s.width == width && s.height == height)
+        {
             return Ok(());
         }
         self.surface = None;
@@ -102,8 +119,23 @@ impl Canvas {
             let mut bits = std::ptr::null_mut();
             let bitmap = CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
             let previous = SelectObject(dc, bitmap.into());
-            self.rt.BindDC(dc, &RECT { left: 0, top: 0, right: width, bottom: height })?;
-            self.surface = Some(Surface { dc, bitmap, bits: bits as *const u8, previous, width, height });
+            self.rt.BindDC(
+                dc,
+                &RECT {
+                    left: 0,
+                    top: 0,
+                    right: width,
+                    bottom: height,
+                },
+            )?;
+            self.surface = Some(Surface {
+                dc,
+                bitmap,
+                bits: bits as *const u8,
+                previous,
+                width,
+                height,
+            });
         }
         Ok(())
     }
@@ -111,7 +143,10 @@ impl Canvas {
     /// 把畫好的內容貼到螢幕上；`origin` 是視窗左上角，`opacity` 0～1 整體透明度。
     pub fn present(&self, hwnd: HWND, origin: POINT, opacity: f32) -> Result<()> {
         let surface = self.surface.as_ref().expect("ensure_size before present");
-        let size = SIZE { cx: surface.width, cy: surface.height };
+        let size = SIZE {
+            cx: surface.width,
+            cy: surface.height,
+        };
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,
@@ -119,7 +154,17 @@ impl Canvas {
             AlphaFormat: AC_SRC_ALPHA as u8,
         };
         unsafe {
-            UpdateLayeredWindow(hwnd, None, Some(&origin), Some(&size), Some(surface.dc), Some(&POINT { x: 0, y: 0 }), COLORREF(0), Some(&blend), ULW_ALPHA)
+            UpdateLayeredWindow(
+                hwnd,
+                None,
+                Some(&origin),
+                Some(&size),
+                Some(surface.dc),
+                Some(&POINT { x: 0, y: 0 }),
+                COLORREF(0),
+                Some(&blend),
+                ULW_ALPHA,
+            )
         }
     }
 
@@ -155,7 +200,11 @@ pub struct PetRenderer {
 impl PetRenderer {
     pub fn new(gfx: &Gfx) -> Result<Self> {
         let canvas = Canvas::new(gfx)?;
-        Ok(Self { target: canvas.target(), canvas, effects: EffectPainter::new()? })
+        Ok(Self {
+            target: canvas.target(),
+            canvas,
+            effects: EffectPainter::new()?,
+        })
     }
 
     /// `anchor` 是腳底在視窗裡的位置。
@@ -166,28 +215,80 @@ impl PetRenderer {
             rt.Clear(Some(&TRANSPARENT));
             let f = scene.frame;
             // 站在地上時腳底對齊身體重心；貼在牆上時要的是外框邊緣碰到牆，所以用外框中心。
-            let left = if scene.pose.climb.is_some() { anchor.X - f.width / 2.0 } else { anchor.X - f.center_x };
-            let dest = D2D_RECT_F { left, top: anchor.Y - f.height, right: left + f.width, bottom: anchor.Y };
+            let left = if scene.pose.climb.is_some() {
+                anchor.X - f.width / 2.0
+            } else {
+                anchor.X - f.center_x
+            };
+            let dest = D2D_RECT_F {
+                left,
+                top: anchor.Y - f.height,
+                right: left + f.width,
+                bottom: anchor.Y,
+            };
             let appear = Matrix3x2::scale_around(scene.appear, scene.appear, anchor);
             let transform = match scene.pose.climb {
-                Some(side) => climb_transform(&scene.pose, side, scene.own_frames, anchor, f.width, scene.base_height),
-                None => pose_transform(&scene.pose, scene.procedural, anchor, f.height, scene.base_height),
+                Some(side) => climb_transform(
+                    &scene.pose,
+                    side,
+                    scene.own_frames,
+                    anchor,
+                    f.width,
+                    scene.base_height,
+                ),
+                None => pose_transform(
+                    &scene.pose,
+                    scene.procedural,
+                    anchor,
+                    f.height,
+                    scene.base_height,
+                ),
             };
             rt.SetTransform(&(transform * appear));
-            rt.DrawBitmap(&f.bitmap, Some(&dest), scene.appear.clamp(0.0, 1.0), D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+            rt.DrawBitmap(
+                &f.bitmap,
+                Some(&dest),
+                scene.appear.clamp(0.0, 1.0),
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
             rt.SetTransform(&Matrix3x2::identity());
             let zzz = match scene.pose.zzz {
-                Some(t) => self.effects.draw_zzz(&self.target, t, anchor, f.width, f.height, scene.base_height),
+                Some(t) => self.effects.draw_zzz(
+                    &self.target,
+                    t,
+                    anchor,
+                    f.width,
+                    f.height,
+                    scene.base_height,
+                ),
                 None => Ok(()),
             };
-            let (scale_y, lift) = if scene.procedural { (scene.pose.scale_y, scene.pose.lift) } else { (1.0, 0.0) };
+            let (scale_y, lift) = if scene.procedural {
+                (scene.pose.scale_y, scene.pose.lift)
+            } else {
+                (1.0, 0.0)
+            };
             let head = match scene.pose.climb {
                 // 轉 90 度貼在牆上時，頭在離牆一個身高的地方。
-                Some(side) if !scene.own_frames => Vector2 { X: anchor.X - side * f.height, Y: anchor.Y - f.width / 2.0 },
-                _ => Vector2 { X: anchor.X, Y: anchor.Y - f.height * scale_y + lift * scene.base_height },
+                Some(side) if !scene.own_frames => Vector2 {
+                    X: anchor.X - side * f.height,
+                    Y: anchor.Y - f.width / 2.0,
+                },
+                _ => Vector2 {
+                    X: anchor.X,
+                    Y: anchor.Y - f.height * scale_y + lift * scene.base_height,
+                },
             };
-            let fx_anchor = Anchor { head, feet: anchor, height: scene.base_height, facing_left: scene.pose.flip };
-            let fx = self.effects.draw(&self.target, scene.effects, scene.now, fx_anchor);
+            let fx_anchor = Anchor {
+                head,
+                feet: anchor,
+                height: scene.base_height,
+                facing_left: scene.pose.flip,
+            };
+            let fx = self
+                .effects
+                .draw(&self.target, scene.effects, scene.now, fx_anchor);
             let end = rt.EndDraw(None, None);
             zzz.and(fx).and(end)
         }
@@ -198,7 +299,14 @@ impl PetRenderer {
 /// - 有攀爬圖：照原樣直立畫，臉朝牆、身體貼著牆的那一側（攀爬圖照規範面向右畫）。
 /// - 沒有：把走路圖以腳底為軸轉 90 度（頭朝離牆的方向、臉朝上），再往上挪半個寬度，
 ///   整隻落在牆線的螢幕內側、腳底以上 —— 「把牆當地面」走上去。
-fn climb_transform(pose: &Pose, side: f32, own_frames: bool, anchor: Vector2, width: f32, base_height: f32) -> Matrix3x2 {
+fn climb_transform(
+    pose: &Pose,
+    side: f32,
+    own_frames: bool,
+    anchor: Vector2,
+    width: f32,
+    base_height: f32,
+) -> Matrix3x2 {
     // 爬的時候一步一步離牆一點點。
     let away = -side * (-pose.lift) * base_height;
     let flip = if side < 0.0 { -1.0 } else { 1.0 };
@@ -213,7 +321,13 @@ fn climb_transform(pose: &Pose, side: f32, own_frames: bool, anchor: Vector2, wi
     face_up * onto_wall * Matrix3x2::translation(away, -width / 2.0)
 }
 
-fn pose_transform(pose: &Pose, procedural: bool, anchor: Vector2, height: f32, base_height: f32) -> Matrix3x2 {
+fn pose_transform(
+    pose: &Pose,
+    procedural: bool,
+    anchor: Vector2,
+    height: f32,
+    base_height: f32,
+) -> Matrix3x2 {
     let flip = if pose.flip { -1.0 } else { 1.0 };
     if !procedural {
         return Matrix3x2::scale_around(flip, 1.0, anchor);
@@ -221,8 +335,14 @@ fn pose_transform(pose: &Pose, procedural: bool, anchor: Vector2, height: f32, b
     let scale = Matrix3x2::scale_around(pose.scale_x * flip, pose.scale_y, anchor);
     let pivot = match pose.pivot {
         Pivot::Feet => anchor,
-        Pivot::Top => Vector2 { X: anchor.X, Y: anchor.Y - height * pose.scale_y },
-        Pivot::Center => Vector2 { X: anchor.X, Y: anchor.Y - height * pose.scale_y / 2.0 },
+        Pivot::Top => Vector2 {
+            X: anchor.X,
+            Y: anchor.Y - height * pose.scale_y,
+        },
+        Pivot::Center => Vector2 {
+            X: anchor.X,
+            Y: anchor.Y - height * pose.scale_y / 2.0,
+        },
     };
     let rotate = Matrix3x2::rotation_around(pose.rotation_deg, pivot);
     let lift = Matrix3x2::translation(0.0, pose.lift * base_height);

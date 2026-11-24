@@ -2,41 +2,45 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod area_editor;
 mod autostart;
 mod behavior;
 mod bubble;
 mod chatter;
+mod countdown;
 mod effects;
+mod focus_module;
+mod glow;
 mod holiday_sync;
+mod icons;
 mod logger;
 mod memwatch;
 mod modules;
 mod paths;
 mod platforms;
+mod popup_menu;
+mod preview;
 mod reminder_module;
 mod render;
 mod slicer;
-mod preview;
 mod snapshot;
 mod soak;
 mod sprites;
 mod theme;
 mod toy;
-mod glow;
-mod area_editor;
-mod countdown;
-mod focus_module;
-mod icons;
-mod popup_menu;
 mod tray;
 mod updater;
 mod window_restore;
 
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WAIT_ABANDONED, WAIT_OBJECT_0, WPARAM};
+use windows::Win32::Foundation::{
+    ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WAIT_ABANDONED, WAIT_OBJECT_0, WPARAM,
+};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
-use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+};
 use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageW, WM_COPYDATA};
 use windows::core::{PCWSTR, w};
 
@@ -77,7 +81,9 @@ fn main() {
     match arg(1) {
         Some(SLICE_FLAG) => {
             let (Some(sheet), Some(pet)) = (arg(2), arg(3)) else {
-                eprintln!("用法：Youban.exe --slice <多格圖.png> <桌寵資料夾名> <名稱1> <名稱2> ...");
+                eprintln!(
+                    "用法：Youban.exe --slice <多格圖.png> <桌寵資料夾名> <名稱1> <名稱2> ..."
+                );
                 std::process::exit(2);
             };
             let names: Vec<String> = args.iter().skip(4).cloned().collect();
@@ -87,24 +93,42 @@ fn main() {
             }
         }
         Some(FRAMES_FLAG) => {
-            let out = arg(2).map(std::path::PathBuf::from).unwrap_or_else(|| "frames".into());
-            let dpi = arg(3).and_then(|d| d.parse().ok()).unwrap_or(SNAPSHOT_DEFAULT_DPI);
+            let out = arg(2)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| "frames".into());
+            let dpi = arg(3)
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(SNAPSHOT_DEFAULT_DPI);
             if let Err(e) = preview::frames(&out, dpi, arg(4)) {
                 eprintln!("frames failed: {e}");
                 std::process::exit(1);
             }
         }
         Some(SNAPSHOT_FLAG) | Some(SNAPSHOT_CARDS_FLAG) => {
-            let out = arg(2).map(std::path::PathBuf::from).unwrap_or_else(|| "snapshot.png".into());
-            let dpi = arg(3).and_then(|d| d.parse().ok()).unwrap_or(SNAPSHOT_DEFAULT_DPI);
-            let result = if arg(1) == Some(SNAPSHOT_FLAG) { snapshot::pet(&out, dpi) } else { snapshot::cards(&out, dpi) };
+            let out = arg(2)
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| "snapshot.png".into());
+            let dpi = arg(3)
+                .and_then(|d| d.parse().ok())
+                .unwrap_or(SNAPSHOT_DEFAULT_DPI);
+            let result = if arg(1) == Some(SNAPSHOT_FLAG) {
+                snapshot::pet(&out, dpi)
+            } else {
+                snapshot::cards(&out, dpi)
+            };
             if let Err(e) = result {
                 eprintln!("snapshot failed: {e}");
                 std::process::exit(1);
             }
         }
         Some(SEND_FLAG) => std::process::exit(if send(arg(2).unwrap_or("{}")) { 0 } else { 1 }),
-        Some(QUIT_FLAG) => std::process::exit(if send(&serde_json::json!({ "cmd": petkit::ipc::CMD_QUIT }).to_string()) { 0 } else { 1 }),
+        Some(QUIT_FLAG) => std::process::exit(
+            if send(&serde_json::json!({ "cmd": petkit::ipc::CMD_QUIT }).to_string()) {
+                0
+            } else {
+                1
+            },
+        ),
         Some(AUTOSTART_FLAG) => std::process::exit(match autostart::cli(arg(2)) {
             Ok(()) => 0,
             Err(e) => {
@@ -113,7 +137,11 @@ fn main() {
             }
         }),
         other => {
-            let soak_secs = (other == Some(SOAK_FLAG)).then(|| arg(2).and_then(|s| s.parse().ok()).unwrap_or(SOAK_DEFAULT_SECS));
+            let soak_secs = (other == Some(SOAK_FLAG)).then(|| {
+                arg(2)
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(SOAK_DEFAULT_SECS)
+            });
             run_app(soak_secs, other == Some(updater::AFTER_UPDATE_FLAG));
         }
     }
@@ -125,7 +153,13 @@ fn run_app(soak_secs: Option<u64>, after_update: bool) {
         let guard = CreateMutexW(None, true, w!("Local\\YoubanDesktopPet.Core"));
         if GetLastError() == ERROR_ALREADY_EXISTS {
             // 舊核心結束時沒有放開，所以拿到的會是「被放棄」（WAIT_ABANDONED），一樣算接手成功。
-            let taken = after_update && guard.as_ref().is_ok_and(|h| matches!(WaitForSingleObject(*h, AFTER_UPDATE_WAIT_MS), WAIT_OBJECT_0 | WAIT_ABANDONED));
+            let taken = after_update
+                && guard.as_ref().is_ok_and(|h| {
+                    matches!(
+                        WaitForSingleObject(*h, AFTER_UPDATE_WAIT_MS),
+                        WAIT_OBJECT_0 | WAIT_ABANDONED
+                    )
+                });
             if !taken {
                 log!("another instance is running; exiting");
                 return;
@@ -147,8 +181,17 @@ fn send(json: &str) -> bool {
             eprintln!("desktop pet is not running");
             return false;
         };
-        let data = COPYDATASTRUCT { dwData: 0, cbData: json.len() as u32, lpData: json.as_ptr() as *mut _ };
-        SendMessageW(hwnd, WM_COPYDATA, Some(WPARAM(0)), Some(LPARAM(&data as *const _ as isize)));
+        let data = COPYDATASTRUCT {
+            dwData: 0,
+            cbData: json.len() as u32,
+            lpData: json.as_ptr() as *mut _,
+        };
+        SendMessageW(
+            hwnd,
+            WM_COPYDATA,
+            Some(WPARAM(0)),
+            Some(LPARAM(&data as *const _ as isize)),
+        );
         true
     }
 }

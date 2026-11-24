@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{Datelike, Duration, NaiveDateTime};
-use petkit::anniversary::{AnnualDate, Anniversary};
+use petkit::anniversary::{Anniversary, AnnualDate};
 use petkit::config::{load_json, write_atomic};
 use petkit::holidays::{self, Calendar};
 use petkit::reminders::{Reminder, ReminderFile, Style};
@@ -54,8 +54,13 @@ struct State {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum Pending {
     /// 要按完成的提醒，`at` 是響的時間（標題重開時從提醒檔讀，改過名就顯示新的）。
-    Reminder { at: NaiveDateTime },
-    Missed { rows: Vec<MissedRow>, more: usize },
+    Reminder {
+        at: NaiveDateTime,
+    },
+    Missed {
+        rows: Vec<MissedRow>,
+        more: usize,
+    },
 }
 
 /// 錯過的提醒裡的一列：存時間不存排好的字，卡片放到隔天也能重畫出日期。
@@ -63,7 +68,11 @@ enum Pending {
 #[serde(untagged)]
 enum MissedRow {
     /// `last` 是最後一次該響的時間，`count` 是這段時間錯過幾次。
-    At { title: String, last: NaiveDateTime, count: usize },
+    At {
+        title: String,
+        last: NaiveDateTime,
+        count: usize,
+    },
     /// 0.6.0 的存檔只有排好的字（標題、時間），讀到就照原樣顯示。
     Text(String, String),
 }
@@ -73,7 +82,14 @@ impl MissedRow {
         match self {
             MissedRow::At { title, last, count } => {
                 let when = card_time(*last, today);
-                (title.clone(), if *count > 1 { format!("{when}（{count} 次）") } else { when })
+                (
+                    title.clone(),
+                    if *count > 1 {
+                        format!("{when}（{count} 次）")
+                    } else {
+                        when
+                    },
+                )
             }
             MissedRow::Text(title, when) => (title.clone(), when.clone()),
         }
@@ -81,7 +97,10 @@ impl MissedRow {
 }
 
 fn missed_card(rows: &[MissedRow], more: usize, now: NaiveDateTime) -> Card {
-    Card::Missed { rows: rows.iter().map(|r| r.shown(now.date())).collect(), more }
+    Card::Missed {
+        rows: rows.iter().map(|r| r.shown(now.date())).collect(),
+        more,
+    }
 }
 
 pub struct ReminderModule {
@@ -128,7 +147,12 @@ impl Entry<'_> {
         }
     }
 
-    fn occurrences_between(&self, from: NaiveDateTime, to: NaiveDateTime, cal: &Calendar) -> (usize, Option<NaiveDateTime>) {
+    fn occurrences_between(
+        &self,
+        from: NaiveDateTime,
+        to: NaiveDateTime,
+        cal: &Calendar,
+    ) -> (usize, Option<NaiveDateTime>) {
         match self {
             Entry::Reminder(r) => r.occurrences_between(from, to, cal),
             Entry::Anniversary(a) => a.alerts_between(from, to),
@@ -149,22 +173,50 @@ impl Entry<'_> {
             Entry::Reminder(r) => {
                 let (title, time) = (r.title.clone(), card_time(at, now.date()));
                 match r.style {
-                    Style::Card => Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing },
-                    Style::Auto => Card::Nudge { title, time, icon: Icon::BellRing },
+                    Style::Card => Card::Reminder {
+                        title,
+                        time,
+                        snooze_open: false,
+                        icon: Icon::BellRing,
+                    },
+                    Style::Auto => Card::Nudge {
+                        title,
+                        time,
+                        icon: Icon::BellRing,
+                    },
                 }
             }
             Entry::Anniversary(a) => {
                 // 這一張是為哪一次響的；還有幾天照今天算（按「稍後」、隔天重開都對）。
                 let (title, time) = match a.next_on_or_after(at.date()) {
                     Some(o) => {
-                        let lunar = matches!(a.date, AnnualDate::Lunar { .. }).then(|| format!(" · {}", a.date.label())).unwrap_or_default();
-                        let years = o.nth.filter(|n| *n > 0).map(|n| format!(" · 滿 {n} 年")).unwrap_or_default();
-                        let day = format!("{}/{}（{}）{lunar}{years}", o.date.month(), o.date.day(), WEEKDAYS[o.date.weekday().num_days_from_monday() as usize]);
-                        (anniversary_line(&a.title, (o.date - now.date()).num_days()), day)
+                        let lunar = matches!(a.date, AnnualDate::Lunar { .. })
+                            .then(|| format!(" · {}", a.date.label()))
+                            .unwrap_or_default();
+                        let years = o
+                            .nth
+                            .filter(|n| *n > 0)
+                            .map(|n| format!(" · 滿 {n} 年"))
+                            .unwrap_or_default();
+                        let day = format!(
+                            "{}/{}（{}）{lunar}{years}",
+                            o.date.month(),
+                            o.date.day(),
+                            WEEKDAYS[o.date.weekday().num_days_from_monday() as usize]
+                        );
+                        (
+                            anniversary_line(&a.title, (o.date - now.date()).num_days()),
+                            day,
+                        )
                     }
                     None => (a.title.clone(), a.date.label()),
                 };
-                Card::Reminder { title, time, snooze_open: false, icon: Icon::Cake }
+                Card::Reminder {
+                    title,
+                    time,
+                    snooze_open: false,
+                    icon: Icon::Cake,
+                }
             }
         }
     }
@@ -212,7 +264,8 @@ impl ReminderModule {
     }
 
     fn reload_calendar(&mut self) {
-        let (cal, problems) = holidays::load_calendar(&self.paths.holiday_cache, self.file.day_overrides.clone());
+        let (cal, problems) =
+            holidays::load_calendar(&self.paths.holiday_cache, self.file.day_overrides.clone());
         for p in problems {
             log!("holiday calendar unreadable: {p}");
         }
@@ -220,7 +273,11 @@ impl ReminderModule {
     }
 
     fn entries(&self) -> impl Iterator<Item = Entry<'_>> {
-        self.file.reminders.iter().map(Entry::Reminder).chain(self.file.anniversaries.iter().map(Entry::Anniversary))
+        self.file
+            .reminders
+            .iter()
+            .map(Entry::Reminder)
+            .chain(self.file.anniversaries.iter().map(Entry::Anniversary))
     }
 
     fn entry(&self, key: &str) -> Option<Entry<'_>> {
@@ -228,18 +285,30 @@ impl ReminderModule {
     }
 
     fn reschedule(&mut self, from: NaiveDateTime) {
-        self.next = self.entries().filter_map(|e| Some((e.key(), e.next_after(from, &self.calendar)?))).collect();
+        self.next = self
+            .entries()
+            .filter_map(|e| Some((e.key(), e.next_after(from, &self.calendar)?)))
+            .collect();
         let keys: HashSet<String> = self.entries().map(|e| e.key()).collect();
         self.state.snoozes.retain(|id, _| keys.contains(id));
-        self.state.pending.retain(|id, _| id == MISSED_KEY || keys.contains(id));
+        self.state
+            .pending
+            .retain(|id, _| id == MISSED_KEY || keys.contains(id));
     }
 
     /// 時間到：跳要按完成的卡（記進 `pending`），或會自己消失的卡。
     fn fire(&mut self, ctx: &mut Ctx, key: &str, at: NaiveDateTime) {
-        let Some((card, keep)) = self.entry(key).map(|e| (e.card(at, ctx.now), e.needs_done())) else { return };
+        let Some((card, keep)) = self
+            .entry(key)
+            .map(|e| (e.card(at, ctx.now), e.needs_done()))
+        else {
+            return;
+        };
         ctx.card(key, card);
         if keep {
-            self.state.pending.insert(key.to_owned(), Pending::Reminder { at });
+            self.state
+                .pending
+                .insert(key.to_owned(), Pending::Reminder { at });
         } else {
             self.state.pending.remove(key);
         }
@@ -248,14 +317,20 @@ impl ReminderModule {
     /// 跳「錯過的提醒」；上一張還沒按掉的話併在一起（新的排前面）。
     fn show_missed(&mut self, ctx: &mut Ctx, rows: Vec<MissedRow>) {
         let (mut rows, mut more) = (rows, 0);
-        if let Some(Pending::Missed { rows: old, more: old_more }) = self.state.pending.remove(MISSED_KEY) {
+        if let Some(Pending::Missed {
+            rows: old,
+            more: old_more,
+        }) = self.state.pending.remove(MISSED_KEY)
+        {
             rows.extend(old);
             more += old_more;
         }
         more += rows.len().saturating_sub(MISSED_MAX_ROWS);
         rows.truncate(MISSED_MAX_ROWS);
         ctx.card(MISSED_KEY, missed_card(&rows, more, ctx.now));
-        self.state.pending.insert(MISSED_KEY.to_owned(), Pending::Missed { rows, more });
+        self.state
+            .pending
+            .insert(MISSED_KEY.to_owned(), Pending::Missed { rows, more });
     }
 
     /// 這段時間錯過的提醒，每則一列，最近錯過的排前面。
@@ -268,7 +343,9 @@ impl ReminderModule {
             })
             .collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-        rows.into_iter().map(|(last, title, count)| MissedRow::At { title, last, count }).collect()
+        rows.into_iter()
+            .map(|(last, title, count)| MissedRow::At { title, last, count })
+            .collect()
     }
 
     fn save_state(&mut self, now: NaiveDateTime) {
@@ -304,7 +381,8 @@ impl Module for ReminderModule {
             let before: Vec<String> = self.next.keys().cloned().collect();
             self.reschedule(now);
             for id in before.iter().filter(|id| self.entry(id).is_none()) {
-                ctx.out.push(crate::modules::Request::Withdraw { key: id.clone() });
+                ctx.out
+                    .push(crate::modules::Request::Withdraw { key: id.clone() });
             }
         }
 
@@ -328,17 +406,31 @@ impl Module for ReminderModule {
         }
         self.last_tick = Some(now);
 
-        let due: Vec<String> = self.next.iter().filter(|(_, at)| **at <= now).map(|(id, _)| id.clone()).collect();
+        let due: Vec<String> = self
+            .next
+            .iter()
+            .filter(|(_, at)| **at <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
         for id in due {
             let fired_at = self.next[&id];
             self.fire(ctx, &id, fired_at);
-            match self.entry(&id).and_then(|e| e.next_after(now, &self.calendar)) {
+            match self
+                .entry(&id)
+                .and_then(|e| e.next_after(now, &self.calendar))
+            {
                 Some(next) => self.next.insert(id, next),
                 None => self.next.remove(&id),
             };
         }
 
-        let snoozed: Vec<String> = self.state.snoozes.iter().filter(|(_, at)| **at <= now).map(|(id, _)| id.clone()).collect();
+        let snoozed: Vec<String> = self
+            .state
+            .snoozes
+            .iter()
+            .filter(|(_, at)| **at <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
         let snooze_fired = !snoozed.is_empty();
         for id in snoozed {
             self.state.snoozes.remove(&id);
@@ -346,7 +438,12 @@ impl Module for ReminderModule {
         }
 
         // 跳出、按掉的卡馬上存（隨時可能被關掉）；其他照固定間隔存「看到哪個時間了」。
-        if snooze_fired || self.state.pending != pending_before || self.last_save.is_none_or(|t| now - t >= Duration::seconds(STATE_SAVE_SECS)) {
+        if snooze_fired
+            || self.state.pending != pending_before
+            || self
+                .last_save
+                .is_none_or(|t| now - t >= Duration::seconds(STATE_SAVE_SECS))
+        {
             self.save_state(now);
         }
     }
@@ -355,7 +452,10 @@ impl Module for ReminderModule {
         match event {
             ModuleEvent::Card { key, action } => {
                 if let CardAction::Snooze(minutes) = action {
-                    self.state.snoozes.insert(key.to_string(), ctx.now + Duration::minutes(i64::from(*minutes)));
+                    self.state.snoozes.insert(
+                        key.to_string(),
+                        ctx.now + Duration::minutes(i64::from(*minutes)),
+                    );
                 }
                 if *action != CardAction::OpenSnooze {
                     self.state.pending.remove(*key);
@@ -374,7 +474,10 @@ impl Module for ReminderModule {
     /// 那筆刪掉了、改成自己消失、或已經按掉的不再跳。
     fn restore_card(&mut self, key: &str, _card: Card, now: NaiveDateTime) -> Option<Card> {
         match self.state.pending.get(key)? {
-            Pending::Reminder { at } => self.entry(key).filter(|e| e.needs_done()).map(|e| e.card(*at, now)),
+            Pending::Reminder { at } => self
+                .entry(key)
+                .filter(|e| e.needs_done())
+                .map(|e| e.card(*at, now)),
             Pending::Missed { rows, more } => Some(missed_card(rows, *more, now)),
         }
     }
@@ -384,23 +487,39 @@ impl Module for ReminderModule {
 mod tests {
     use super::*;
     use crate::modules::Request;
-    use petkit::config::Config;
     use chrono::{NaiveDate, NaiveTime};
+    use petkit::config::Config;
     use petkit::reminders::{HolidayPolicy, Repeat};
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static N: AtomicU32 = AtomicU32::new(0);
 
     fn dt(d: u32, h: u32, m: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 3, d).unwrap().and_hms_opt(h, m, 0).unwrap()
+        NaiveDate::from_ymd_opt(2026, 3, d)
+            .unwrap()
+            .and_hms_opt(h, m, 0)
+            .unwrap()
     }
 
     fn setup(reminders: Vec<Reminder>) -> (ReminderModule, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("petcore-rem-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let dir = std::env::temp_dir().join(format!(
+            "petcore-rem-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let paths = Paths { reminders: dir.join("reminders.json"), state: dir.join("state.json"), holiday_cache: dir.join("holidays") };
-        ReminderFile { reminders, ..Default::default() }.save(&paths.reminders).unwrap();
+        let paths = Paths {
+            reminders: dir.join("reminders.json"),
+            state: dir.join("state.json"),
+            holiday_cache: dir.join("holidays"),
+        };
+        ReminderFile {
+            reminders,
+            ..Default::default()
+        }
+        .save(&paths.reminders)
+        .unwrap();
         (ReminderModule::new(paths), dir)
     }
 
@@ -423,12 +542,26 @@ mod tests {
         r.style = Style::Auto;
         let (mut m, _) = setup(vec![r]);
         tick(&mut m, dt(2, 8, 59));
-        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), vec![("a".into(), Card::Nudge { title: "提醒a".into(), time: "09:00".into(), icon: Icon::BellRing })]);
+        assert_eq!(
+            cards(&tick(&mut m, dt(2, 9, 0))),
+            vec![(
+                "a".into(),
+                Card::Nudge {
+                    title: "提醒a".into(),
+                    time: "09:00".into(),
+                    icon: Icon::BellRing
+                }
+            )]
+        );
     }
 
     fn tick(m: &mut ReminderModule, now: NaiveDateTime) -> Vec<Request> {
         let mut out = Vec::new();
-        m.tick(&mut Ctx { now, config: &Config::default(), out: &mut out });
+        m.tick(&mut Ctx {
+            now,
+            config: &Config::default(),
+            out: &mut out,
+        });
         out
     }
 
@@ -446,8 +579,22 @@ mod tests {
         let (mut m, _) = setup(vec![daily("a", 9)]);
         assert!(tick(&mut m, dt(2, 8, 59)).is_empty());
         let out = cards(&tick(&mut m, dt(2, 9, 0)));
-        assert_eq!(out, vec![("a".into(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false, icon: Icon::BellRing })]);
-        assert!(cards(&tick(&mut m, dt(2, 9, 0))).is_empty(), "same minute does not fire twice");
+        assert_eq!(
+            out,
+            vec![(
+                "a".into(),
+                Card::Reminder {
+                    title: "提醒a".into(),
+                    time: "09:00".into(),
+                    snooze_open: false,
+                    icon: Icon::BellRing
+                }
+            )]
+        );
+        assert!(
+            cards(&tick(&mut m, dt(2, 9, 0))).is_empty(),
+            "same minute does not fire twice"
+        );
     }
 
     #[test]
@@ -456,7 +603,17 @@ mod tests {
         tick(&mut m, dt(2, 8, 59));
         tick(&mut m, dt(2, 9, 0));
         let mut out = Vec::new();
-        m.on_event(&ModuleEvent::Card { key: "a", action: CardAction::Snooze(15) }, &mut Ctx { now: dt(2, 9, 0), config: &Config::default(), out: &mut out });
+        m.on_event(
+            &ModuleEvent::Card {
+                key: "a",
+                action: CardAction::Snooze(15),
+            },
+            &mut Ctx {
+                now: dt(2, 9, 0),
+                config: &Config::default(),
+                out: &mut out,
+            },
+        );
         assert!(cards(&tick(&mut m, dt(2, 9, 14))).is_empty());
         assert_eq!(cards(&tick(&mut m, dt(2, 9, 15))).len(), 1);
     }
@@ -470,7 +627,9 @@ mod tests {
         assert_eq!(out.len(), 1);
         let (key, card) = &out[0];
         assert_eq!(key, MISSED_KEY);
-        let Card::Missed { rows, more } = card else { panic!("expected missed card") };
+        let Card::Missed { rows, more } = card else {
+            panic!("expected missed card")
+        };
         assert_eq!(*more, 0);
         assert_eq!(rows[0], ("提醒b".to_string(), "10:00（2 次）".to_string()));
         // 之後照常排：隔天 9:00 響
@@ -483,24 +642,47 @@ mod tests {
         let (mut m, dir) = setup(vec![daily("a", 9)]);
         tick(&mut m, dt(2, 8, 0)); // 存下 lastChecked
         drop(m);
-        let paths = Paths { reminders: dir.join("reminders.json"), state: dir.join("state.json"), holiday_cache: dir.join("holidays") };
+        let paths = Paths {
+            reminders: dir.join("reminders.json"),
+            state: dir.join("state.json"),
+            holiday_cache: dir.join("holidays"),
+        };
         let mut m = ReminderModule::new(paths);
         let out = cards(&tick(&mut m, dt(2, 12, 0)));
         assert!(matches!(&out[..], [(k, Card::Missed { .. })] if k == MISSED_KEY));
     }
 
     fn restart(dir: &Path) -> ReminderModule {
-        ReminderModule::new(Paths { reminders: dir.join("reminders.json"), state: dir.join("state.json"), holiday_cache: dir.join("holidays") })
+        ReminderModule::new(Paths {
+            reminders: dir.join("reminders.json"),
+            state: dir.join("state.json"),
+            holiday_cache: dir.join("holidays"),
+        })
     }
 
     fn press(m: &mut ReminderModule, key: &str, action: CardAction, now: NaiveDateTime) {
-        m.on_event(&ModuleEvent::Card { key, action }, &mut Ctx { now, config: &Config::default(), out: &mut Vec::new() });
+        m.on_event(
+            &ModuleEvent::Card { key, action },
+            &mut Ctx {
+                now,
+                config: &Config::default(),
+                out: &mut Vec::new(),
+            },
+        );
     }
 
     /// 重開柚伴：核心把上次沒按掉的卡（`needs_done`）還給模組，收集它說要重新跳的。
-    fn reopen(dir: &Path, shown: &[(String, Card)], now: NaiveDateTime) -> (ReminderModule, Vec<(String, Card)>) {
+    fn reopen(
+        dir: &Path,
+        shown: &[(String, Card)],
+        now: NaiveDateTime,
+    ) -> (ReminderModule, Vec<(String, Card)>) {
         let mut m = restart(dir);
-        let back = shown.iter().filter(|(_, c)| c.needs_done()).filter_map(|(k, c)| Some((k.clone(), m.restore_card(k, c.clone(), now)?))).collect();
+        let back = shown
+            .iter()
+            .filter(|(_, c)| c.needs_done())
+            .filter_map(|(k, c)| Some((k.clone(), m.restore_card(k, c.clone(), now)?)))
+            .collect();
         (m, back)
     }
 
@@ -519,7 +701,10 @@ mod tests {
         assert!(reopen(&dir, &shown, dt(2, 9, 3)).1.is_empty());
         tick(&mut m, dt(3, 9, 0));
         let (_, back) = reopen(&dir, &shown, dt(4, 8, 0));
-        assert!(matches!(&back[..], [(_, Card::Reminder { time, .. })] if time == "3/3 09:00"), "{back:?}");
+        assert!(
+            matches!(&back[..], [(_, Card::Reminder { time, .. })] if time == "3/3 09:00"),
+            "{back:?}"
+        );
     }
 
     #[test]
@@ -530,7 +715,12 @@ mod tests {
         // 關著的時候在設定裡改成「自己消失」：重開不再跳那張要按完成的卡。
         let mut r = daily("a", 9);
         r.style = Style::Auto;
-        ReminderFile { reminders: vec![r], ..Default::default() }.save(&dir.join("reminders.json")).unwrap();
+        ReminderFile {
+            reminders: vec![r],
+            ..Default::default()
+        }
+        .save(&dir.join("reminders.json"))
+        .unwrap();
         assert!(reopen(&dir, &shown, dt(2, 9, 1)).1.is_empty());
     }
 
@@ -556,7 +746,10 @@ mod tests {
             other => panic!("expected missed card, got {other:?}"),
         };
         assert_eq!(row(Some(missed[0].1.clone())), "09:00（2 次）");
-        assert_eq!(row(m.restore_card(MISSED_KEY, missed[0].1.clone(), dt(4, 8, 0))), "3/3 09:00（2 次）");
+        assert_eq!(
+            row(m.restore_card(MISSED_KEY, missed[0].1.clone(), dt(4, 8, 0))),
+            "3/3 09:00（2 次）"
+        );
     }
 
     #[test]
@@ -564,23 +757,54 @@ mod tests {
         let (_, dir) = setup(vec![daily("a", 9)]);
         let saved = r#"{ "lastChecked": "2026-03-03T11:00:00", "pending": { "missed": { "kind": "missed", "rows": [["提醒a", "09:00（2 次）"]], "more": 0 } } }"#;
         fs::write(dir.join("state.json"), saved).unwrap();
-        let card = Card::Missed { rows: vec![("提醒a".into(), "09:00（2 次）".into())], more: 0 };
+        let card = Card::Missed {
+            rows: vec![("提醒a".into(), "09:00（2 次）".into())],
+            more: 0,
+        };
         let mut m = restart(&dir);
         assert_eq!(m.state.last_checked, Some(dt(3, 11, 0)));
-        assert_eq!(m.restore_card(MISSED_KEY, card.clone(), dt(4, 8, 0)), Some(card));
+        assert_eq!(
+            m.restore_card(MISSED_KEY, card.clone(), dt(4, 8, 0)),
+            Some(card)
+        );
     }
 
     #[test]
     fn anniversary_alerts_say_how_many_days_are_left_and_stay_until_done() {
-        use petkit::anniversary::{Alert, AnnualDate, Anniversary};
-        let alert = |days_before, h| Alert { days_before, time: NaiveTime::from_hms_opt(h, 0, 0).unwrap() };
-        let a = Anniversary { id: "mom".into(), title: "媽媽生日".into(), enabled: true, date: AnnualDate::Solar { month: 3, day: 5 }, year: Some(1966), alerts: vec![alert(3, 9), alert(0, 8)] };
+        use petkit::anniversary::{Alert, Anniversary, AnnualDate};
+        let alert = |days_before, h| Alert {
+            days_before,
+            time: NaiveTime::from_hms_opt(h, 0, 0).unwrap(),
+        };
+        let a = Anniversary {
+            id: "mom".into(),
+            title: "媽媽生日".into(),
+            enabled: true,
+            date: AnnualDate::Solar { month: 3, day: 5 },
+            year: Some(1966),
+            alerts: vec![alert(3, 9), alert(0, 8)],
+        };
         let (_, dir) = setup(Vec::new());
-        ReminderFile { anniversaries: vec![a], ..Default::default() }.save(&dir.join("reminders.json")).unwrap();
+        ReminderFile {
+            anniversaries: vec![a],
+            ..Default::default()
+        }
+        .save(&dir.join("reminders.json"))
+        .unwrap();
         let mut m = restart(&dir);
         tick(&mut m, dt(2, 8, 0));
         let key = format!("{ANNIVERSARY_KEY_PREFIX}mom");
-        let card = |title: &str| vec![(key.clone(), Card::Reminder { title: title.into(), time: "3/5（四） · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake })];
+        let card = |title: &str| {
+            vec![(
+                key.clone(),
+                Card::Reminder {
+                    title: title.into(),
+                    time: "3/5（四） · 滿 60 年".into(),
+                    snooze_open: false,
+                    icon: Icon::Cake,
+                },
+            )]
+        };
         let shown = cards(&tick(&mut m, dt(2, 9, 0)));
         assert_eq!(shown, card("再 3 天就是媽媽生日囉～"));
         // 沒按完成就關掉柚伴：隔兩天重開還在，天數照當天算。
@@ -588,7 +812,10 @@ mod tests {
         assert_eq!(back, card("明天就是媽媽生日囉～"));
         tick(&mut m, dt(4, 7, 0));
         press(&mut m, &key, CardAction::Done, dt(4, 7, 0));
-        assert_eq!(cards(&tick(&mut m, dt(5, 8, 0))), card("今天是媽媽生日喔～"));
+        assert_eq!(
+            cards(&tick(&mut m, dt(5, 8, 0))),
+            card("今天是媽媽生日喔～")
+        );
         assert!(cards(&tick(&mut m, dt(5, 8, 1))).is_empty());
     }
 
@@ -597,10 +824,26 @@ mod tests {
         let (mut m, dir) = setup(vec![daily("a", 9), daily("b", 10)]);
         tick(&mut m, dt(2, 8, 0));
         std::thread::sleep(std::time::Duration::from_millis(20));
-        ReminderFile { reminders: vec![daily("c", 8)], ..Default::default() }.save(&dir.join("reminders.json")).unwrap();
+        ReminderFile {
+            reminders: vec![daily("c", 8)],
+            ..Default::default()
+        }
+        .save(&dir.join("reminders.json"))
+        .unwrap();
         let out = tick(&mut m, dt(2, 8, 1));
         assert!(out.contains(&Request::Withdraw { key: "a".into() }));
         assert!(out.contains(&Request::Withdraw { key: "b".into() }));
-        assert_eq!(cards(&tick(&mut m, dt(3, 8, 0))), vec![("c".into(), Card::Reminder { title: "提醒c".into(), time: "08:00".into(), snooze_open: false, icon: Icon::BellRing })]);
+        assert_eq!(
+            cards(&tick(&mut m, dt(3, 8, 0))),
+            vec![(
+                "c".into(),
+                Card::Reminder {
+                    title: "提醒c".into(),
+                    time: "08:00".into(),
+                    snooze_open: false,
+                    icon: Icon::BellRing
+                }
+            )]
+        );
     }
 }

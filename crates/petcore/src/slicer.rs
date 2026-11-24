@@ -23,16 +23,37 @@ pub fn run(sheet_path: &Path, pet: &str, names: &[String]) -> Result<()> {
     let (w, h, pixels) = wic.decode_premultiplied(sheet_path)?;
     let pieces = sheet::split(&pixels, w, h);
     if pieces.len() != names.len() {
-        return Err(Error::new(E_FAIL, format!("圖上找到 {} 隻，但給了 {} 個名稱", pieces.len(), names.len())));
+        return Err(Error::new(
+            E_FAIL,
+            format!(
+                "圖上找到 {} 隻，但給了 {} 個名稱",
+                pieces.len(),
+                names.len()
+            ),
+        ));
     }
     for (piece, name) in pieces.iter().zip(names) {
         if name == SKIP_NAME {
             continue;
         }
         let file = frames_dir.join(format!("{name}.png"));
-        wic.save_png(&file, piece.width as u32, piece.height as u32, &piece.pixels)?;
-        let note = if piece.marks_removed > 0 { format!("（拿掉 {} 個符號）", piece.marks_removed) } else { String::new() };
-        println!("{name}: {}x{}{note} → {}", piece.width, piece.height, file.display());
+        wic.save_png(
+            &file,
+            piece.width as u32,
+            piece.height as u32,
+            &piece.pixels,
+        )?;
+        let note = if piece.marks_removed > 0 {
+            format!("（拿掉 {} 個符號）", piece.marks_removed)
+        } else {
+            String::new()
+        };
+        println!(
+            "{name}: {}x{}{note} → {}",
+            piece.width,
+            piece.height,
+            file.display()
+        );
     }
     Ok(())
 }

@@ -9,9 +9,16 @@ use std::time::{Duration, Instant};
 
 use petkit::config::{load_json, write_atomic};
 use serde::{Deserialize, Serialize};
-use windows::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError, HWND, LPARAM, MAX_PATH, RECT};
-use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
-use windows::Win32::System::Threading::{GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, GetLastError, HWND, LPARAM, MAX_PATH, RECT,
+};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentProcessId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    QueryFullProcessImageNameW,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, PWSTR};
 
@@ -29,10 +36,25 @@ const AUTO_RECORD_EVERY: Duration = Duration::from_secs(60);
 const ANNOUNCE_TITLE_MAX_CHARS: usize = 12;
 const MENU_SAVE: u32 = 1;
 const MENU_RESTORE: u32 = 2;
-use petkit::ipc::{CMD_EDIT_WINDOW as CMD_EDIT, CMD_RESTORE_LAYOUT as CMD_RESTORE, CMD_SAVE_LAYOUT as CMD_SAVE};
+use petkit::ipc::{
+    CMD_EDIT_WINDOW as CMD_EDIT, CMD_RESTORE_LAYOUT as CMD_RESTORE, CMD_SAVE_LAYOUT as CMD_SAVE,
+};
 /// 系統資料夾下的程式不記（設定、開始選單這類），終端機例外。
-const SYSTEM_DIRS: [&str; 4] = ["c:\\windows\\system32\\", "c:\\windows\\systemapps\\", "c:\\windows\\immersivecontrolpanel\\", "c:\\program files\\windowsapps\\"];
-const TERMINALS: [&str; 7] = ["conhost.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wt.exe", "windowsterminal.exe", "openconsole.exe"];
+const SYSTEM_DIRS: [&str; 4] = [
+    "c:\\windows\\system32\\",
+    "c:\\windows\\systemapps\\",
+    "c:\\windows\\immersivecontrolpanel\\",
+    "c:\\program files\\windowsapps\\",
+];
+const TERMINALS: [&str; 7] = [
+    "conhost.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wt.exe",
+    "windowsterminal.exe",
+    "openconsole.exe",
+];
 const DESKTOP_TITLE: &str = "Program Manager";
 const EXPLORER: &str = "explorer.exe";
 
@@ -62,7 +84,11 @@ pub fn announce_text(titles: &[String]) -> Option<String> {
         [] => None,
         [title] => {
             let short: String = title.chars().take(ANNOUNCE_TITLE_MAX_CHARS).collect();
-            let ellipsis = if title.chars().count() > ANNOUNCE_TITLE_MAX_CHARS { "…" } else { "" };
+            let ellipsis = if title.chars().count() > ANNOUNCE_TITLE_MAX_CHARS {
+                "…"
+            } else {
+                ""
+            };
             Some(format!("「{short}{ellipsis}」的位置，我記住囉～"))
         }
         _ => Some(format!("新來的 {} 個視窗，我都記住囉！", titles.len())),
@@ -96,10 +122,19 @@ fn place(hwnd: HWND, e: &Entry) -> Placed {
         }
         let mut r = RECT::default();
         let _ = GetWindowRect(hwnd, &mut r);
-        if (r.left, r.top, r.right - r.left, r.bottom - r.top) == (e.left, e.top, e.width, e.height) {
+        if (r.left, r.top, r.right - r.left, r.bottom - r.top) == (e.left, e.top, e.width, e.height)
+        {
             return Placed::Done;
         }
-        match SetWindowPos(hwnd, None, e.left, e.top, e.width, e.height, SWP_NOZORDER | SWP_NOACTIVATE) {
+        match SetWindowPos(
+            hwnd,
+            None,
+            e.left,
+            e.top,
+            e.width,
+            e.height,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        ) {
             Ok(()) => Placed::Done,
             Err(_) if GetLastError() == ERROR_ACCESS_DENIED => Placed::Denied,
             Err(err) => {
@@ -122,9 +157,17 @@ impl WindowRestore {
         let mut layout: Layout = load_json(&path).unwrap_or_default();
         // 核心重啟後：代碼還在、而且還是同一支程式的視窗才留（之前誤記的透明圖層也在這裡清掉）。
         let before = layout.windows.len();
-        layout.windows.retain(|hwnd, e| window_exe(HWND(*hwnd as _)).is_some_and(|exe| exe == e.exe) && !is_click_through(HWND(*hwnd as _)));
+        layout.windows.retain(|hwnd, e| {
+            window_exe(HWND(*hwnd as _)).is_some_and(|exe| exe == e.exe)
+                && !is_click_through(HWND(*hwnd as _))
+        });
         let dropped = layout.windows.len() != before;
-        let mut m = Self { path, layout, display_changed: None, last_auto: Instant::now() };
+        let mut m = Self {
+            path,
+            layout,
+            display_changed: None,
+            last_auto: Instant::now(),
+        };
         if m.layout.windows.is_empty() {
             m.save_all();
         } else if m.record_new().is_empty() && dropped {
@@ -147,7 +190,10 @@ impl WindowRestore {
 
     /// 以目前畫面為準，整份重記。
     fn save_all(&mut self) -> usize {
-        self.layout = Layout { monitors: monitor_geometry(), windows: snapshot().into_iter().collect() };
+        self.layout = Layout {
+            monitors: monitor_geometry(),
+            windows: snapshot().into_iter().collect(),
+        };
         self.persist();
         self.layout.windows.len()
     }
@@ -169,7 +215,9 @@ impl WindowRestore {
 
     /// 回傳（放回幾個、幾個要系統管理員權限才能動）。
     fn restore(&mut self) -> (usize, usize) {
-        self.layout.windows.retain(|hwnd, _| unsafe { IsWindow(Some(HWND(*hwnd as _))) }.as_bool());
+        self.layout
+            .windows
+            .retain(|hwnd, _| unsafe { IsWindow(Some(HWND(*hwnd as _))) }.as_bool());
         let (mut restored, mut denied) = (0, 0);
         for (hwnd, e) in &self.layout.windows {
             match place(HWND(*hwnd as _), e) {
@@ -185,7 +233,15 @@ impl WindowRestore {
     /// 設定裡改了某個視窗的位置：記下來，也馬上把它搬過去。視窗已經關掉的話就把那筆拿掉。
     fn edit(&mut self, v: &serde_json::Value, ctx: &mut Ctx) {
         let int = |k: &str| v[k].as_i64().and_then(|n| i32::try_from(n).ok());
-        let (Some(id), Some(left), Some(top), Some(width), Some(height)) = (v["id"].as_i64(), int("left"), int("top"), int("width"), int("height")) else { return };
+        let (Some(id), Some(left), Some(top), Some(width), Some(height)) = (
+            v["id"].as_i64(),
+            int("left"),
+            int("top"),
+            int("width"),
+            int("height"),
+        ) else {
+            return;
+        };
         if width <= 0 || height <= 0 {
             return;
         }
@@ -196,24 +252,38 @@ impl WindowRestore {
             }
             return;
         }
-        let Some(e) = self.layout.windows.get_mut(&id) else { return };
+        let Some(e) = self.layout.windows.get_mut(&id) else {
+            return;
+        };
         (e.left, e.top, e.width, e.height) = (left, top, width, height);
         if let Placed::Denied = place(hwnd, e) {
-            ctx.info("這個視窗太重了，我搬不動耶",Some("要用系統管理員身分開柚伴才行".into()));
+            ctx.info(
+                "這個視窗太重了，我搬不動耶",
+                Some("要用系統管理員身分開柚伴才行".into()),
+            );
         }
         self.persist();
     }
 
     fn report_restore(&mut self, ctx: &mut Ctx) {
         let (restored, denied) = self.restore();
-        let detail = (denied > 0).then(|| format!("有 {denied} 個太重搬不動，要用系統管理員身分開柚伴才行"));
-        let title = if restored == 0 { "沒有要搬的視窗喔".to_owned() } else { format!("幫你把 {restored} 個視窗搬回原位囉～") };
+        let detail =
+            (denied > 0).then(|| format!("有 {denied} 個太重搬不動，要用系統管理員身分開柚伴才行"));
+        let title = if restored == 0 {
+            "沒有要搬的視窗喔".to_owned()
+        } else {
+            format!("幫你把 {restored} 個視窗搬回原位囉～")
+        };
         ctx.info(title, detail);
     }
 
     fn report_save(&mut self, ctx: &mut Ctx) {
         let n = self.save_all();
-        let title = if n == 0 { "現在沒有視窗可以記耶".to_owned() } else { format!("{n} 個視窗的位置，我都記好囉！") };
+        let title = if n == 0 {
+            "現在沒有視窗可以記耶".to_owned()
+        } else {
+            format!("{n} 個視窗的位置，我都記好囉！")
+        };
         ctx.info(title, None);
     }
 }
@@ -269,20 +339,40 @@ impl Module for WindowRestore {
     }
 
     /// 跟設定程式那一頁的按鈕同名。
-    fn menu(&self, _now: chrono::NaiveDateTime, _config: &petkit::config::Config) -> Vec<(u32, String, Icon)> {
-        vec![(MENU_SAVE, "記住目前位置".into(), Icon::Save), (MENU_RESTORE, "恢復位置".into(), Icon::RotateCcw)]
+    fn menu(
+        &self,
+        _now: chrono::NaiveDateTime,
+        _config: &petkit::config::Config,
+    ) -> Vec<(u32, String, Icon)> {
+        vec![
+            (MENU_SAVE, "記住目前位置".into(), Icon::Save),
+            (MENU_RESTORE, "恢復位置".into(), Icon::RotateCcw),
+        ]
     }
 
     /// 只丟會自己消失的通知卡（「搬回原位囉」），沒有要按完成的卡；重開不用再跳。
-    fn restore_card(&mut self, _key: &str, _card: crate::bubble::Card, _now: chrono::NaiveDateTime) -> Option<crate::bubble::Card> {
+    fn restore_card(
+        &mut self,
+        _key: &str,
+        _card: crate::bubble::Card,
+        _now: chrono::NaiveDateTime,
+    ) -> Option<crate::bubble::Card> {
         None
     }
 }
 
 fn monitor_geometry() -> Vec<[i32; 4]> {
-    unsafe extern "system" fn collect(monitor: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+    unsafe extern "system" fn collect(
+        monitor: HMONITOR,
+        _: HDC,
+        _: *mut RECT,
+        data: LPARAM,
+    ) -> BOOL {
         let out = unsafe { &mut *(data.0 as *mut Vec<[i32; 4]>) };
-        let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let mut info = MONITORINFO {
+            cbSize: size_of::<MONITORINFO>() as u32,
+            ..Default::default()
+        };
         if unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
             let r = info.rcMonitor;
             out.push([r.left, r.top, r.right, r.bottom]);
@@ -291,7 +381,12 @@ fn monitor_geometry() -> Vec<[i32; 4]> {
     }
     let mut out: Vec<[i32; 4]> = Vec::new();
     unsafe {
-        let _ = EnumDisplayMonitors(None, None, Some(collect), LPARAM(&mut out as *mut _ as isize));
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(collect),
+            LPARAM(&mut out as *mut _ as isize),
+        );
     }
     out.sort();
     out
@@ -307,7 +402,13 @@ fn window_exe(hwnd: HWND) -> Option<String> {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = [0u16; MAX_PATH as usize];
         let mut len = buf.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
+        let ok = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+        .is_ok();
         let _ = CloseHandle(process);
         ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
     }
@@ -328,7 +429,10 @@ fn snapshot() -> Vec<(i64, Entry)> {
     let mut out = Vec::new();
     for hwnd in hwnds {
         unsafe {
-            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() || is_click_through(hwnd) {
+            if !IsWindowVisible(hwnd).as_bool()
+                || IsIconic(hwnd).as_bool()
+                || is_click_through(hwnd)
+            {
                 continue;
             }
             let mut pid = 0;
@@ -350,7 +454,17 @@ fn snapshot() -> Vec<(i64, Entry)> {
             if GetWindowRect(hwnd, &mut r).is_err() {
                 continue;
             }
-            out.push((hwnd.0 as i64, Entry { title, exe, left: r.left, top: r.top, width: r.right - r.left, height: r.bottom - r.top }));
+            out.push((
+                hwnd.0 as i64,
+                Entry {
+                    title,
+                    exe,
+                    left: r.left,
+                    top: r.top,
+                    width: r.right - r.left,
+                    height: r.bottom - r.top,
+                },
+            ));
         }
     }
     out
@@ -362,20 +476,53 @@ mod tests {
 
     #[test]
     fn exclusion_rules_match_session_window_manager() {
-        assert!(should_exclude("c:\\windows\\explorer.exe", "Program Manager"), "desktop background");
-        assert!(!should_exclude("c:\\windows\\explorer.exe", "下載"), "file explorer windows are kept");
-        assert!(!should_exclude("c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe", "PowerShell"), "terminals are kept");
-        assert!(should_exclude("c:\\windows\\systemapps\\microsoft.windows.startmenuexperiencehost\\x.exe", "開始"));
-        assert!(should_exclude("c:\\program files\\windowsapps\\microsoft.windowscalculator\\calc.exe", "小算盤"));
-        assert!(!should_exclude("c:\\program files\\google\\chrome\\application\\chrome.exe", "Google"));
-        assert!(!should_exclude("", "不知道是誰"), "unknown exe is kept, like the original");
+        assert!(
+            should_exclude("c:\\windows\\explorer.exe", "Program Manager"),
+            "desktop background"
+        );
+        assert!(
+            !should_exclude("c:\\windows\\explorer.exe", "下載"),
+            "file explorer windows are kept"
+        );
+        assert!(
+            !should_exclude(
+                "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+                "PowerShell"
+            ),
+            "terminals are kept"
+        );
+        assert!(should_exclude(
+            "c:\\windows\\systemapps\\microsoft.windows.startmenuexperiencehost\\x.exe",
+            "開始"
+        ));
+        assert!(should_exclude(
+            "c:\\program files\\windowsapps\\microsoft.windowscalculator\\calc.exe",
+            "小算盤"
+        ));
+        assert!(!should_exclude(
+            "c:\\program files\\google\\chrome\\application\\chrome.exe",
+            "Google"
+        ));
+        assert!(
+            !should_exclude("", "不知道是誰"),
+            "unknown exe is kept, like the original"
+        );
     }
 
     #[test]
     fn announces_one_window_by_title_and_several_by_count() {
         assert_eq!(announce_text(&[]), None);
-        assert_eq!(announce_text(&["記事本".into()]).as_deref(), Some("「記事本」的位置，我記住囉～"));
-        assert_eq!(announce_text(&["新分頁 - Google Chrome".into()]).as_deref(), Some("「新分頁 - Google…」的位置，我記住囉～"));
-        assert_eq!(announce_text(&["a".into(), "b".into(), "c".into()]).as_deref(), Some("新來的 3 個視窗，我都記住囉！"));
+        assert_eq!(
+            announce_text(&["記事本".into()]).as_deref(),
+            Some("「記事本」的位置，我記住囉～")
+        );
+        assert_eq!(
+            announce_text(&["新分頁 - Google Chrome".into()]).as_deref(),
+            Some("「新分頁 - Google…」的位置，我記住囉～")
+        );
+        assert_eq!(
+            announce_text(&["a".into(), "b".into(), "c".into()]).as_deref(),
+            Some("新來的 3 個視窗，我都記住囉！")
+        );
     }
 }

@@ -37,10 +37,19 @@ pub fn write(msg: &str) {
     let mut guard = SINK.lock().unwrap();
     let Some(sink) = guard.as_mut() else { return };
     let _ = sink.file.write_all(line.as_bytes());
-    if sink.file.metadata().map(|m| m.len() > MAX_LOG_BYTES).unwrap_or(false) {
+    if sink
+        .file
+        .metadata()
+        .map(|m| m.len() > MAX_LOG_BYTES)
+        .unwrap_or(false)
+    {
         let old = sink.path.with_extension("log.old");
         let _ = fs::rename(&sink.path, old);
-        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&sink.path) {
+        if let Ok(file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&sink.path)
+        {
             sink.file = file;
         }
     }

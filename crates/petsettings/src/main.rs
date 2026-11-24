@@ -23,7 +23,10 @@ use tauri::State;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WPARAM};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Threading::CreateMutexW;
-use windows::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SendMessageW, SetForegroundWindow, ShowWindow, WM_COPYDATA};
+use windows::Win32::UI::WindowsAndMessaging::{
+    ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SendMessageW, SetForegroundWindow,
+    ShowWindow, WM_COPYDATA,
+};
 use windows::core::{HSTRING, PCWSTR, w};
 
 /// 也用來找已經開著的設定視窗（只開一個）；跟 `tauri.conf.json` 的視窗 title、`ui/index.html` 的 `<title>` 一致。
@@ -134,7 +137,11 @@ fn anniversary_info(anniversary: anniversary::Anniversary) -> AnniversaryInfo {
     let today = chrono::Local::now().date_naive();
     let upcoming = anniversary.upcoming(today, ANNIVERSARY_PREVIEW_COUNT);
     let days_left = upcoming.first().map(|o| (o.date - today).num_days());
-    AnniversaryInfo { label: anniversary.date.label(), upcoming, days_left }
+    AnniversaryInfo {
+        label: anniversary.date.label(),
+        upcoming,
+        days_left,
+    }
 }
 
 #[tauri::command]
@@ -168,12 +175,16 @@ fn preview(reminder: Reminder, overrides: BTreeMap<NaiveDate, DayKind>) -> Vec<P
 #[tauri::command]
 fn official_days() -> Vec<holidays::CalendarDay> {
     let (cal, _) = holidays::load_calendar(&paths::holiday_cache_dir(), BTreeMap::new());
-    cal.official_changes(chrono::Local::now().date_naive()).cloned().collect()
+    cal.official_changes(chrono::Local::now().date_naive())
+        .cloned()
+        .collect()
 }
 
 #[tauri::command]
 fn list_pets() -> Vec<PetInfo> {
-    let Some(dir) = paths::pets_dir() else { return Vec::new() };
+    let Some(dir) = paths::pets_dir() else {
+        return Vec::new();
+    };
     let companions = CompanionFile::load(&paths::companion_file()).unwrap_or_default();
     let config = Config::load(&paths::config_file()).unwrap_or_default();
     let mut out: Vec<PetInfo> = std::fs::read_dir(&dir)
@@ -185,7 +196,14 @@ fn list_pets() -> Vec<PetInfo> {
             let p = pack::load(&e.path()).ok()?;
             let image = pet_file_url(&dir, &p.states[states::IDLE].variants[0].frames[0])?;
             let days = companions.days(&id);
-            Some(PetInfo { name: config.pet_name(&id, &p.name).to_owned(), species: p.name, id, image, editable: p.editable, days })
+            Some(PetInfo {
+                name: config.pet_name(&id, &p.name).to_owned(),
+                species: p.name,
+                id,
+                image,
+                editable: p.editable,
+                days,
+            })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -196,12 +214,23 @@ fn list_pets() -> Vec<PetInfo> {
 /// 五隻桌寵的站姿圖加起來超過 1 MB，轉碼加傳送會讓設定頁晚 0.3 秒以上才畫得出來。
 fn pet_file_url(root: &std::path::Path, file: &std::path::Path) -> Option<String> {
     let rel = file.strip_prefix(root).ok()?;
-    let parts: Vec<String> = rel.components().map(|c| percent_encode(&c.as_os_str().to_string_lossy())).collect();
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| percent_encode(&c.as_os_str().to_string_lossy()))
+        .collect();
     Some(format!("{PET_FILE_ORIGIN}/{}", parts.join("/")))
 }
 
 fn percent_encode(s: &str) -> String {
-    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+    s.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                (b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
 }
 
 fn percent_decode(s: &str) -> Vec<u8> {
@@ -210,7 +239,10 @@ fn percent_decode(s: &str) -> Vec<u8> {
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'%'
-            && let Some(v) = b.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok())
+            && let Some(v) = b
+                .get(i + 1..i + 3)
+                .and_then(|h| std::str::from_utf8(h).ok())
+                .and_then(|h| u8::from_str_radix(h, 16).ok())
         {
             out.push(v);
             i += 3;
@@ -224,32 +256,56 @@ fn percent_decode(s: &str) -> Vec<u8> {
 
 /// `pet://` 的請求：只給桌寵資料夾裡的檔案（`..` 繞出去的一律 404）。
 fn serve_pet_file(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    let not_found = || tauri::http::Response::builder().status(404).body(Vec::new()).expect("static response");
-    let Ok(root) = pets_root().and_then(|r| r.canonicalize().map_err(err)) else { return not_found() };
-    let rel = String::from_utf8_lossy(&percent_decode(request.uri().path().trim_start_matches('/'))).into_owned();
-    let Ok(path) = root.join(rel).canonicalize() else { return not_found() };
+    let not_found = || {
+        tauri::http::Response::builder()
+            .status(404)
+            .body(Vec::new())
+            .expect("static response")
+    };
+    let Ok(root) = pets_root().and_then(|r| r.canonicalize().map_err(err)) else {
+        return not_found();
+    };
+    let rel = String::from_utf8_lossy(&percent_decode(
+        request.uri().path().trim_start_matches('/'),
+    ))
+    .into_owned();
+    let Ok(path) = root.join(rel).canonicalize() else {
+        return not_found();
+    };
     if !path.starts_with(&root) {
         return not_found();
     }
     match std::fs::read(&path) {
-        Ok(bytes) => tauri::http::Response::builder().header("Content-Type", "image/png").body(bytes).expect("static response"),
+        Ok(bytes) => tauri::http::Response::builder()
+            .header("Content-Type", "image/png")
+            .body(bytes)
+            .expect("static response"),
         Err(_) => not_found(),
     }
 }
 
 fn data_url(png: &[u8]) -> String {
-    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png))
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    )
 }
 
 fn decode_upload(data: &str) -> CmdResult<Vec<u8>> {
     let raw = data.split_once(',').map_or(data, |(_, b64)| b64);
-    base64::engine::general_purpose::STANDARD.decode(raw).map_err(err)
+    base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(err)
 }
 
 /// 使用者剛選的圖整理好（去背、裁切；四格圖會切開）之後的樣子，給畫面預覽。
 #[tauri::command]
 fn import_preview(data: String) -> CmdResult<Vec<String>> {
-    Ok(importer::prepare_all(&decode_upload(&data)?).map_err(err)?.iter().map(|p| data_url(p)).collect())
+    Ok(importer::prepare_all(&decode_upload(&data)?)
+        .map_err(err)?
+        .iter()
+        .map(|p| data_url(p))
+        .collect())
 }
 
 /// 用一張圖做一隻新桌寵，回傳它的 id（呼叫端接著把它設成目前的桌寵）。
@@ -263,7 +319,13 @@ fn create_pet(name: String, data: String) -> CmdResult<String> {
     let dir = pets.join(&id);
     pack_edit::append(&dir, states::IDLE, pack::DEFAULT_VARIANT, &pngs).map_err(err)?;
     let manifest = serde_json::json!({ "spec": 1, "name": name.trim(), "editable": true });
-    petkit::config::write_atomic(&dir.join(pack::MANIFEST_FILE), serde_json::to_string_pretty(&manifest).map_err(err)?.as_bytes()).map_err(err)?;
+    petkit::config::write_atomic(
+        &dir.join(pack::MANIFEST_FILE),
+        serde_json::to_string_pretty(&manifest)
+            .map_err(err)?
+            .as_bytes(),
+    )
+    .map_err(err)?;
     Ok(id)
 }
 
@@ -303,14 +365,32 @@ fn read_actions(id: &str) -> CmdResult<PetActions> {
     let mut default_fps = BTreeMap::new();
     for state in states::ALL {
         for variant in pack_edit::variants(&p.dir, state).map_err(err)? {
-            let frames = pack_edit::list(&p.dir, state, &variant).map_err(err)?.iter().filter_map(|f| std::fs::read(f).ok()).map(|b| data_url(&b)).collect();
-            groups.push(ActionGroup { state: state.to_owned(), variant, frames });
+            let frames = pack_edit::list(&p.dir, state, &variant)
+                .map_err(err)?
+                .iter()
+                .filter_map(|f| std::fs::read(f).ok())
+                .map(|b| data_url(&b))
+                .collect();
+            groups.push(ActionGroup {
+                state: state.to_owned(),
+                variant,
+                frames,
+            });
         }
-        let own = p.states.get(state).and_then(|s| s.variants.first()).and_then(|v| v.durations_ms.first()).map(|ms| MS_PER_SEC / *ms as f32);
+        let own = p
+            .states
+            .get(state)
+            .and_then(|s| s.variants.first())
+            .and_then(|v| v.durations_ms.first())
+            .map(|ms| MS_PER_SEC / *ms as f32);
         fps.insert(state.to_owned(), own.unwrap_or(states::defaults(state).fps));
         default_fps.insert(state.to_owned(), states::defaults(state).fps);
     }
-    Ok(PetActions { groups, fps, default_fps })
+    Ok(PetActions {
+        groups,
+        fps,
+        default_fps,
+    })
 }
 
 /// 這隻桌寵每個動作的圖與速度。
@@ -321,7 +401,12 @@ fn pet_actions(id: String) -> CmdResult<PetActions> {
 
 /// 接在某個動作最後面加圖；四格圖會切開、依閱讀順序一張張接上去。
 #[tauri::command]
-fn add_frames(id: String, state: String, variant: String, images: Vec<String>) -> CmdResult<PetActions> {
+fn add_frames(
+    id: String,
+    state: String,
+    variant: String,
+    images: Vec<String>,
+) -> CmdResult<PetActions> {
     check_action(&state, &variant)?;
     let p = editable_pet(&id)?;
     let mut pngs = Vec::new();
@@ -336,7 +421,13 @@ fn add_frames(id: String, state: String, variant: String, images: Vec<String>) -
 fn remove_frame(id: String, state: String, variant: String, index: usize) -> CmdResult<PetActions> {
     check_action(&state, &variant)?;
     let p = editable_pet(&id)?;
-    if state == states::IDLE && variant == pack::DEFAULT_VARIANT && pack_edit::list(&p.dir, &state, &variant).map_err(err)?.len() <= 1 {
+    if state == states::IDLE
+        && variant == pack::DEFAULT_VARIANT
+        && pack_edit::list(&p.dir, &state, &variant)
+            .map_err(err)?
+            .len()
+            <= 1
+    {
         return Err("站著的圖至少要留一張".into());
     }
     pack_edit::remove(&p.dir, &state, &variant, index).map_err(err)?;
@@ -345,7 +436,13 @@ fn remove_frame(id: String, state: String, variant: String, index: usize) -> Cmd
 
 /// 拖曳換順序：第 `from` 張搬到第 `to` 的位置。
 #[tauri::command]
-fn move_frame(id: String, state: String, variant: String, from: usize, to: usize) -> CmdResult<PetActions> {
+fn move_frame(
+    id: String,
+    state: String,
+    variant: String,
+    from: usize,
+    to: usize,
+) -> CmdResult<PetActions> {
     check_action(&state, &variant)?;
     pack_edit::move_to(&editable_pet(&id)?.dir, &state, &variant, from, to).map_err(err)?;
     read_actions(&id)
@@ -361,8 +458,14 @@ fn set_action_speed(id: String, state: String, fps: Option<f32>) -> CmdResult<Pe
 
 /// 內建水豚這個動作的圖，當作「應該長這樣」的範例。
 fn example_pngs(state: &str) -> Vec<Vec<u8>> {
-    let Some(dir) = paths::pets_dir().map(|d| d.join(EXAMPLE_PET)) else { return Vec::new() };
-    pack_edit::list(&dir, state, pack::DEFAULT_VARIANT).unwrap_or_default().iter().filter_map(|f| std::fs::read(f).ok()).collect()
+    let Some(dir) = paths::pets_dir().map(|d| d.join(EXAMPLE_PET)) else {
+        return Vec::new();
+    };
+    pack_edit::list(&dir, state, pack::DEFAULT_VARIANT)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|f| std::fs::read(f).ok())
+        .collect()
 }
 
 #[tauri::command]
@@ -373,22 +476,32 @@ fn example_frames(state: String) -> Vec<String> {
 /// 把範例圖排成一列存到「下載」資料夾並打開它所在的位置，方便直接丟給 AI。
 #[tauri::command]
 fn save_example(state: String, label: String) -> CmdResult<()> {
-    let frames: Vec<image::RgbaImage> = example_pngs(&state).iter().filter_map(|b| image::load_from_memory(b).ok()).map(|i| i.to_rgba8()).collect();
+    let frames: Vec<image::RgbaImage> = example_pngs(&state)
+        .iter()
+        .filter_map(|b| image::load_from_memory(b).ok())
+        .map(|i| i.to_rgba8())
+        .collect();
     if frames.is_empty() {
         return Err("這個動作還沒有範例圖".into());
     }
     let height = frames.iter().map(|f| f.height()).max().unwrap_or(0);
-    let width = frames.iter().map(|f| f.width()).sum::<u32>() + EXAMPLE_GAP * (frames.len() as u32 - 1);
+    let width =
+        frames.iter().map(|f| f.width()).sum::<u32>() + EXAMPLE_GAP * (frames.len() as u32 - 1);
     let mut strip = image::RgbaImage::new(width, height);
     let mut x = 0;
     for f in &frames {
         image::imageops::replace(&mut strip, f, x as i64, (height - f.height()) as i64);
         x += f.width() + EXAMPLE_GAP;
     }
-    let downloads = std::env::var_os("USERPROFILE").map(|p| std::path::PathBuf::from(p).join("Downloads")).ok_or("找不到下載資料夾")?;
+    let downloads = std::env::var_os("USERPROFILE")
+        .map(|p| std::path::PathBuf::from(p).join("Downloads"))
+        .ok_or("找不到下載資料夾")?;
     let path = downloads.join(format!("桌寵範例-{label}.png"));
     strip.save(&path).map_err(err)?;
-    Command::new("explorer").arg(format!("/select,{}", path.display())).spawn().map_err(err)?;
+    Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn()
+        .map_err(err)?;
     Ok(())
 }
 
@@ -410,7 +523,13 @@ fn window_layout() -> Vec<WindowInfo> {
         .map(|(id, e)| WindowInfo {
             id,
             title: e["title"].as_str().unwrap_or_default().to_owned(),
-            exe: e["exe"].as_str().unwrap_or_default().rsplit('\\').next().unwrap_or_default().to_owned(),
+            exe: e["exe"]
+                .as_str()
+                .unwrap_or_default()
+                .rsplit('\\')
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
             left: e["left"].as_i64().unwrap_or(0) as i32,
             top: e["top"].as_i64().unwrap_or(0) as i32,
             width: e["width"].as_i64().unwrap_or(0) as i32,
@@ -434,11 +553,20 @@ fn core_running() -> bool {
 fn send_core(command: serde_json::Value) -> CmdResult<()> {
     let hwnd = core_window().ok_or("柚伴沒有在執行")?;
     let text = command.to_string();
-    let data = COPYDATASTRUCT { dwData: 0, cbData: text.len() as u32, lpData: text.as_ptr() as *mut _ };
+    let data = COPYDATASTRUCT {
+        dwData: 0,
+        cbData: text.len() as u32,
+        lpData: text.as_ptr() as *mut _,
+    };
     unsafe {
         // 核心可能要把自己的畫面拉到最前面（畫範圍要收得到 Esc）：前景權在按按鈕的設定程式手上，先讓出來。
         let _ = AllowSetForegroundWindow(ASFW_ANY);
-        SendMessageW(hwnd, WM_COPYDATA, Some(WPARAM(0)), Some(LPARAM(&data as *const _ as isize)));
+        SendMessageW(
+            hwnd,
+            WM_COPYDATA,
+            Some(WPARAM(0)),
+            Some(LPARAM(&data as *const _ as isize)),
+        );
     }
     Ok(())
 }
@@ -474,14 +602,25 @@ fn start_core() -> CmdResult<()> {
 #[tauri::command]
 fn open_pets_dir() -> CmdResult<()> {
     let dir = paths::pets_dir().ok_or("找不到 pets 資料夾")?;
-    Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(err)
+    Command::new("explorer")
+        .arg(dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(err)
 }
 
 fn core_cli(arg: &str) -> CmdResult<String> {
     let exe = paths::sibling_exe(paths::CORE_EXE).ok_or(format!("找不到 {}", paths::CORE_EXE))?;
-    let out = Command::new(exe).args([AUTOSTART_FLAG, arg]).output().map_err(err)?;
+    let out = Command::new(exe)
+        .args([AUTOSTART_FLAG, arg])
+        .output()
+        .map_err(err)?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    if out.status.success() { Ok(text) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
+    if out.status.success() {
+        Ok(text)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_owned())
+    }
 }
 
 #[tauri::command]
@@ -518,7 +657,11 @@ fn main() {
         eprintln!("legacy data folder not moved: {problem}");
     }
     let args: Vec<String> = std::env::args().collect();
-    let page = args.iter().position(|a| a == PAGE_FLAG).and_then(|i| args.get(i + 1)).cloned();
+    let page = args
+        .iter()
+        .position(|a| a == PAGE_FLAG)
+        .and_then(|i| args.get(i + 1))
+        .cloned();
     tauri::Builder::default()
         .manage(Init { page })
         .invoke_handler(tauri::generate_handler![
@@ -558,7 +701,12 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
-                apply_color_scheme(&window, Config::load(&paths::config_file()).unwrap_or_default().color_scheme);
+                apply_color_scheme(
+                    &window,
+                    Config::load(&paths::config_file())
+                        .unwrap_or_default()
+                        .color_scheme,
+                );
             }
             Ok(())
         })
@@ -580,9 +728,20 @@ fn apply_color_scheme(window: &tauri::WebviewWindow, scheme: ColorScheme) {
 fn paint_background(window: &tauri::WebviewWindow) {
     let dark = window.theme().is_ok_and(|t| t == tauri::Theme::Dark);
     let tokens = tokens();
-    let hex = tokens["color"][if dark { "dark" } else { "light" }]["surface"].as_str().unwrap_or_default().trim_start_matches('#').to_owned();
-    let Ok(rgb) = u32::from_str_radix(&hex, 16) else { return };
-    let _ = window.set_background_color(Some(tauri::window::Color((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255)));
+    let hex = tokens["color"][if dark { "dark" } else { "light" }]["surface"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_start_matches('#')
+        .to_owned();
+    let Ok(rgb) = u32::from_str_radix(&hex, 16) else {
+        return;
+    };
+    let _ = window.set_background_color(Some(tauri::window::Color(
+        (rgb >> 16) as u8,
+        (rgb >> 8) as u8,
+        rgb as u8,
+        255,
+    )));
 }
 
 #[cfg(test)]
@@ -601,13 +760,34 @@ mod tests {
         std::fs::write(root.join("my cat/idle_01.png"), b"png").unwrap();
         std::fs::write(base.join("secret.txt"), b"secret").unwrap();
         PETS_ROOT.with(|r| *r.borrow_mut() = Some(root.clone()));
-        let get = |url: &str| serve_pet_file(&tauri::http::Request::builder().uri(url).body(Vec::new()).unwrap());
+        let get = |url: &str| {
+            serve_pet_file(
+                &tauri::http::Request::builder()
+                    .uri(url)
+                    .body(Vec::new())
+                    .unwrap(),
+            )
+        };
 
         let url = pet_file_url(&root, &root.join("my cat/idle_01.png")).unwrap();
         let ok = get(&url);
-        assert_eq!((ok.status().as_u16(), ok.body().as_slice()), (200, &b"png"[..]), "{url}");
-        assert_eq!(get(&format!("{PET_FILE_ORIGIN}/..%2Fsecret.txt")).status().as_u16(), 404);
-        assert_eq!(get(&format!("{PET_FILE_ORIGIN}/%2E%2E/secret.txt")).status().as_u16(), 404);
+        assert_eq!(
+            (ok.status().as_u16(), ok.body().as_slice()),
+            (200, &b"png"[..]),
+            "{url}"
+        );
+        assert_eq!(
+            get(&format!("{PET_FILE_ORIGIN}/..%2Fsecret.txt"))
+                .status()
+                .as_u16(),
+            404
+        );
+        assert_eq!(
+            get(&format!("{PET_FILE_ORIGIN}/%2E%2E/secret.txt"))
+                .status()
+                .as_u16(),
+            404
+        );
 
         PETS_ROOT.with(|r| *r.borrow_mut() = None);
         let _ = std::fs::remove_dir_all(&base);
@@ -615,7 +795,8 @@ mod tests {
 
     /// 白底上畫幾個描邊方塊（大小不同才分得出順序），轉成畫面送進來的 data URL。
     fn sheet(count: u32) -> String {
-        let mut img = image::RgbaImage::from_pixel(220 * count, 200, image::Rgba([255, 255, 255, 255]));
+        let mut img =
+            image::RgbaImage::from_pixel(220 * count, 200, image::Rgba([255, 255, 255, 255]));
         for i in 0..count {
             for y in 40..(120 + i * 10) {
                 for x in (20 + i * 220)..(140 + i * 220) {
@@ -624,7 +805,8 @@ mod tests {
             }
         }
         let mut png = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
         data_url(&png)
     }
 
@@ -635,19 +817,75 @@ mod tests {
         PETS_ROOT.with(|r| *r.borrow_mut() = Some(root.clone()));
         let id = create_pet("測試".into(), sheet(1)).unwrap();
         let result = (|| -> CmdResult<()> {
-            let a = add_frames(id.clone(), states::WALK.into(), pack::DEFAULT_VARIANT.into(), vec![sheet(4)])?;
-            let walk = |a: &PetActions| a.groups.iter().find(|g| g.state == states::WALK).map(|g| g.frames.clone()).unwrap_or_default();
-            assert_eq!(walk(&a).len(), 4, "a four-pose sheet becomes four walk frames");
+            let a = add_frames(
+                id.clone(),
+                states::WALK.into(),
+                pack::DEFAULT_VARIANT.into(),
+                vec![sheet(4)],
+            )?;
+            let walk = |a: &PetActions| {
+                a.groups
+                    .iter()
+                    .find(|g| g.state == states::WALK)
+                    .map(|g| g.frames.clone())
+                    .unwrap_or_default()
+            };
+            assert_eq!(
+                walk(&a).len(),
+                4,
+                "a four-pose sheet becomes four walk frames"
+            );
             let before = walk(&a);
-            let a = move_frame(id.clone(), states::WALK.into(), pack::DEFAULT_VARIANT.into(), 3, 0)?;
+            let a = move_frame(
+                id.clone(),
+                states::WALK.into(),
+                pack::DEFAULT_VARIANT.into(),
+                3,
+                0,
+            )?;
             assert_eq!(walk(&a)[0], before[3], "last frame moved to the front");
-            let a = remove_frame(id.clone(), states::WALK.into(), pack::DEFAULT_VARIANT.into(), 0)?;
+            let a = remove_frame(
+                id.clone(),
+                states::WALK.into(),
+                pack::DEFAULT_VARIANT.into(),
+                0,
+            )?;
             assert_eq!(walk(&a), before[..3]);
             let a = set_action_speed(id.clone(), states::WALK.into(), Some(12.0))?;
-            assert!((a.fps[states::WALK] - 12.0).abs() < 0.5, "custom speed read back");
-            assert!(remove_frame(id.clone(), states::IDLE.into(), pack::DEFAULT_VARIANT.into(), 0).is_err(), "the last standing frame cannot be removed");
-            assert!(add_frames(id.clone(), "../evil".into(), pack::DEFAULT_VARIANT.into(), vec![sheet(1)]).is_err(), "unknown action rejected");
-            assert!(add_frames(id.clone(), states::IDLE.into(), "../x".into(), vec![sheet(1)]).is_err(), "variant cannot escape the folder");
+            assert!(
+                (a.fps[states::WALK] - 12.0).abs() < 0.5,
+                "custom speed read back"
+            );
+            assert!(
+                remove_frame(
+                    id.clone(),
+                    states::IDLE.into(),
+                    pack::DEFAULT_VARIANT.into(),
+                    0
+                )
+                .is_err(),
+                "the last standing frame cannot be removed"
+            );
+            assert!(
+                add_frames(
+                    id.clone(),
+                    "../evil".into(),
+                    pack::DEFAULT_VARIANT.into(),
+                    vec![sheet(1)]
+                )
+                .is_err(),
+                "unknown action rejected"
+            );
+            assert!(
+                add_frames(
+                    id.clone(),
+                    states::IDLE.into(),
+                    "../x".into(),
+                    vec![sheet(1)]
+                )
+                .is_err(),
+                "variant cannot escape the folder"
+            );
             Ok(())
         })();
         delete_pet(id).unwrap();

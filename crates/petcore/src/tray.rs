@@ -1,7 +1,10 @@
 //! 托盤圖示（點了開的選單在 `popup_menu`）。
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::Shell::{NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW, Shell_NotifyIconW};
+use windows::Win32::UI::Shell::{
+    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
+    Shell_NotifyIconW,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub const WM_TRAY: u32 = WM_APP + 1;
@@ -17,7 +20,11 @@ pub struct Tray {
 
 impl Tray {
     pub fn new(hwnd: HWND, icon: HICON) -> Self {
-        let tray = Self { hwnd, icon, tip: TOOLTIP.to_owned() };
+        let tray = Self {
+            hwnd,
+            icon,
+            tip: TOOLTIP.to_owned(),
+        };
         tray.add();
         tray
     }

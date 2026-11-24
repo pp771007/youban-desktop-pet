@@ -12,15 +12,15 @@ use windows::core::{Error, Result};
 
 use crate::app::{anchor, window_size};
 use crate::behavior::{Emote, Env, Input, Pet, Pose};
-use crate::effects::Effects;
 use crate::bubble::{Card, CardPainter};
+use crate::effects::Effects;
 use crate::icons::Icon;
 use crate::paths;
 use crate::popup_menu::{Entry, Item, MenuPainter};
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::sprites::Wic;
-use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::theme;
+use crate::toy::{self, Toy, ToyKind, ToyPainter};
 
 const BASE_DPI: f32 = 96.0;
 const DT: f32 = 1.0 / 60.0;
@@ -92,12 +92,18 @@ impl Sheet {
 pub fn pet(out: &Path, dpi: u32) -> Result<()> {
     let config = Config::default();
     let pets_dir = paths::pets_dir().ok_or_else(|| Error::new(E_FAIL, "找不到 pets 資料夾"))?;
-    let pack = pack::load(&pets_dir.join(&config.pet)).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+    let pack =
+        pack::load(&pets_dir.join(&config.pet)).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
     let gfx = Gfx::new()?;
     let wic = Wic::new()?;
     let mut renderer = PetRenderer::new(&gfx)?;
     let px_per_dip = dpi as f32 / BASE_DPI;
-    let sprites = wic.load_pet(&pack, &renderer.canvas.target(), config.size_dip as f32 * px_per_dip, dpi)?;
+    let sprites = wic.load_pet(
+        &pack,
+        &renderer.canvas.target(),
+        config.size_dip as f32 * px_per_dip,
+        dpi,
+    )?;
     let size = window_size(&sprites);
     renderer.canvas.ensure_size(size.0, size.1)?;
 
@@ -124,7 +130,11 @@ pub fn pet(out: &Path, dpi: u32) -> Result<()> {
         ceiling: 0.0,
         item: None,
     };
-    let mut sim = Sim { pet: Pet::new(5000.0, ground, 0.0, 12345), now: 0.0, env };
+    let mut sim = Sim {
+        pet: Pet::new(5000.0, ground, 0.0, 12345),
+        now: 0.0,
+        env,
+    };
     // (姿勢, 要一起畫的特效與它已經播了幾秒)
     let mut shots: Vec<(Pose, Option<(Emote, f32)>)> = Vec::new();
 
@@ -133,21 +143,35 @@ pub fn pet(out: &Path, dpi: u32) -> Result<()> {
     sim.until(states::WALK);
     sim.step(0.12);
     shots.push((sim.pose(), None));
-    for (state, at, emote) in [(states::HOP, 0.22, Some((Emote::Note, 0.5))), (states::LOOK, 0.9, Some((Emote::Question, 0.4))), (states::WAKE, 0.6, None), (states::DOZE, 0.6, None)] {
+    for (state, at, emote) in [
+        (states::HOP, 0.22, Some((Emote::Note, 0.5))),
+        (states::LOOK, 0.9, Some((Emote::Question, 0.4))),
+        (states::WAKE, 0.6, None),
+        (states::DOZE, 0.6, None),
+    ] {
         sim.until(state);
         sim.step(at);
         shots.push((sim.pose(), emote));
     }
     sim.until(states::IDLE);
-    sim.input(Input::PointerDown { x: 5000.0, y: ground - 50.0 });
+    sim.input(Input::PointerDown {
+        x: 5000.0,
+        y: ground - 50.0,
+    });
     sim.input(Input::PointerUp);
     sim.step(0.3);
     shots.push((sim.pose(), Some((Emote::Hearts, 0.45))));
     sim.until(states::IDLE);
-    sim.input(Input::PointerDown { x: sim.pet.x, y: ground - 50.0 });
+    sim.input(Input::PointerDown {
+        x: sim.pet.x,
+        y: ground - 50.0,
+    });
     for i in 0..15 {
         let x = 5000.0 + i as f32 * 25.0 * px_per_dip;
-        sim.input(Input::PointerMove { x, y: ground - 400.0 });
+        sim.input(Input::PointerMove {
+            x,
+            y: ground - 400.0,
+        });
         sim.step(DT);
     }
     shots.push((sim.pose(), Some((Emote::Sweat, 0.3))));
@@ -179,7 +203,10 @@ pub fn pet(out: &Path, dpi: u32) -> Result<()> {
     let mut sheet = Sheet { tiles: Vec::new() };
     for (pose, emote) in &shots {
         // 過場動作沒有圖時直接用站姿（跟主程式一樣）。
-        let res = pack.resolve(pose.state).or_else(|| pack.resolve(states::IDLE)).ok_or_else(|| Error::new(E_FAIL, "no idle frames"))?;
+        let res = pack
+            .resolve(pose.state)
+            .or_else(|| pack.resolve(states::IDLE))
+            .ok_or_else(|| Error::new(E_FAIL, "no idle frames"))?;
         let variant = &sprites.states[res.source].variants[0];
         let mut effects = Effects::default();
         let now = 100.0;
@@ -237,7 +264,9 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     }
     let mut toys = ToyPainter::new(&gfx)?;
     let size = Config::default().size_dip as f32 * s * toy::SIZE_PER_HEIGHT;
-    let kinds = ToyKind::all().map(|k| (k, 0.0, true)).chain([(ToyKind::Ball(0), 50.0, false)]);
+    let kinds = ToyKind::all()
+        .map(|k| (k, 0.0, true))
+        .chain([(ToyKind::Ball(0), 50.0, false)]);
     for (kind, spin, resting) in kinds {
         let mut t = Toy::new(kind, 0.0, 0.0, 0.0, 0.0, size);
         t.spin_deg = spin;
@@ -254,13 +283,40 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         .flatten()
         .filter_map(|e| {
             let p = pack::load(&e.path()).ok()?;
-            let picture = p.states.get(states::IDLE)?.variants.first()?.frames.first()?.clone();
+            let picture = p
+                .states
+                .get(states::IDLE)?
+                .variants
+                .first()?
+                .frames
+                .first()?
+                .clone();
             Some((p.name, picture))
         })
         .collect();
     pets.sort();
-    let children: Vec<Entry> = pets.into_iter().enumerate().map(|(i, (name, picture))| Entry::Item(Item { id: 10 + i as u32, label: name, icon: None, picture: Some(picture), checked: i == 1, children: Vec::new() })).collect();
-    let switch = Item { id: 2, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: children.clone() };
+    let children: Vec<Entry> = pets
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, picture))| {
+            Entry::Item(Item {
+                id: 10 + i as u32,
+                label: name,
+                icon: None,
+                picture: Some(picture),
+                checked: i == 1,
+                children: Vec::new(),
+            })
+        })
+        .collect();
+    let switch = Item {
+        id: 2,
+        label: "換一隻桌寵".into(),
+        icon: Some(Icon::PawPrint),
+        picture: None,
+        checked: false,
+        children: children.clone(),
+    };
     let main = vec![
         Entry::Header("桌寵".into()),
         Item::entry(1, "陪你第 12 天", Icon::Heart),
@@ -276,10 +332,15 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         Item::entry(8, "設定…", Icon::Settings),
         Item::entry(9, "結束", Icon::Power),
     ];
-    let mut chip = crate::countdown::Countdown::new(&gfx, windows::Win32::Foundation::HWND::default())?;
+    let mut chip =
+        crate::countdown::Countdown::new(&gfx, windows::Win32::Foundation::HWND::default())?;
     for palette in [&theme::LIGHT, &theme::DARK] {
         for (text, focusing) in [("24:59", true), ("03:07", false)] {
-            let shown = crate::countdown::Shown { text: text.into(), focusing, head: windows_numerics::Vector2 { X: 0.0, Y: 0.0 } };
+            let shown = crate::countdown::Shown {
+                text: text.into(),
+                focusing,
+                head: windows_numerics::Vector2 { X: 0.0, Y: 0.0 },
+            };
             let (w, h) = chip.render(&shown, s, palette)?;
             sheet.push(w, h, chip.pixels());
         }

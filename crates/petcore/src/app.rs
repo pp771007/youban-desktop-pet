@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Instant, SystemTime};
 
 use petkit::companion::{self, CompanionFile};
-use petkit::config::{Activity, Area, Config, Countdown as CountdownMode, Roam, Talk, load_json, write_atomic};
+use petkit::config::{
+    Activity, Area, Config, Countdown as CountdownMode, Roam, Talk, load_json, write_atomic,
+};
 use petkit::focus_status::FocusStatus;
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
@@ -17,41 +19,50 @@ use petkit::states;
 use petkit::update_status::UpdateStatus;
 use serde::{Deserialize, Serialize};
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY, MONITORINFO,
+    MonitorFromPoint,
+};
 use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetTickCount;
-use windows::Win32::System::Threading::{CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, INFINITE, SetWaitableTimer, TIMER_ALL_ACCESS};
+use windows::Win32::System::Threading::{
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, INFINITE, SetWaitableTimer,
+    TIMER_ALL_ACCESS,
+};
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, GetSystemMetricsForDpi, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetCapture, GetLastInputInfo, LASTINPUTINFO, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetCapture, GetLastInputInfo, LASTINPUTINFO, ReleaseCapture, SetCapture, TME_LEAVE,
+    TRACKMOUSEEVENT, TrackMouseEvent, VK_ESCAPE,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Error, HSTRING, PCWSTR, Result, w};
 use windows_numerics::Vector2;
 
-use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
-use crate::toy::{self, Toy, ToyKind, ToyPainter};
-use crate::glow::{GlowPainter, GlowStyle};
 use crate::area_editor::{AreaEditor, AreaInput, AreaKind, AreaPreview, Outcome};
-use crate::chatter::{self, Chatter, ChatterSaved, Moment, Say};
-use crate::platforms;
+use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::bubble::{self, Bubble, Card, CardAction, Pointer};
+use crate::chatter::{self, Chatter, ChatterSaved, Moment, Say};
+use crate::countdown::{self, Countdown};
 use crate::effects::Effects;
+use crate::focus_module::{self, FocusModule};
+use crate::glow::{GlowPainter, GlowStyle};
 use crate::holiday_sync::{self, WM_HOLIDAYS_UPDATED};
-use crate::updater::{self, WM_UPDATE_READY};
+use crate::icons::Icon;
 use crate::log;
 use crate::memwatch::{self, MemWatch};
 use crate::modules::{ModuleEvent, ModuleHost, Request};
 use crate::paths;
+use crate::platforms;
+use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
 use crate::reminder_module::{self, ReminderModule};
-use crate::focus_module::{self, FocusModule};
-use crate::countdown::{self, Countdown};
 use crate::render::{Gfx, PetRenderer, Scene};
 use crate::soak::{Action, Soak};
 use crate::sprites::{SpriteSet, Wic};
 use crate::theme::{self, Palette};
-use crate::icons::Icon;
-use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
+use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::tray::{self, Tray};
+use crate::updater::{self, WM_UPDATE_READY};
 use crate::window_restore::{self, WindowRestore};
 
 /// 設定程式靠這個類別名稱找到核心（`petkit::ipc::PET_WINDOW_CLASS`）。
@@ -211,8 +222,21 @@ static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 fn push(event: Event) {
     EVENTS.with_borrow_mut(|q| {
         // 連續的滑鼠移動只留最後一筆，佇列不會因為滑鼠狂動而長大。
-        let is_move = |e: &Event| matches!(e, Event::PointerMove | Event::Hover | Event::Card(Pointer::Move, ..) | Event::Area(AreaInput::Move(..)) | Event::MenuInput(_, MenuInput::Move(..)));
-        if is_move(&event) && q.last().is_some_and(|last| std::mem::discriminant(last) == std::mem::discriminant(&event) && is_move(last)) {
+        let is_move = |e: &Event| {
+            matches!(
+                e,
+                Event::PointerMove
+                    | Event::Hover
+                    | Event::Card(Pointer::Move, ..)
+                    | Event::Area(AreaInput::Move(..))
+                    | Event::MenuInput(_, MenuInput::Move(..))
+            )
+        };
+        if is_move(&event)
+            && q.last().is_some_and(|last| {
+                std::mem::discriminant(last) == std::mem::discriminant(&event) && is_move(last)
+            })
+        {
             q.pop();
         }
         q.push(event);
@@ -258,7 +282,12 @@ const CORE_OWNER: &str = "core";
 
 /// 核心自己丟的卡重開（或換日）後要不要再跳：休息提醒要（跟一般提醒一樣，沒按掉不會因為重開就不見），
 /// 時間照 `now` 那天重寫；「看看樣子」的範例卡不用。
-fn restore_core_card(key: &str, mut card: Card, rest_at: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> Option<Card> {
+fn restore_core_card(
+    key: &str,
+    mut card: Card,
+    rest_at: Option<chrono::NaiveDateTime>,
+    now: chrono::NaiveDateTime,
+) -> Option<Card> {
     if key != REST_CARD_KEY {
         return None;
     }
@@ -414,13 +443,22 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let today = local_now().date();
     let primary_monitor = unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) };
     let primary = work_area(primary_monitor);
-    let base_height = config.size_dip as f32 * monitor_dpi(primary_monitor) as f32 / BASE_DPI as f32;
+    let base_height =
+        config.size_dip as f32 * monitor_dpi(primary_monitor) as f32 / BASE_DPI as f32;
     let (x, y) = match runtime.position {
         Some((x, y)) => (x as f32, y as f32),
-        None => (primary.right as f32 - base_height * DEFAULT_OFFSET_HEIGHTS, primary.bottom as f32),
+        None => (
+            primary.right as f32 - base_height * DEFAULT_OFFSET_HEIGHTS,
+            primary.bottom as f32,
+        ),
     };
     let dpi = monitor_dpi(monitor_at(x, y));
-    let sprites = wic.load_pet(&pack, &renderer.canvas.target(), px_height(&config, dpi), dpi)?;
+    let sprites = wic.load_pet(
+        &pack,
+        &renderer.canvas.target(),
+        px_height(&config, dpi),
+        dpi,
+    )?;
     let tray = Tray::new(hwnd, pet_icon(&wic, &pack, dpi)?);
 
     let mut modules = ModuleHost::new(Vec::new());
@@ -440,7 +478,14 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         sprites,
         window_size: (0, 0),
         pet: Pet::new(x, y, 0.0, seed),
-        anim: Anim { state: "", source: String::new(), own: false, variant: 0, frame: 0, elapsed_ms: 0.0 },
+        anim: Anim {
+            state: "",
+            source: String::new(),
+            own: false,
+            variant: 0,
+            frame: 0,
+            elapsed_ms: 0.0,
+        },
         started,
         last_tick: 0.0,
         last_module_tick: f64::NEG_INFINITY,
@@ -494,7 +539,11 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     app.resize_window()?;
     app.restore_cards(saved_cards);
     if after_update {
-        app.enqueue("core", "info".into(), Card::success(format!("已更新到 {}", env!("CARGO_PKG_VERSION")), None));
+        app.enqueue(
+            "core",
+            "info".into(),
+            Card::success(format!("已更新到 {}", env!("CARGO_PKG_VERSION")), None),
+        );
     }
     app.tick()?;
     unsafe {
@@ -503,7 +552,11 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let result = app.run_loop();
     app.save_state();
     let mem = memwatch::sample();
-    log!("exit; private={}KB working_set={}KB", mem.private_bytes / 1024, mem.working_set / 1024);
+    log!(
+        "exit; private={}KB working_set={}KB",
+        mem.private_bytes / 1024,
+        mem.working_set / 1024
+    );
     result
 }
 
@@ -512,7 +565,10 @@ fn load_companions() -> CompanionFile {
     let path = paths::companion_file();
     CompanionFile::load(&path).unwrap_or_else(|e| {
         let backup = path.with_extension("broken.json");
-        log!("companion file unreadable ({e}); kept as {}", backup.display());
+        log!(
+            "companion file unreadable ({e}); kept as {}",
+            backup.display()
+        );
         let _ = std::fs::rename(&path, backup);
         CompanionFile::default()
     })
@@ -526,7 +582,15 @@ fn stamp(path: &Path) -> Option<SystemTime> {
 /// 非同步播放，不會卡住畫面。
 fn play_reminder_sound() {
     use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC, SND_NODEFAULT};
-    if !unsafe { PlaySoundW(w!("Notification.Reminder"), None, SND_ALIAS | SND_ASYNC | SND_NODEFAULT) }.as_bool() {
+    if !unsafe {
+        PlaySoundW(
+            w!("Notification.Reminder"),
+            None,
+            SND_ALIAS | SND_ASYNC | SND_NODEFAULT,
+        )
+    }
+    .as_bool()
+    {
         log!("reminder sound not played");
     }
 }
@@ -534,7 +598,15 @@ fn play_reminder_sound() {
 /// 設定裡開著的功能 → 要載入的模組（也是右鍵選單裡的順序）。
 fn enabled_modules(config: &Config) -> Vec<&'static str> {
     let f = config.features;
-    [(f.reminders, reminder_module::ID), (f.window_restore, window_restore::ID), (f.focus, focus_module::ID)].into_iter().filter(|(on, _)| *on).map(|(_, id)| id).collect()
+    [
+        (f.reminders, reminder_module::ID),
+        (f.window_restore, window_restore::ID),
+        (f.focus, focus_module::ID),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .map(|(_, id)| id)
+    .collect()
 }
 
 fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
@@ -546,13 +618,21 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
         })),
         window_restore::ID => Box::new(WindowRestore::new(paths::window_layout_file())),
         // 關掉柚伴再打開：還沒結束的那一段接著倒數（關著的時候已經過了就不接）。
-        focus_module::ID => Box::new(FocusModule::resume(FocusStatus::load(&paths::focus_status_file(), local_now()))),
+        focus_module::ID => Box::new(FocusModule::resume(FocusStatus::load(
+            &paths::focus_status_file(),
+            local_now(),
+        ))),
         _ => unreachable!("unknown module {id}"),
     }
 }
 
 fn area_rect(a: Area) -> Rect {
-    Rect { left: a.left as f32, top: a.top as f32, right: a.right as f32, bottom: a.bottom as f32 }
+    Rect {
+        left: a.left as f32,
+        top: a.top as f32,
+        right: a.right as f32,
+        bottom: a.bottom as f32,
+    }
 }
 
 fn px_height(config: &Config, dpi: u32) -> f32 {
@@ -566,7 +646,10 @@ fn load_config(path: &Path) -> Config {
             // 壞掉的設定檔先留一份，不要被下一次存檔默默蓋掉。
             let backup = path.with_extension("json.bad");
             let _ = std::fs::rename(path, &backup);
-            log!("config unreadable ({e}); moved to {} and using defaults", backup.display());
+            log!(
+                "config unreadable ({e}); moved to {} and using defaults",
+                backup.display()
+            );
             Config::default()
         }
     }
@@ -599,8 +682,19 @@ fn list_pets(pets_dir: &Path, config: &Config) -> Vec<PetChoice> {
         .filter_map(|e| {
             let id = e.file_name().to_str()?.to_owned();
             let p = pack::load(&e.path()).ok()?;
-            let picture = p.states.get(states::IDLE)?.variants.first()?.frames.first()?.clone();
-            Some(PetChoice { name: config.pet_name(&id, &p.name).to_owned(), id, picture })
+            let picture = p
+                .states
+                .get(states::IDLE)?
+                .variants
+                .first()?
+                .frames
+                .first()?
+                .clone();
+            Some(PetChoice {
+                name: config.pet_name(&id, &p.name).to_owned(),
+                id,
+                picture,
+            })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -631,7 +725,22 @@ fn register_class(name: PCWSTR, proc: WNDPROC, cursor: PCWSTR) -> Result<HINSTAN
 }
 
 fn create_layered(class: PCWSTR, title: PCWSTR, instance: HINSTANCE) -> Result<HWND> {
-    unsafe { CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, class, title, WS_POPUP, 0, 0, 1, 1, None, None, Some(instance), None) }
+    unsafe {
+        CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+            class,
+            title,
+            WS_POPUP,
+            0,
+            0,
+            1,
+            1,
+            None,
+            None,
+            Some(instance),
+            None,
+        )
+    }
 }
 
 fn create_windows() -> Result<(HWND, HWND, HWND, HWND, HWND)> {
@@ -641,19 +750,32 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND, HWND)> {
     register_class(GLOW_CLASS, Some(glow_proc), IDC_ARROW)?;
     register_class(AREA_CLASS, Some(area_proc), IDC_CROSS)?;
     register_class(MENU_CLASS, Some(menu_proc), IDC_ARROW)?;
-    unsafe { TASKBAR_CREATED.store(RegisterWindowMessageW(w!("TaskbarCreated")), Ordering::Relaxed) };
+    unsafe {
+        TASKBAR_CREATED.store(
+            RegisterWindowMessageW(w!("TaskbarCreated")),
+            Ordering::Relaxed,
+        )
+    };
     let pet = create_layered(pet_class(), w!("柚伴"), instance)?;
     let card = create_layered(CARD_CLASS, w!("柚伴提醒"), instance)?;
     let toy = create_layered(TOY_CLASS, w!("柚伴玩具"), instance)?;
     // 牆的紅光：滑鼠點下去要穿過它，點到後面的東西。
     let glow = create_layered(GLOW_CLASS, w!("柚伴牆"), instance)?;
     unsafe {
-        SetWindowLongW(glow, GWL_EXSTYLE, GetWindowLongW(glow, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32);
+        SetWindowLongW(
+            glow,
+            GWL_EXSTYLE,
+            GetWindowLongW(glow, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32,
+        );
     }
     // 專注倒數的小膠囊：一樣讓滑鼠點穿過去。
     let countdown = create_layered(GLOW_CLASS, w!("柚伴專注"), instance)?;
     unsafe {
-        SetWindowLongW(countdown, GWL_EXSTYLE, GetWindowLongW(countdown, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32);
+        SetWindowLongW(
+            countdown,
+            GWL_EXSTYLE,
+            GetWindowLongW(countdown, GWL_EXSTYLE) | WS_EX_TRANSPARENT.0 as i32,
+        );
     }
     // 設定程式（可能不是系統管理員權限）也要能送指令給以系統管理員權限執行的核心。
     unsafe {
@@ -691,7 +813,12 @@ extern "system" fn menu_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
     let input = match msg {
         WM_MOUSEMOVE => {
             // 要求滑鼠離開時通知（WM_MOUSELEAVE），反白才會跟著拿掉。
-            let mut track = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+            let mut track = TRACKMOUSEEVENT {
+                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
             unsafe {
                 let _ = TrackMouseEvent(&mut track);
             }
@@ -748,7 +875,11 @@ extern "system" fn pet_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
                 LRESULT(0)
             }
             WM_MOUSEMOVE => {
-                push(if GetCapture() == hwnd { Event::PointerMove } else { Event::Hover });
+                push(if GetCapture() == hwnd {
+                    Event::PointerMove
+                } else {
+                    Event::Hover
+                });
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
@@ -791,7 +922,8 @@ extern "system" fn pet_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
             WM_COPYDATA => {
                 let data = &*(lparam.0 as *const COPYDATASTRUCT);
                 if !data.lpData.is_null() {
-                    let bytes = std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize);
+                    let bytes =
+                        std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize);
                     push(Event::Command(String::from_utf8_lossy(bytes).into_owned()));
                 }
                 LRESULT(1)
@@ -819,7 +951,12 @@ extern "system" fn card_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
     unsafe {
         match msg {
             WM_MOUSEMOVE => {
-                let mut track = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                let mut track = TRACKMOUSEEVENT {
+                    cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: hwnd,
+                    dwHoverTime: 0,
+                };
                 let _ = TrackMouseEvent(&mut track);
                 let (x, y) = client_xy(lparam);
                 push(Event::Card(Pointer::Move, x, y));
@@ -853,23 +990,39 @@ extern "system" fn card_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 
 pub fn window_size(s: &SpriteSet) -> (i32, i32) {
     // 爬牆時桌寵橫躺在牆線的一側，視窗半寬至少要一個身高多一點。
-    let w = (s.max_width + s.max_height * WINDOW_WIDTH_PER_HEIGHT).max(s.max_height * CLIMB_MIN_WIDTH_PER_HEIGHT).ceil() as i32;
+    let w = (s.max_width + s.max_height * WINDOW_WIDTH_PER_HEIGHT)
+        .max(s.max_height * CLIMB_MIN_WIDTH_PER_HEIGHT)
+        .ceil() as i32;
     let h = (s.max_height * WINDOW_HEIGHT_PER_HEIGHT + FOOT_PAD).ceil() as i32;
     (w, h)
 }
 
 /// 腳底在視窗裡的位置。
 pub fn anchor((w, h): (i32, i32)) -> Vector2 {
-    Vector2 { X: w as f32 / 2.0, Y: h as f32 - FOOT_PAD }
+    Vector2 {
+        X: w as f32 / 2.0,
+        Y: h as f32 - FOOT_PAD,
+    }
 }
 
 fn monitor_at(x: f32, y: f32) -> HMONITOR {
     // 腳底在地面那條線上，往上一點才會落在螢幕裡。
-    unsafe { MonitorFromPoint(POINT { x: x as i32, y: y as i32 - 1 }, MONITOR_DEFAULTTONEAREST) }
+    unsafe {
+        MonitorFromPoint(
+            POINT {
+                x: x as i32,
+                y: y as i32 - 1,
+            },
+            MONITOR_DEFAULTTONEAREST,
+        )
+    }
 }
 
 fn work_area(monitor: HMONITOR) -> RECT {
-    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
     unsafe {
         let _ = GetMonitorInfoW(monitor, &mut info);
     }
@@ -885,7 +1038,10 @@ fn monitor_dpi(monitor: HMONITOR) -> u32 {
 }
 
 fn idle_input_secs() -> f32 {
-    let mut info = LASTINPUTINFO { cbSize: size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    let mut info = LASTINPUTINFO {
+        cbSize: size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
     unsafe {
         if !GetLastInputInfo(&mut info).as_bool() {
             return 0.0;
@@ -908,7 +1064,14 @@ fn local_now() -> chrono::NaiveDateTime {
 
 impl App {
     fn run_loop(&mut self) -> Result<()> {
-        let timer = unsafe { CreateWaitableTimerExW(None, PCWSTR::null(), CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS.0)? };
+        let timer = unsafe {
+            CreateWaitableTimerExW(
+                None,
+                PCWSTR::null(),
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                TIMER_ALL_ACCESS.0,
+            )?
+        };
         let result = self.pump(timer);
         unsafe {
             let _ = CloseHandle(timer);
@@ -921,7 +1084,14 @@ impl App {
             let due = -((HUNDRED_NS_PER_SEC / self.desired_fps() as f32) as i64);
             unsafe { SetWaitableTimer(timer, &due, 0, None, None, false)? };
             loop {
-                let woke = unsafe { MsgWaitForMultipleObjectsEx(Some(&[timer]), INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+                let woke = unsafe {
+                    MsgWaitForMultipleObjectsEx(
+                        Some(&[timer]),
+                        INFINITE,
+                        QS_ALLINPUT,
+                        MWMO_INPUTAVAILABLE,
+                    )
+                };
                 let mut msg = MSG::default();
                 while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
                     if msg.message == WM_QUIT {
@@ -1012,7 +1182,8 @@ impl App {
 
     fn broadcast(&mut self, event: &ModuleEvent) {
         let mut out = Vec::new();
-        self.modules.broadcast(event, local_now(), &self.config, &mut out);
+        self.modules
+            .broadcast(event, local_now(), &self.config, &mut out);
         self.apply(out);
     }
 
@@ -1021,13 +1192,23 @@ impl App {
         for (owner, request) in requests {
             match request {
                 Request::Card { key, card } => self.enqueue(owner, key, card),
-                Request::Withdraw { key } => self.cards.retain(|q| !(q.owner == owner && q.key == key)),
+                Request::Withdraw { key } => {
+                    self.cards.retain(|q| !(q.owner == owner && q.key == key))
+                }
                 Request::Say { text } => {
                     let now = self.now();
                     let ctx = self.talk_ctx(now);
                     if ctx.can_speak && !ctx.asleep {
                         // 功能自己找話講（例如記住新視窗）；專注自己的台詞是在回應「開始專注」。
-                        self.say(Say { text, emote: None, secs: MODULE_SAY_SECS, reply: owner == focus_module::ID }, now);
+                        self.say(
+                            Say {
+                                text,
+                                emote: None,
+                                secs: MODULE_SAY_SECS,
+                                reply: owner == focus_module::ID,
+                            },
+                            now,
+                        );
                     }
                 }
             }
@@ -1038,7 +1219,11 @@ impl App {
     /// 專注開始、換段、停止時寫一份給設定程式（設定的專注頁顯示「停止專注」用）。
     /// 每次模組有動靜都會經過 `apply`，在這裡比對就不會漏掉哪個入口。
     fn write_focus_status(&mut self) {
-        let status = self.modules.session(local_now()).map(|s| FocusStatus { focusing: s.focusing, until: s.until, round: s.round });
+        let status = self.modules.session(local_now()).map(|s| FocusStatus {
+            focusing: s.focusing,
+            until: s.until,
+            round: s.round,
+        });
         if self.focus_written == Some(status) {
             return;
         }
@@ -1054,13 +1239,21 @@ impl App {
     }
 
     fn enqueue(&mut self, owner: &'static str, key: String, card: Card) {
-        if let Some(q) = self.cards.iter_mut().find(|q| q.owner == owner && q.key == key) {
+        if let Some(q) = self
+            .cards
+            .iter_mut()
+            .find(|q| q.owner == owner && q.key == key)
+        {
             q.card = card;
             self.shown_card = false;
             return;
         }
         if self.cards.len() >= MAX_CARDS {
-            let drop_at = self.cards.iter().position(|q| matches!(q.card, Card::Info { .. })).unwrap_or(0);
+            let drop_at = self
+                .cards
+                .iter()
+                .position(|q| matches!(q.card, Card::Info { .. }))
+                .unwrap_or(0);
             self.cards.remove(drop_at);
         }
         self.cards.push_back(Queued { owner, key, card });
@@ -1072,7 +1265,9 @@ impl App {
             self.pet.stop_talking(self.now());
             return;
         }
-        let Some(front) = self.cards.front_mut() else { return };
+        let Some(front) = self.cards.front_mut() else {
+            return;
+        };
         if action == CardAction::OpenSnooze {
             if let Card::Reminder { snooze_open, .. } = &mut front.card {
                 *snooze_open = true;
@@ -1098,7 +1293,16 @@ impl App {
             return;
         }
         let mut out = Vec::new();
-        self.modules.send(q.owner, &ModuleEvent::Card { key: &q.key, action }, local_now(), &self.config, &mut out);
+        self.modules.send(
+            q.owner,
+            &ModuleEvent::Card {
+                key: &q.key,
+                action,
+            },
+            local_now(),
+            &self.config,
+            &mut out,
+        );
         self.apply(out);
     }
 
@@ -1109,7 +1313,16 @@ impl App {
         };
         log!("command: {text}");
         match v["cmd"].as_str().unwrap_or_default() {
-            ipc::CMD_TEST_REMINDER => self.enqueue("core", "test".into(), Card::Reminder { title: v["title"].as_str().unwrap_or("測試提醒").to_owned(), time: local_now().format("%H:%M").to_string(), snooze_open: false, icon: Icon::BellRing }),
+            ipc::CMD_TEST_REMINDER => self.enqueue(
+                "core",
+                "test".into(),
+                Card::Reminder {
+                    title: v["title"].as_str().unwrap_or("測試提醒").to_owned(),
+                    time: local_now().format("%H:%M").to_string(),
+                    snooze_open: false,
+                    icon: Icon::BellRing,
+                },
+            ),
             ipc::CMD_CARD_ACTION => {
                 let action = match v["action"].as_str().unwrap_or_default() {
                     "done" => Some(CardAction::Done),
@@ -1133,33 +1346,70 @@ impl App {
             ipc::CMD_PREVIEW_AREA => {
                 self.area_preview = None;
                 if let Ok(area) = serde_json::from_value::<Area>(v["area"].clone()) {
-                    let color = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) { self.palette.accent } else { self.palette.danger };
-                    self.area_preview = Some(AreaPreview::open(&self.gfx, GLOW_CLASS, &area, color.d2d(), self.dpi_scale(), self.now())?);
+                    let color = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) {
+                        self.palette.accent
+                    } else {
+                        self.palette.danger
+                    };
+                    self.area_preview = Some(AreaPreview::open(
+                        &self.gfx,
+                        GLOW_CLASS,
+                        &area,
+                        color.d2d(),
+                        self.dpi_scale(),
+                        self.now(),
+                    )?);
                 }
             }
             ipc::CMD_DRAW_AREA => {
-                let kind = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) { AreaKind::Allowed } else { AreaKind::Forbidden };
+                let kind = if v["kind"].as_str() == Some(ipc::AREA_ALLOWED) {
+                    AreaKind::Allowed
+                } else {
+                    AreaKind::Forbidden
+                };
                 self.open_area_editor(kind)?;
             }
             ipc::CMD_SAY => {
                 let text = v["text"].as_str().unwrap_or("測試講話").to_owned();
                 let secs = v["secs"].as_f64().unwrap_or(4.0) as f32;
-                self.say(Say { text, emote: None, secs, reply: true }, self.now());
+                self.say(
+                    Say {
+                        text,
+                        emote: None,
+                        secs,
+                        reply: true,
+                    },
+                    self.now(),
+                );
             }
             // 自動測試用：把桌寵拎到 (x, y) 放手（跟真的用滑鼠拖一樣走拖曳流程）。
             ipc::CMD_DROP => {
                 if let (Some(x), Some(y)) = (v["x"].as_f64(), v["y"].as_f64()) {
                     let (now, env) = (self.now(), self.env());
                     let (px, py) = (self.pet.x, self.pet.y - self.sprites.base_height / 2.0);
-                    self.pet.input(Input::PointerDown { x: px, y: py }, now, &env);
-                    self.pet.input(Input::PointerMove { x: x as f32, y: y as f32 - self.sprites.base_height / 2.0 }, now, &env);
+                    self.pet
+                        .input(Input::PointerDown { x: px, y: py }, now, &env);
+                    self.pet.input(
+                        Input::PointerMove {
+                            x: x as f32,
+                            y: y as f32 - self.sprites.base_height / 2.0,
+                        },
+                        now,
+                        &env,
+                    );
                     self.pet.input(Input::PointerUp, now, &env);
                 }
             }
             ipc::CMD_TEST_MEMORY_ALERT => {
                 const MB: usize = 1024 * 1024;
-                let samples: Vec<usize> = (0..memwatch::TREND_SAMPLES).map(|i| 15 * MB + i * 20 * MB / memwatch::TREND_SAMPLES).collect();
-                self.memory_alert(&memwatch::Leak { from_bytes: samples[0], to_bytes: samples[samples.len() - 1], samples });
+                let samples: Vec<usize> = (0..memwatch::TREND_SAMPLES)
+                    .map(|i| 15 * MB + i * 20 * MB / memwatch::TREND_SAMPLES)
+                    .collect();
+                self.memory_alert(&memwatch::Leak {
+                    from_bytes: samples[0],
+                    to_bytes: samples[samples.len() - 1],
+                    samples,
+                });
             }
             ipc::CMD_QUIT => self.quit(),
             ipc::CMD_CHECK_UPDATE => self.check_update_now(),
@@ -1178,15 +1428,30 @@ impl App {
     /// 記憶體一路往上漲：存一份診斷檔（當下狀態＋這一天的記憶體曲線），再冒泡告訴使用者。
     fn memory_alert(&mut self, leak: &memwatch::Leak) {
         const MB: f64 = 1024.0 * 1024.0;
-        log!("memory kept rising: {:.1}MB -> {:.1}MB", leak.from_bytes as f64 / MB, leak.to_bytes as f64 / MB);
-        let unix = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        log!(
+            "memory kept rising: {:.1}MB -> {:.1}MB",
+            leak.from_bytes as f64 / MB,
+            leak.to_bytes as f64 / MB
+        );
+        let unix = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         let path = paths::logs_dir().join(format!("diagnostic-{unix}.json"));
         let report = serde_json::json!({ "status": self.status(), "fromBytes": leak.from_bytes, "toBytes": leak.to_bytes, "samples": leak.samples });
         if let Err(e) = write_atomic(&path, report.to_string().as_bytes()) {
             log!("write diagnostic failed: {e}");
         }
-        let detail = format!("一天內從 {:.0}MB 漲到 {:.0}MB。重新開啟柚伴就會恢復", leak.from_bytes as f64 / MB, leak.to_bytes as f64 / MB);
-        self.enqueue("core", "memory".into(), Card::warning("柚伴的記憶體一直在增加", Some(detail)));
+        let detail = format!(
+            "一天內從 {:.0}MB 漲到 {:.0}MB。重新開啟柚伴就會恢復",
+            leak.from_bytes as f64 / MB,
+            leak.to_bytes as f64 / MB
+        );
+        self.enqueue(
+            "core",
+            "memory".into(),
+            Card::warning("柚伴的記憶體一直在增加", Some(detail)),
+        );
     }
 
     fn status(&self) -> serde_json::Value {
@@ -1212,21 +1477,50 @@ impl App {
 
     /// 右鍵選單：桌寵自己的一組，再來每個開著的功能一組（標題是功能名稱），最後是設定與結束。
     fn menu_entries(&self, pets: &[PetChoice]) -> Vec<Entry> {
-        let mut entries = vec![Entry::Header(self.config.given_name(&self.pack.id).unwrap_or("桌寵").into())];
+        let mut entries = vec![Entry::Header(
+            self.config
+                .given_name(&self.pack.id)
+                .unwrap_or("桌寵")
+                .into(),
+        )];
         let days = self.companions.days(&self.pack.id);
         if days > 0 {
-            entries.push(Item::entry(MENU_DAYS, format!("陪你第 {days} 天"), Icon::Heart));
+            entries.push(Item::entry(
+                MENU_DAYS,
+                format!("陪你第 {days} 天"),
+                Icon::Heart,
+            ));
         }
         let choices = pets
             .iter()
             .enumerate()
-            .map(|(i, p)| Entry::Item(Item { id: MENU_PET_BASE + i as u32, label: p.name.clone(), icon: None, picture: Some(p.picture.clone()), checked: p.id == self.pack.id, children: Vec::new() }))
+            .map(|(i, p)| {
+                Entry::Item(Item {
+                    id: MENU_PET_BASE + i as u32,
+                    label: p.name.clone(),
+                    icon: None,
+                    picture: Some(p.picture.clone()),
+                    checked: p.id == self.pack.id,
+                    children: Vec::new(),
+                })
+            })
             .collect();
-        entries.push(Entry::Item(Item { id: MENU_SWITCH_PET, label: "換一隻桌寵".into(), icon: Some(Icon::PawPrint), picture: None, checked: false, children: choices }));
+        entries.push(Entry::Item(Item {
+            id: MENU_SWITCH_PET,
+            label: "換一隻桌寵".into(),
+            icon: Some(Icon::PawPrint),
+            picture: None,
+            checked: false,
+            children: choices,
+        }));
         entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
         entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
         for group in self.modules.menu(local_now(), &self.config) {
-            let mut items: Vec<Entry> = group.items.into_iter().map(|(id, label, icon)| Item::entry(id, label, icon)).collect();
+            let mut items: Vec<Entry> = group
+                .items
+                .into_iter()
+                .map(|(id, label, icon)| Item::entry(id, label, icon))
+                .collect();
             if group.module == reminder_module::ID {
                 items.insert(0, Item::entry(MENU_ADD_REMINDER, "新增提醒…", Icon::Bell));
             }
@@ -1248,13 +1542,22 @@ impl App {
         self.menu_pets = pets;
         let (x, y) = cursor();
         let s = monitor_dpi(monitor_at(x, y + 1.0)) as f32 / BASE_DPI as f32;
-        self.menu = Some(PopupMenu::open(&self.gfx, &self.wic, MENU_CLASS, entries, self.palette, s)?);
+        self.menu = Some(PopupMenu::open(
+            &self.gfx,
+            &self.wic,
+            MENU_CLASS,
+            entries,
+            self.palette,
+            s,
+        )?);
         Ok(())
     }
 
     fn menu_input(&mut self, hwnd: HWND, input: MenuInput) -> Result<()> {
         let now = self.now();
-        let Some(menu) = self.menu.as_mut() else { return Ok(()) };
+        let Some(menu) = self.menu.as_mut() else {
+            return Ok(());
+        };
         match menu.input(hwnd, input, now)? {
             Some(MenuOutcome::Pick(id)) => {
                 self.menu = None;
@@ -1283,7 +1586,8 @@ impl App {
             }
             id => {
                 let mut out = Vec::new();
-                self.modules.menu_clicked(id, local_now(), &self.config, &mut out);
+                self.modules
+                    .menu_clicked(id, local_now(), &self.config, &mut out);
                 self.apply(out);
             }
         }
@@ -1291,7 +1595,9 @@ impl App {
 
     /// 專注中（不含中間的休息）。
     fn focusing(&self) -> bool {
-        self.modules.session(local_now()).is_some_and(|s| s.focusing)
+        self.modules
+            .session(local_now())
+            .is_some_and(|s| s.focusing)
     }
 
     fn rest_every_secs(&self) -> f64 {
@@ -1308,7 +1614,18 @@ impl App {
 
     fn open_settings(&mut self, page: Option<&str>) {
         let Some(exe) = paths::settings_exe() else {
-            self.enqueue("core", "info".into(), Card::warning("找不到設定程式", Some(format!("{} 要跟 {} 放在同一個資料夾", paths::SETTINGS_EXE, paths::CORE_EXE))));
+            self.enqueue(
+                "core",
+                "info".into(),
+                Card::warning(
+                    "找不到設定程式",
+                    Some(format!(
+                        "{} 要跟 {} 放在同一個資料夾",
+                        paths::SETTINGS_EXE,
+                        paths::CORE_EXE
+                    )),
+                ),
+            );
             return;
         };
         let mut cmd = std::process::Command::new(exe);
@@ -1323,7 +1640,14 @@ impl App {
     fn desired_fps(&self) -> u32 {
         if self.hidden {
             FPS_HIDDEN
-        } else if self.effects.active() || self.transition.is_some() || self.now() - self.last_ride_move < RIDE_SMOOTH_SECS || self.toy.as_ref().is_some_and(|t| !t.toy.resting || t.fading.is_some()) {
+        } else if self.effects.active()
+            || self.transition.is_some()
+            || self.now() - self.last_ride_move < RIDE_SMOOTH_SECS
+            || self
+                .toy
+                .as_ref()
+                .is_some_and(|t| !t.toy.resting || t.fading.is_some())
+        {
             FPS_ANIMATING
         } else {
             self.pet.desired_fps()
@@ -1336,14 +1660,23 @@ impl App {
         if now - self.last_busy_check >= BUSY_CHECK_SECS {
             self.last_busy_check = now;
             // 自己的畫範圍畫面也是蓋滿螢幕的最上層視窗，會被系統當成全螢幕程式：畫的時候不躲。
-            let busy = self.config.hide_in_fullscreen && self.area_editor.is_none() && platforms::user_is_busy();
+            let busy = self.config.hide_in_fullscreen
+                && self.area_editor.is_none()
+                && platforms::user_is_busy();
             if busy != self.hidden {
                 self.hidden = busy;
-                log!("fullscreen app {}; pet {}", if busy { "detected" } else { "gone" }, if busy { "hidden" } else { "shown" });
+                log!(
+                    "fullscreen app {}; pet {}",
+                    if busy { "detected" } else { "gone" },
+                    if busy { "hidden" } else { "shown" }
+                );
                 unsafe {
                     let _ = ShowWindow(self.hwnd, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
                     if self.toy.is_some() {
-                        let _ = ShowWindow(self.toy_hwnd, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
+                        let _ = ShowWindow(
+                            self.toy_hwnd,
+                            if busy { SW_HIDE } else { SW_SHOWNOACTIVATE },
+                        );
                     }
                 }
                 if busy {
@@ -1369,9 +1702,26 @@ impl App {
         self.last_topmost = now;
         // 後設的在上面：選單開著的話要蓋過桌寵。
         let menu = self.menu.as_ref().map(PopupMenu::hwnds).unwrap_or_default();
-        for hwnd in [self.glow_hwnd, self.toy_hwnd, self.hwnd, self.countdown.hwnd(), self.card_hwnd].into_iter().chain(menu) {
+        for hwnd in [
+            self.glow_hwnd,
+            self.toy_hwnd,
+            self.hwnd,
+            self.countdown.hwnd(),
+            self.card_hwnd,
+        ]
+        .into_iter()
+        .chain(menu)
+        {
             unsafe {
-                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                );
             }
         }
     }
@@ -1386,13 +1736,21 @@ impl App {
         }
         self.last_platform_scan = now;
         let work = work_area(monitor_at(self.pet.x, self.pet.y));
-        self.platforms = platforms::scan(work, self.idle_width() * PLATFORM_MIN_WIDTH_RATIO, self.sprites.base_height);
+        self.platforms = platforms::scan(
+            work,
+            self.idle_width() * PLATFORM_MIN_WIDTH_RATIO,
+            self.sprites.base_height,
+        );
     }
 
     /// 完整掃描之間，只看桌寵站著的那一個視窗：它被拖動就把它的那幾段一起平移（便宜，可以每一格做）。
     fn follow_ridden_window(&mut self, now: f64) {
-        let Some(window) = self.pet.riding_window() else { return };
-        let Some(seg) = self.platforms.iter().find(|p| p.window == window) else { return };
+        let Some(window) = self.pet.riding_window() else {
+            return;
+        };
+        let Some(seg) = self.platforms.iter().find(|p| p.window == window) else {
+            return;
+        };
         let (old_left, old_top) = (seg.window_left, seg.y);
         match platforms::window_origin(window) {
             Some((left, top)) => {
@@ -1435,19 +1793,31 @@ impl App {
             cursor: Some(cursor()),
             pet_height: self.sprites.base_height,
             pet_half_width: half,
-            platforms: if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() },
+            platforms: if self.config.stand_on_windows {
+                self.platforms.clone()
+            } else {
+                Vec::new()
+            },
             // 專注中安靜陪著：不散步、不追滑鼠、不爬牆（跟「安靜」一樣）。
-            activity: if self.focusing() { Activity::Calm } else { self.config.activity },
+            activity: if self.focusing() {
+                Activity::Calm
+            } else {
+                self.config.activity
+            },
             wall_left: rect.left as f32,
             wall_right: rect.right as f32,
             ceiling: rect.top as f32,
-            item: self.toy.as_ref().filter(|t| t.fading.is_none()).map(|t| ItemView {
-                x: t.toy.x,
-                y: t.toy.y,
-                food: t.toy.kind.is_food(),
-                grounded: t.toy.grounded(),
-                wanted: t.toy.kind.is_food() || t.toy.kicks < BALL_MAX_KICKS,
-            }),
+            item: self
+                .toy
+                .as_ref()
+                .filter(|t| t.fading.is_none())
+                .map(|t| ItemView {
+                    x: t.toy.x,
+                    y: t.toy.y,
+                    food: t.toy.kind.is_food(),
+                    grounded: t.toy.grounded(),
+                    wanted: t.toy.kind.is_food() || t.toy.kicks < BALL_MAX_KICKS,
+                }),
             blocks: Vec::new(),
             invisible_floor: false,
             invisible_walls: (false, false),
@@ -1462,7 +1832,11 @@ impl App {
             }
             Roam::Avoid => {
                 env.blocks = self.forbidden_rects();
-                env.platforms.extend(behavior::block_platforms(&env.blocks, env.ceiling, env.pet_height));
+                env.platforms.extend(behavior::block_platforms(
+                    &env.blocks,
+                    env.ceiling,
+                    env.pet_height,
+                ));
             }
         }
         env
@@ -1473,21 +1847,40 @@ impl App {
         self.area_preview = None;
         let s = self.dpi_scale();
         let (existing, min, color) = match kind {
-            AreaKind::Allowed => (self.config.allowed_area.into_iter().collect(), (self.idle_width() * MIN_ALLOWED_WIDTHS, self.sprites.base_height * MIN_ALLOWED_HEIGHTS), self.palette.accent.d2d()),
-            AreaKind::Forbidden => (self.config.forbidden_areas.clone(), (MIN_FORBIDDEN_DIP * s, MIN_FORBIDDEN_DIP * s), self.palette.danger.d2d()),
+            AreaKind::Allowed => (
+                self.config.allowed_area.into_iter().collect(),
+                (
+                    self.idle_width() * MIN_ALLOWED_WIDTHS,
+                    self.sprites.base_height * MIN_ALLOWED_HEIGHTS,
+                ),
+                self.palette.accent.d2d(),
+            ),
+            AreaKind::Forbidden => (
+                self.config.forbidden_areas.clone(),
+                (MIN_FORBIDDEN_DIP * s, MIN_FORBIDDEN_DIP * s),
+                self.palette.danger.d2d(),
+            ),
         };
         let min = (min.0.ceil() as i32, min.1.ceil() as i32);
-        self.area_editor = Some(AreaEditor::open(&self.gfx, AREA_CLASS, kind, existing, min, s, color)?);
+        self.area_editor = Some(AreaEditor::open(
+            &self.gfx, AREA_CLASS, kind, existing, min, s, color,
+        )?);
         Ok(())
     }
 
     /// 畫範圍的畫面收到滑鼠或鍵盤：畫好就寫進設定檔（設定程式回到前景時會重新讀）。
     fn area_input(&mut self, input: AreaInput) -> Result<()> {
-        let Some(editor) = self.area_editor.as_mut() else { return Ok(()) };
+        let Some(editor) = self.area_editor.as_mut() else {
+            return Ok(());
+        };
         let kind = editor.kind;
-        let Some(outcome) = editor.input(input)? else { return Ok(()) };
+        let Some(outcome) = editor.input(input)? else {
+            return Ok(());
+        };
         self.area_editor = None;
-        let Outcome::Done(area) = outcome else { return Ok(()) };
+        let Outcome::Done(area) = outcome else {
+            return Ok(());
+        };
         log!("{kind:?} area drawn: {area:?}");
         let text = match kind {
             AreaKind::Allowed => {
@@ -1505,7 +1898,15 @@ impl App {
         }
         self.config_stamp = stamp(&path);
         if self.config.talk != Talk::Never {
-            self.say(Say { text: text.to_owned(), emote: Some(Emote::Note), secs: SAY_AREA_SECS, reply: true }, self.now());
+            self.say(
+                Say {
+                    text: text.to_owned(),
+                    emote: Some(Emote::Note),
+                    secs: SAY_AREA_SECS,
+                    reply: true,
+                },
+                self.now(),
+            );
         }
         Ok(())
     }
@@ -1515,7 +1916,11 @@ impl App {
         if self.config.roam != Roam::Avoid {
             return Vec::new();
         }
-        self.config.forbidden_areas.iter().map(|a| area_rect(*a)).collect()
+        self.config
+            .forbidden_areas
+            .iter()
+            .map(|a| area_rect(*a))
+            .collect()
     }
 
     /// 專注倒數：專注（或休息）中、頭上沒有卡片或泡泡時顯示；設定成「滑鼠移過去才顯示」就只在滑鼠停在桌寵身上時顯示。
@@ -1523,7 +1928,9 @@ impl App {
         let h = self.sprites.base_height;
         let hovering = {
             let (cx, cy) = cursor();
-            (cx - self.pet.x).abs() <= self.idle_width() / 2.0 && cy <= self.pet.y && cy >= self.pet.y - h
+            (cx - self.pet.x).abs() <= self.idle_width() / 2.0
+                && cy <= self.pet.y
+                && cy >= self.pet.y - h
         };
         let free_above = self.speech.is_none() && self.cards.is_empty() && self.menu.is_none();
         let wanted = self.config.focus_countdown == CountdownMode::Always || hovering;
@@ -1531,8 +1938,16 @@ impl App {
             .modules
             .session(local_now())
             .filter(|_| free_above && wanted)
-            .map(|s| countdown::Shown { text: countdown::clock_text(s.secs_left), focusing: s.focusing, head: Vector2 { X: self.pet.x, Y: self.pet.y - h } });
-        self.countdown.update(shown, dt, self.dpi_scale(), &self.palette)
+            .map(|s| countdown::Shown {
+                text: countdown::clock_text(s.secs_left),
+                focusing: s.focusing,
+                head: Vector2 {
+                    X: self.pet.x,
+                    Y: self.pet.y - h,
+                },
+            });
+        self.countdown
+            .update(shown, dt, self.dpi_scale(), &self.palette)
     }
 
     fn idle_width(&self) -> f32 {
@@ -1543,7 +1958,11 @@ impl App {
         let now = self.now();
         let dt = ((now - self.last_tick) as f32).clamp(0.0, MAX_DT);
         self.last_tick = now;
-        if self.area_preview.as_ref().is_some_and(|p| now - p.shown_at > AREA_PREVIEW_MAX_SECS) {
+        if self
+            .area_preview
+            .as_ref()
+            .is_some_and(|p| now - p.shown_at > AREA_PREVIEW_MAX_SECS)
+        {
             self.area_preview = None;
         }
         if let Some(menu) = self.menu.as_mut() {
@@ -1556,7 +1975,8 @@ impl App {
         }
         self.drive_soak(now)?;
         if self.update_hidden(now) {
-            self.countdown.update(None, dt, self.dpi_scale(), &self.palette)?;
+            self.countdown
+                .update(None, dt, self.dpi_scale(), &self.palette)?;
             if self.config.remind_in_fullscreen {
                 // 全螢幕程式自己也可能是最上層：卡片要定時放回它上面，不然跳了也看不到。
                 self.keep_topmost(now);
@@ -1574,8 +1994,13 @@ impl App {
             self.save_state();
         }
         let glows = self.pet.glows(&env, now);
-        let style = GlowStyle { pet_height: self.sprites.base_height, scale: self.dpi_scale(), color: self.palette.danger.d2d() };
-        self.glow.update(self.glow_hwnd, self.hwnd, &glows, dt, &style)?;
+        let style = GlowStyle {
+            pet_height: self.sprites.base_height,
+            scale: self.dpi_scale(),
+            color: self.palette.danger.d2d(),
+        };
+        self.glow
+            .update(self.glow_hwnd, self.hwnd, &glows, dt, &style)?;
         self.update_countdown(dt)?;
         for happening in self.pet.drain_happenings() {
             let ctx = self.talk_ctx(now);
@@ -1606,7 +2031,10 @@ impl App {
         let frame = &variant.frames[self.anim.frame];
         let procedural = !self.anim.own || variant.procedural;
         let anchor = anchor(self.window_size);
-        let origin = POINT { x: (self.pet.x - anchor.X).round() as i32, y: (self.pet.y - anchor.Y).round() as i32 };
+        let origin = POINT {
+            x: (self.pet.x - anchor.X).round() as i32,
+            y: (self.pet.y - anchor.Y).round() as i32,
+        };
         let scene = Scene {
             frame,
             pose,
@@ -1635,19 +2063,43 @@ impl App {
         let h = self.sprites.base_height;
         let s = self.dpi_scale();
         let work = work_area(monitor_at(self.pet.x, self.pet.y));
-        let side = if self.pet.x > (work.left + work.right) as f32 / 2.0 { -1.0 } else { 1.0 };
+        let side = if self.pet.x > (work.left + work.right) as f32 / 2.0 {
+            -1.0
+        } else {
+            1.0
+        };
         let size = h * toy::SIZE_PER_HEIGHT;
-        let x = (self.pet.x + side * TOY_DROP_SIDE_HEIGHTS * h).clamp(work.left as f32 + size, work.right as f32 - size);
+        let x = (self.pet.x + side * TOY_DROP_SIDE_HEIGHTS * h)
+            .clamp(work.left as f32 + size, work.right as f32 - size);
         // 從桌寵頭上的高度掉下來；中間隔著別的視窗頂的話，從那個視窗頂底下開始掉，才會落在牠搆得到的那一層。
-        let blocked = self.platforms.iter().filter(|p| x >= p.left && x <= p.right && p.y < self.pet.y - 1.0).map(|p| p.y + 1.0).fold(f32::NEG_INFINITY, f32::max);
-        let y = (self.pet.y - TOY_DROP_HEIGHTS * h).max(work.top as f32 + size).max(blocked);
+        let blocked = self
+            .platforms
+            .iter()
+            .filter(|p| x >= p.left && x <= p.right && p.y < self.pet.y - 1.0)
+            .map(|p| p.y + 1.0)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let y = (self.pet.y - TOY_DROP_HEIGHTS * h)
+            .max(work.top as f32 + size)
+            .max(blocked);
         let toy = if ball {
-            Toy::new(ToyKind::ball(self.rand01()), x, y, side * BALL_THROW_X_DIP * s, -BALL_THROW_UP_DIP * s, size)
+            Toy::new(
+                ToyKind::ball(self.rand01()),
+                x,
+                y,
+                side * BALL_THROW_X_DIP * s,
+                -BALL_THROW_UP_DIP * s,
+                size,
+            )
         } else {
             Toy::new(ToyKind::food(self.rand01()), x, y, 0.0, 0.0, size)
         };
         log!("toy: {:?}", toy.kind);
-        self.toy = Some(ToySlot { toy, touched: self.now(), fading: None, done_at: None });
+        self.toy = Some(ToySlot {
+            toy,
+            touched: self.now(),
+            fading: None,
+            done_at: None,
+        });
     }
 
     fn remove_toy(&mut self) {
@@ -1663,7 +2115,9 @@ impl App {
         let blocks = self.forbidden_rects();
         let s = self.dpi_scale();
         let press = self.toy_press;
-        let Some(slot) = self.toy.as_mut() else { return Ok(()) };
+        let Some(slot) = self.toy.as_mut() else {
+            return Ok(());
+        };
         if let Some((px, py)) = press {
             let (cx, cy) = cursor();
             if !slot.toy.is_held() && (cx - px).hypot(cy - py) > behavior::DRAG_THRESHOLD_DIP * s {
@@ -1678,15 +2132,30 @@ impl App {
             }
         }
         let rect = work_area(monitor_at(slot.toy.x, slot.toy.y - 1.0));
-        let mut platforms = if self.config.stand_on_windows { self.platforms.clone() } else { Vec::new() };
+        let mut platforms = if self.config.stand_on_windows {
+            self.platforms.clone()
+        } else {
+            Vec::new()
+        };
         // 禁止範圍的頂端也接得住東西（掉進範圍裡，桌寵就拿不到了）。
-        platforms.extend(behavior::block_platforms(&blocks, rect.top as f32, self.sprites.base_height));
-        let world = toy::World { ground_y: rect.bottom as f32, wall_left: rect.left as f32, wall_right: rect.right as f32, platforms: &platforms, px_per_dip: self.sprites.dpi as f32 / BASE_DPI as f32 };
+        platforms.extend(behavior::block_platforms(
+            &blocks,
+            rect.top as f32,
+            self.sprites.base_height,
+        ));
+        let world = toy::World {
+            ground_y: rect.bottom as f32,
+            wall_left: rect.left as f32,
+            wall_right: rect.right as f32,
+            platforms: &platforms,
+            px_per_dip: self.sprites.dpi as f32 / BASE_DPI as f32,
+        };
         let landed = slot.toy.update(dt, &world);
         if landed {
             self.effects.spawn(Emote::Dust, now);
         }
-        let played_out = !slot.toy.kind.is_food() && slot.toy.kicks >= BALL_MAX_KICKS && slot.toy.resting;
+        let played_out =
+            !slot.toy.kind.is_food() && slot.toy.kicks >= BALL_MAX_KICKS && slot.toy.resting;
         let done = played_out || (slot.toy.resting && now - slot.touched >= TOY_UNTOUCHED_MAX_SECS);
         if done && slot.done_at.is_none() {
             slot.done_at = Some(now);
@@ -1694,7 +2163,9 @@ impl App {
         if slot.fading.is_none() && slot.done_at.is_some_and(|t| now - t >= TOY_LINGER_SECS) {
             slot.fading = Some(now);
         }
-        let opacity = slot.fading.map_or(1.0, |t| 1.0 - ((now - t) / TOY_FADE_SECS) as f32);
+        let opacity = slot
+            .fading
+            .map_or(1.0, |t| 1.0 - ((now - t) / TOY_FADE_SECS) as f32);
         if opacity <= 0.0 {
             self.remove_toy();
             return Ok(());
@@ -1731,7 +2202,11 @@ impl App {
             None => petkit::APP_NAME.to_owned(),
         };
         self.tray.set_tip(match session {
-            Some(s) => format!("{who} · {}中，還剩 {} 分", if s.focusing { "專注" } else { "休息" }, s.minutes_left),
+            Some(s) => format!(
+                "{who} · {}中，還剩 {} 分",
+                if s.focusing { "專注" } else { "休息" },
+                s.minutes_left
+            ),
             None => who,
         });
         // 休息提醒放在設定的「提醒」頁，跟著提醒功能一起開關；專注（含中間的休息）進行中先暫停，不跟番茄鐘搶著叫人休息。
@@ -1744,14 +2219,25 @@ impl App {
             self.rest_at = Some(at);
             let time = bubble::card_time(at, at.date());
             let card = match self.config.rest_style {
-                Style::Card => Card::Reminder { title: text, time, snooze_open: false, icon: REST_CARD_ICON },
-                Style::Auto => Card::Nudge { title: text, time, icon: REST_CARD_ICON },
+                Style::Card => Card::Reminder {
+                    title: text,
+                    time,
+                    snooze_open: false,
+                    icon: REST_CARD_ICON,
+                },
+                Style::Auto => Card::Nudge {
+                    title: text,
+                    time,
+                    icon: REST_CARD_ICON,
+                },
             };
             self.enqueue(CORE_OWNER, REST_CARD_KEY.into(), card);
         }
         self.count_day(now);
         // 卡片、講過的話、等著慶祝的天數一變就存（隨時可能被關掉）；其他照固定間隔存。
-        if self.saved_marks.as_ref() != Some(&self.state_marks()) || now - self.last_state_save >= STATE_SAVE_SECS {
+        if self.saved_marks.as_ref() != Some(&self.state_marks())
+            || now - self.last_state_save >= STATE_SAVE_SECS
+        {
             self.save_state();
         }
 
@@ -1779,7 +2265,9 @@ impl App {
 
     /// 啟動時查一次新版，之後每小時看一次要不要再查（實際一天最多查一次）；新版解好了就挑空檔換上。
     fn check_update(&mut self, now: f64) {
-        let Some(install) = paths::install_dir() else { return };
+        let Some(install) = paths::install_dir() else {
+            return;
+        };
         if !self.config.auto_update || self.soak.is_some() || !updater::enabled_for(&install) {
             return;
         }
@@ -1799,7 +2287,9 @@ impl App {
         }
         self.update_ready = false;
         self.update_offered = true;
-        if let Some(version) = updater::staged_version(&paths::update_dir()).filter(|_| updater::staged(&paths::update_dir()).is_some()) {
+        if let Some(version) = updater::staged_version(&paths::update_dir())
+            .filter(|_| updater::staged(&paths::update_dir()).is_some())
+        {
             self.enqueue("core", UPDATE_CARD_KEY.into(), Card::Update { version });
         }
     }
@@ -1811,7 +2301,9 @@ impl App {
             return;
         };
         let dir = paths::update_dir();
-        if let Some(version) = updater::staged_version(&dir).filter(|_| updater::staged(&dir).is_some()) {
+        if let Some(version) =
+            updater::staged_version(&dir).filter(|_| updater::staged(&dir).is_some())
+        {
             updater::report(&UpdateStatus::Ready { version });
             // 之前的更新卡被關掉了也再跳一次。
             self.update_offered = false;
@@ -1823,7 +2315,11 @@ impl App {
 
     /// 使用者在「新版準備好了」卡上（或設定裡）按了「現在更新」。
     fn update_now(&mut self) {
-        let (Some(install), Some(staged)) = (paths::install_dir(), updater::staged(&paths::update_dir())) else { return };
+        let (Some(install), Some(staged)) =
+            (paths::install_dir(), updater::staged(&paths::update_dir()))
+        else {
+            return;
+        };
         match updater::apply_and_restart(&staged, &install) {
             Ok(()) => {
                 log!("update applied; restarting");
@@ -1831,20 +2327,28 @@ impl App {
             }
             Err(e) => {
                 log!("update apply failed: {e}");
-                self.enqueue("core", "info".into(), Card::warning("更新沒有成功", Some("下次啟動柚伴時會再試一次".into())));
+                self.enqueue(
+                    "core",
+                    "info".into(),
+                    Card::warning("更新沒有成功", Some("下次啟動柚伴時會再試一次".into())),
+                );
             }
         }
     }
 
     fn drive_soak(&mut self, now: f64) -> Result<()> {
-        let Some(soak) = self.soak.as_mut() else { return Ok(()) };
+        let Some(soak) = self.soak.as_mut() else {
+            return Ok(());
+        };
         if soak.finished(now) {
             soak.report();
             self.soak = None;
             self.quit();
             return Ok(());
         }
-        let Some(action) = soak.next(now) else { return Ok(()) };
+        let Some(action) = soak.next(now) else {
+            return Ok(());
+        };
         let env = self.env();
         let s = self.dpi_scale();
         match action {
@@ -1854,15 +2358,42 @@ impl App {
                     self.begin_switch(pet.id.clone(), false);
                 }
             }
-            Action::ShowCard => self.enqueue("core", "test".into(), Card::Reminder { title: "壓力測試提醒".into(), time: "12:00".into(), snooze_open: false, icon: Icon::BellRing }),
+            Action::ShowCard => self.enqueue(
+                "core",
+                "test".into(),
+                Card::Reminder {
+                    title: "壓力測試提醒".into(),
+                    time: "12:00".into(),
+                    snooze_open: false,
+                    icon: Icon::BellRing,
+                },
+            ),
             Action::OpenSnooze => self.card_action(CardAction::OpenSnooze),
             Action::Done => self.card_action(CardAction::Done),
-            Action::ShowInfo => self.enqueue("core", "info".into(), Card::success("壓力測試通知", Some("第二行說明".into()))),
+            Action::ShowInfo => self.enqueue(
+                "core",
+                "info".into(),
+                Card::success("壓力測試通知", Some("第二行說明".into())),
+            ),
             Action::Grab => {
-                self.pet.input(Input::PointerDown { x: self.pet.x, y: self.pet.y - 10.0 * s }, now, &env);
+                self.pet.input(
+                    Input::PointerDown {
+                        x: self.pet.x,
+                        y: self.pet.y - 10.0 * s,
+                    },
+                    now,
+                    &env,
+                );
             }
             Action::Drag => {
-                self.pet.input(Input::PointerMove { x: self.pet.x + 120.0 * s, y: self.pet.y - 200.0 * s }, now, &env);
+                self.pet.input(
+                    Input::PointerMove {
+                        x: self.pet.x + 120.0 * s,
+                        y: self.pet.y - 200.0 * s,
+                    },
+                    now,
+                    &env,
+                );
             }
             Action::Release => {
                 self.pet.input(Input::PointerUp, now, &env);
@@ -1873,7 +2404,10 @@ impl App {
 
     /// 卡片、泡泡、選單的配色：設定選的深淺色＋這隻桌寵的強調色。
     fn refresh_palette(&mut self) {
-        self.palette = theme::with_accent(theme::current(self.config.color_scheme), self.pack.accent.as_deref());
+        self.palette = theme::with_accent(
+            theme::current(self.config.color_scheme),
+            self.pack.accent.as_deref(),
+        );
     }
 
     fn config_changed(&mut self, new: Config, now: f64) {
@@ -1881,16 +2415,30 @@ impl App {
         // 剛幫現在這隻取了（新）名字：開心一下、報上名字。清掉名字不用講。
         let id = &self.pack.id;
         if old.pet == self.config.pet
-            && let Some(name) = self.config.given_name(id).filter(|n| old.given_name(id) != Some(*n))
+            && let Some(name) = self
+                .config
+                .given_name(id)
+                .filter(|n| old.given_name(id) != Some(*n))
         {
             let text = chatter::named_line(name);
             self.pet.cheer(now);
             if self.config.talk != Talk::Never {
-                self.say(Say { text, emote: Some(Emote::Hearts), secs: NAMED_SAY_SECS, reply: true }, now);
+                self.say(
+                    Say {
+                        text,
+                        emote: Some(Emote::Hearts),
+                        secs: NAMED_SAY_SECS,
+                        reply: true,
+                    },
+                    now,
+                );
             }
         }
         if old.features != self.config.features {
-            for id in self.modules.sync(&enabled_modules(&self.config), make_module) {
+            for id in self
+                .modules
+                .sync(&enabled_modules(&self.config), make_module)
+            {
                 self.cards.retain(|q| q.owner != id);
             }
             log!("modules now {:?}", self.modules.ids());
@@ -1915,7 +2463,10 @@ impl App {
             idle_input_secs: idle_input_secs(),
             talk: self.config.talk,
             workday: self.is_workday(clock.date()),
-            can_speak: !self.hidden && self.cards.is_empty() && self.transition.is_none() && self.soak.is_none(),
+            can_speak: !self.hidden
+                && self.cards.is_empty()
+                && self.transition.is_none()
+                && self.soak.is_none(),
             asleep: self.pet.state() == states::SLEEP,
             name: self.config.given_name(&self.pack.id).map(str::to_owned),
             user_name: self.config.user_name().map(str::to_owned),
@@ -1929,7 +2480,9 @@ impl App {
         {
             return w;
         }
-        let overrides = petkit::reminders::ReminderFile::load(&paths::reminders_file()).map(|f| f.day_overrides).unwrap_or_default();
+        let overrides = petkit::reminders::ReminderFile::load(&paths::reminders_file())
+            .map(|f| f.day_overrides)
+            .unwrap_or_default();
         let (calendar, _) = petkit::holidays::load_calendar(&paths::holiday_cache_dir(), overrides);
         let w = calendar.is_workday(date);
         self.workday = Some((date, w));
@@ -1940,7 +2493,11 @@ impl App {
     fn count_day(&mut self, now: f64) {
         if !self.hidden && idle_input_secs() < PRESENT_IDLE_SECS {
             let today = local_now().date();
-            let c = self.companions.pets.entry(self.pack.id.clone()).or_default();
+            let c = self
+                .companions
+                .pets
+                .entry(self.pack.id.clone())
+                .or_default();
             if c.visit(today) {
                 let days = c.days;
                 log!("days together with {}: {days}", self.pack.id);
@@ -1953,16 +2510,31 @@ impl App {
             }
         }
         // 專注中先留著，專注完再慶祝（不然 `say` 會把它擋掉，那一天的紀念就沒了）。
-        let free = self.speech.is_none() && self.cards.is_empty() && !self.hidden && self.transition.is_none() && now >= MILESTONE_AFTER_SECS && !self.focusing();
+        let free = self.speech.is_none()
+            && self.cards.is_empty()
+            && !self.hidden
+            && self.transition.is_none()
+            && now >= MILESTONE_AFTER_SECS
+            && !self.focusing();
         if !free {
             return;
         }
-        let Some((_, days)) = self.pending_milestone.take() else { return };
+        let Some((_, days)) = self.pending_milestone.take() else {
+            return;
+        };
         self.pet.cheer(now);
         self.effects.spawn(Emote::Star, now);
         if self.config.talk != Talk::Never {
             let text = chatter::milestone_line(days, self.config.given_name(&self.pack.id));
-            self.say(Say { text, emote: Some(Emote::Hearts), secs: MILESTONE_SAY_SECS, reply: false }, now);
+            self.say(
+                Say {
+                    text,
+                    emote: Some(Emote::Hearts),
+                    secs: MILESTONE_SAY_SECS,
+                    reply: false,
+                },
+                now,
+            );
         }
     }
 
@@ -1978,12 +2550,19 @@ impl App {
         if let Some(e) = say.emote {
             self.effects.spawn(e, now);
         }
-        self.speech = Some(Speech { text: say.text, until: now + say.secs as f64 });
+        self.speech = Some(Speech {
+            text: say.text,
+            until: now + say.secs as f64,
+        });
     }
 
     fn update_cards(&mut self, now: f64) -> Result<()> {
         // 提醒卡優先：卡片一來，講到一半的話直接收掉；講完了也收掉。
-        if self.speech.as_ref().is_some_and(|s| !self.cards.is_empty() || now >= s.until) {
+        if self
+            .speech
+            .as_ref()
+            .is_some_and(|s| !self.cards.is_empty() || now >= s.until)
+        {
             self.speech = None;
             self.pet.stop_talking(now);
         }
@@ -2003,7 +2582,13 @@ impl App {
             Some(q) => {
                 if !self.shown_card || self.bubble.card() != Some(&q.card) {
                     let animate = !self.shown_card;
-                    if animate && self.config.reminder_sound && matches!(q.card, Card::Reminder { .. } | Card::Nudge { .. } | Card::Missed { .. }) {
+                    if animate
+                        && self.config.reminder_sound
+                        && matches!(
+                            q.card,
+                            Card::Reminder { .. } | Card::Nudge { .. } | Card::Missed { .. }
+                        )
+                    {
                         play_reminder_sound();
                     }
                     self.bubble.show(q.card.clone(), now, animate);
@@ -2014,11 +2599,14 @@ impl App {
                 self.shown_card = false;
                 match &self.speech {
                     Some(s) => {
-                        let card = Card::Speech { text: s.text.clone() };
+                        let card = Card::Speech {
+                            text: s.text.clone(),
+                        };
                         if self.bubble.card() != Some(&card) {
                             self.bubble.show(card, now, true);
                         }
-                        self.bubble.set_fade(((s.until - now) / SPEECH_FADE_SECS) as f32);
+                        self.bubble
+                            .set_fade(((s.until - now) / SPEECH_FADE_SECS) as f32);
                     }
                     None => {
                         self.bubble.hide();
@@ -2027,7 +2615,10 @@ impl App {
                 }
             }
         }
-        let attention = self.cards.front().is_some_and(|q| matches!(q.card, Card::Reminder { .. } | Card::Missed { .. }));
+        let attention = self
+            .cards
+            .front()
+            .is_some_and(|q| matches!(q.card, Card::Reminder { .. } | Card::Missed { .. }));
         self.pet.set_attention(attention, now);
 
         let work = work_area(monitor_at(self.pet.x, self.pet.y));
@@ -2036,30 +2627,54 @@ impl App {
             let inset = HIDDEN_CARD_INSET_DIP * self.dpi_scale();
             // 卡片以這個點置中：往左退半張卡，右邊才會跟下緣一樣留出距離。
             let half_card = bubble::CARD_WIDTH_DIP * self.dpi_scale() / 2.0;
-            Vector2 { X: work.right as f32 - inset - half_card, Y: work.bottom as f32 - inset }
+            Vector2 {
+                X: work.right as f32 - inset - half_card,
+                Y: work.bottom as f32 - inset,
+            }
         } else {
-            Vector2 { X: self.pet.x, Y: self.pet.y - self.sprites.base_height }
+            Vector2 {
+                X: self.pet.x,
+                Y: self.pet.y - self.sprites.base_height,
+            }
         };
-        self.bubble.update(now, head, work, self.dpi_scale(), &self.palette)
+        self.bubble
+            .update(now, head, work, self.dpi_scale(), &self.palette)
     }
 
     fn begin_switch(&mut self, target: String, save: bool) {
         if self.transition.as_ref().is_some_and(|t| t.target == target) {
             return;
         }
-        self.transition = Some(Transition { phase: Phase::Out, start: self.now(), target, save });
+        self.transition = Some(Transition {
+            phase: Phase::Out,
+            start: self.now(),
+            target,
+            save,
+        });
     }
 
     /// 換桌寵的過場；回傳這一格桌寵的大小比例（0～1）。
     fn advance_transition(&mut self, now: f64) -> Result<f32> {
-        let Some(t) = &self.transition else { return Ok(1.0) };
-        let p = ((now - t.start) / if t.phase == Phase::Out { SWITCH_OUT_SECS } else { SWITCH_IN_SECS }) as f32;
+        let Some(t) = &self.transition else {
+            return Ok(1.0);
+        };
+        let p = ((now - t.start)
+            / if t.phase == Phase::Out {
+                SWITCH_OUT_SECS
+            } else {
+                SWITCH_IN_SECS
+            }) as f32;
         match t.phase {
             Phase::Out if p < 1.0 => Ok(1.0 - theme::ease(theme::MOTION_EASE_IN, p)),
             Phase::Out => {
                 let (target, save) = (t.target.clone(), t.save);
                 self.swap_pet(&target, save)?;
-                self.transition = Some(Transition { phase: Phase::In, start: now, target, save });
+                self.transition = Some(Transition {
+                    phase: Phase::In,
+                    start: now,
+                    target,
+                    save,
+                });
                 Ok(0.0)
             }
             Phase::In if p < 1.0 => Ok(theme::ease(theme::MOTION_SPRING, p).max(0.0)),
@@ -2074,7 +2689,11 @@ impl App {
         let pack = match pack::load(&self.pets_dir.join(id)) {
             Ok(p) => p,
             Err(e) => {
-                self.enqueue("core", "info".into(), Card::warning("這隻桌寵讀不進來", Some(e.to_string())));
+                self.enqueue(
+                    "core",
+                    "info".into(),
+                    Card::warning("這隻桌寵讀不進來", Some(e.to_string())),
+                );
                 return Ok(());
             }
         };
@@ -2086,8 +2705,13 @@ impl App {
         let (pack, sprites) = match self.wic.load_pet(&pack, &target, height, dpi) {
             Ok(s) => (pack, s),
             Err(e) => {
-                self.enqueue("core", "info".into(), Card::warning("這隻桌寵的圖讀不進來", Some(e.message())));
-                let old = pack::load(&self.pack.dir).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
+                self.enqueue(
+                    "core",
+                    "info".into(),
+                    Card::warning("這隻桌寵的圖讀不進來", Some(e.message())),
+                );
+                let old =
+                    pack::load(&self.pack.dir).map_err(|e| Error::new(E_FAIL, e.to_string()))?;
                 let sprites = self.wic.load_pet(&old, &target, height, dpi)?;
                 (old, sprites)
             }
@@ -2117,7 +2741,14 @@ impl App {
                 None => (states::IDLE.to_owned(), false),
             };
             let variant = self.pick_variant(&source);
-            self.anim = Anim { state, source, own, variant, frame: 0, elapsed_ms: 0.0 };
+            self.anim = Anim {
+                state,
+                source,
+                own,
+                variant,
+                frame: 0,
+                elapsed_ms: 0.0,
+            };
             return;
         }
         let loaded = &self.sprites.states[&self.anim.source];
@@ -2169,7 +2800,12 @@ impl App {
             return Ok(());
         }
         self.sprites.states.clear();
-        self.sprites = self.wic.load_pet(&self.pack, &self.renderer.canvas.target(), px_height(&self.config, dpi), dpi)?;
+        self.sprites = self.wic.load_pet(
+            &self.pack,
+            &self.renderer.canvas.target(),
+            px_height(&self.config, dpi),
+            dpi,
+        )?;
         self.anim.state = "";
         log!("dpi changed to {dpi}; sprites reloaded");
         self.resize_window()
@@ -2190,7 +2826,9 @@ impl App {
             cards: self.saved_cards(),
             rest_at: self.rest_at,
         };
-        let result = serde_json::to_vec_pretty(&state).map_err(std::io::Error::other).and_then(|b| write_atomic(&paths::state_file(), &b));
+        let result = serde_json::to_vec_pretty(&state)
+            .map_err(std::io::Error::other)
+            .and_then(|b| write_atomic(&paths::state_file(), &b));
         if let Err(e) = result {
             log!("save state failed: {e}");
         }
@@ -2208,14 +2846,24 @@ impl App {
                 if let Card::Reminder { snooze_open, .. } = &mut card {
                     *snooze_open = false;
                 }
-                SavedCard { owner: q.owner.to_owned(), key: q.key.clone(), card }
+                SavedCard {
+                    owner: q.owner.to_owned(),
+                    key: q.key.clone(),
+                    card,
+                }
             })
             .collect()
     }
 
     fn state_marks(&self) -> StateMarks {
         let c = self.chatter.saved(self.now(), local_now());
-        StateMarks { cards: self.saved_cards(), greeted_on: c.greeted_on, moments_day: c.moments_day, moments_done: c.moments_done, milestone: self.pending_milestone }
+        StateMarks {
+            cards: self.saved_cards(),
+            greeted_on: c.greeted_on,
+            moments_day: c.moments_day,
+            moments_done: c.moments_done,
+            milestone: self.pending_milestone,
+        }
     }
 
     /// 剛開起來：上次沒按掉的卡交回給丟出它的功能，它說還要（可能換成最新的內容）才再跳。
@@ -2237,8 +2885,17 @@ impl App {
                 continue;
             }
             let (owner, key, old) = (q.owner, q.key.clone(), q.card.clone());
-            let Some((_, mut card)) = self.restore_card(owner, &key, old.clone(), now) else { continue };
-            if let (Card::Reminder { snooze_open: was_open, .. }, Card::Reminder { snooze_open, .. }) = (&old, &mut card) {
+            let Some((_, mut card)) = self.restore_card(owner, &key, old.clone(), now) else {
+                continue;
+            };
+            if let (
+                Card::Reminder {
+                    snooze_open: was_open,
+                    ..
+                },
+                Card::Reminder { snooze_open, .. },
+            ) = (&old, &mut card)
+            {
                 *snooze_open = *was_open;
             }
             self.cards[i].card = card;
@@ -2246,7 +2903,13 @@ impl App {
     }
 
     /// 還沒按掉的卡交回給丟出它的功能（核心自己的卡在這裡處理）。
-    fn restore_card(&mut self, owner: &str, key: &str, card: Card, now: chrono::NaiveDateTime) -> Option<(&'static str, Card)> {
+    fn restore_card(
+        &mut self,
+        owner: &str,
+        key: &str,
+        card: Card,
+        now: chrono::NaiveDateTime,
+    ) -> Option<(&'static str, Card)> {
         if owner == CORE_OWNER {
             restore_core_card(key, card, self.rest_at, now).map(|c| (CORE_OWNER, c))
         } else {
@@ -2262,17 +2925,56 @@ mod tests {
     #[test]
     fn state_file_keeps_old_fields_and_round_trips_unhandled_cards() {
         // 舊版只存了位置和打招呼的日子：照樣讀得懂。
-        let old: RuntimeState = serde_json::from_str(r#"{ "position": [1, 2], "greeted_on": "2026-11-24" }"#).unwrap();
-        assert_eq!((old.position, old.chatter.greeted_on), (Some((1, 2)), chrono::NaiveDate::from_ymd_opt(2026, 11, 24)));
-        let card = Card::Reminder { title: "休息一下".into(), time: "15:20".into(), snooze_open: false, icon: REST_CARD_ICON };
-        let state = RuntimeState { cards: vec![SavedCard { owner: CORE_OWNER.into(), key: REST_CARD_KEY.into(), card: card.clone() }], ..old };
-        let back: RuntimeState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        let old: RuntimeState =
+            serde_json::from_str(r#"{ "position": [1, 2], "greeted_on": "2026-11-24" }"#).unwrap();
+        assert_eq!(
+            (old.position, old.chatter.greeted_on),
+            (Some((1, 2)), chrono::NaiveDate::from_ymd_opt(2026, 11, 24))
+        );
+        let card = Card::Reminder {
+            title: "休息一下".into(),
+            time: "15:20".into(),
+            snooze_open: false,
+            icon: REST_CARD_ICON,
+        };
+        let state = RuntimeState {
+            cards: vec![SavedCard {
+                owner: CORE_OWNER.into(),
+                key: REST_CARD_KEY.into(),
+                card: card.clone(),
+            }],
+            ..old
+        };
+        let back: RuntimeState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
         assert_eq!(back.cards, state.cards);
-        let day = |d: u32, h: u32, m: u32| chrono::NaiveDate::from_ymd_opt(2026, 11, d).unwrap().and_hms_opt(h, m, 0).unwrap();
+        let day = |d: u32, h: u32, m: u32| {
+            chrono::NaiveDate::from_ymd_opt(2026, 11, d)
+                .unwrap()
+                .and_hms_opt(h, m, 0)
+                .unwrap()
+        };
         let rest_at = Some(day(24, 15, 20));
-        assert_eq!(restore_core_card(REST_CARD_KEY, card.clone(), rest_at, day(24, 16, 0)), Some(card.clone()), "an unhandled rest reminder comes back");
-        assert_eq!(restore_core_card("test", card.clone(), rest_at, day(24, 16, 0)), None, "the sample card does not");
-        let next_day = Card::Reminder { title: "休息一下".into(), time: "11/24 15:20".into(), snooze_open: false, icon: REST_CARD_ICON };
-        assert_eq!(restore_core_card(REST_CARD_KEY, card, rest_at, day(25, 8, 0)), Some(next_day), "seen the next day, it carries the date");
+        assert_eq!(
+            restore_core_card(REST_CARD_KEY, card.clone(), rest_at, day(24, 16, 0)),
+            Some(card.clone()),
+            "an unhandled rest reminder comes back"
+        );
+        assert_eq!(
+            restore_core_card("test", card.clone(), rest_at, day(24, 16, 0)),
+            None,
+            "the sample card does not"
+        );
+        let next_day = Card::Reminder {
+            title: "休息一下".into(),
+            time: "11/24 15:20".into(),
+            snooze_open: false,
+            icon: REST_CARD_ICON,
+        };
+        assert_eq!(
+            restore_core_card(REST_CARD_KEY, card, rest_at, day(25, 8, 0)),
+            Some(next_day),
+            "seen the next day, it carries the date"
+        );
     }
 }

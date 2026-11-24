@@ -10,10 +10,14 @@ use crate::config::write_atomic;
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum UpdateStatus {
     Checking,
-    Downloading { version: String },
+    Downloading {
+        version: String,
+    },
     UpToDate,
     /// 新版下載解好了，等使用者按「現在更新」（或下次啟動時換上）。
-    Ready { version: String },
+    Ready {
+        version: String,
+    },
     Failed,
     /// 從編譯資料夾跑的開發版不會被正式版蓋掉。
     Unavailable,
@@ -26,6 +30,11 @@ impl UpdateStatus {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        write_atomic(path, serde_json::to_string(self).map_err(io::Error::other)?.as_bytes())
+        write_atomic(
+            path,
+            serde_json::to_string(self)
+                .map_err(io::Error::other)?
+                .as_bytes(),
+        )
     }
 }

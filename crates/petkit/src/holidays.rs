@@ -67,9 +67,15 @@ pub fn parse_dgpa_csv(text: &str) -> Result<Vec<CalendarDay>, ParseError> {
         if line.is_empty() || i == 0 && !line.starts_with(|c: char| c.is_ascii_digit()) {
             continue;
         }
-        let bad = || ParseError { line: i + 1, content: line.to_owned() };
+        let bad = || ParseError {
+            line: i + 1,
+            content: line.to_owned(),
+        };
         let mut cols = line.splitn(4, ',');
-        let date = cols.next().and_then(|d| NaiveDate::parse_from_str(d.trim(), DGPA_DATE_FORMAT).ok()).ok_or_else(bad)?;
+        let date = cols
+            .next()
+            .and_then(|d| NaiveDate::parse_from_str(d.trim(), DGPA_DATE_FORMAT).ok())
+            .ok_or_else(bad)?;
         let _weekday = cols.next().ok_or_else(bad)?;
         let kind = match cols.next().map(str::trim) {
             Some(DGPA_WORKDAY) => DayKind::Workday,
@@ -111,16 +117,31 @@ impl Calendar {
     /// 所以從距離最近的一對開始配，一個節日只配一天；附近找不到的（節日在還沒公布的明年）維持「補假」。
     fn name_makeup_days(&mut self) {
         let is_weekend = |d: &CalendarDay| weekend_rule(d.date) == DayKind::Holiday;
-        let makeup: Vec<NaiveDate> = self.official.values().filter(|d| d.kind == DayKind::Holiday && !is_weekend(d) && d.note == MAKEUP_NOTE).map(|d| d.date).collect();
+        let makeup: Vec<NaiveDate> = self
+            .official
+            .values()
+            .filter(|d| d.kind == DayKind::Holiday && !is_weekend(d) && d.note == MAKEUP_NOTE)
+            .map(|d| d.date)
+            .collect();
         let festivals: Vec<(NaiveDate, String)> = self
             .official
             .values()
-            .filter(|d| d.kind == DayKind::Holiday && is_weekend(d) && !d.note.is_empty() && !d.note.ends_with(MAKEUP_NOTE))
+            .filter(|d| {
+                d.kind == DayKind::Holiday
+                    && is_weekend(d)
+                    && !d.note.is_empty()
+                    && !d.note.ends_with(MAKEUP_NOTE)
+            })
             .map(|d| (d.date, d.note.clone()))
             .collect();
         let mut pairs: Vec<(i64, NaiveDate, usize)> = makeup
             .iter()
-            .flat_map(|m| festivals.iter().enumerate().map(move |(i, (f, _))| ((*m - *f).num_days().abs(), *m, i)))
+            .flat_map(|m| {
+                festivals
+                    .iter()
+                    .enumerate()
+                    .map(move |(i, (f, _))| ((*m - *f).num_days().abs(), *m, i))
+            })
             .filter(|(gap, ..)| *gap <= MAKEUP_MAX_GAP_DAYS)
             .collect();
         pairs.sort();
@@ -150,13 +171,18 @@ impl Calendar {
         if let Some(k) = self.overrides.get(&date) {
             return *k;
         }
-        self.official.get(&date).map_or_else(|| weekend_rule(date), |d| d.kind)
+        self.official
+            .get(&date)
+            .map_or_else(|| weekend_rule(date), |d| d.kind)
     }
 
     /// `from` 當天起，官方日曆跟「週末放假」不一樣的日子（平日放的國定假日、要上班的週末），照日期排。
     /// 設定程式列給使用者一天一天開關（關掉 = 覆寫成週末規則那樣）。
     pub fn official_changes(&self, from: NaiveDate) -> impl Iterator<Item = &CalendarDay> {
-        self.official.range(from..).map(|(_, d)| d).filter(|d| d.kind != weekend_rule(d.date))
+        self.official
+            .range(from..)
+            .map(|(_, d)| d)
+            .filter(|d| d.kind != weekend_rule(d.date))
     }
 
     pub fn is_workday(&self, date: NaiveDate) -> bool {
@@ -165,28 +191,42 @@ impl Calendar {
 
     /// 這一天放假的原因（國定假日名稱）；週末或沒有註記回傳 `None`。
     pub fn note(&self, date: NaiveDate) -> Option<&str> {
-        self.official.get(&date).map(|d| d.note.as_str()).filter(|n| !n.is_empty())
+        self.official
+            .get(&date)
+            .map(|d| d.note.as_str())
+            .filter(|n| !n.is_empty())
     }
 
     /// `date` 當天或之後的第一個上班日。
     pub fn workday_on_or_after(&self, date: NaiveDate) -> Option<NaiveDate> {
-        (0..MAX_WORKDAY_SEARCH_DAYS).filter_map(|i| date.checked_add_days(Days::new(i))).find(|d| self.is_workday(*d))
+        (0..MAX_WORKDAY_SEARCH_DAYS)
+            .filter_map(|i| date.checked_add_days(Days::new(i)))
+            .find(|d| self.is_workday(*d))
     }
 
     /// `date` 當天或之前的最後一個上班日。
     pub fn workday_on_or_before(&self, date: NaiveDate) -> Option<NaiveDate> {
-        (0..MAX_WORKDAY_SEARCH_DAYS).filter_map(|i| date.checked_sub_days(Days::new(i))).find(|d| self.is_workday(*d))
+        (0..MAX_WORKDAY_SEARCH_DAYS)
+            .filter_map(|i| date.checked_sub_days(Days::new(i)))
+            .find(|d| self.is_workday(*d))
     }
 }
 
 /// 內建日曆 ＋ 下載回來的較新版本（`<cache_dir>/<西元年>.csv`，同一年以下載的為準）＋ 手動覆寫。
 /// 回傳日曆與讀不懂的檔案清單（給呼叫端寫 log；壞掉的那一年退回週末規則）。
-pub fn load_calendar(cache_dir: &Path, overrides: BTreeMap<NaiveDate, DayKind>) -> (Calendar, Vec<String>) {
-    let mut years: BTreeMap<i32, String> = BUNDLED.iter().map(|(y, t)| (*y, t.to_string())).collect();
+pub fn load_calendar(
+    cache_dir: &Path,
+    overrides: BTreeMap<NaiveDate, DayKind>,
+) -> (Calendar, Vec<String>) {
+    let mut years: BTreeMap<i32, String> =
+        BUNDLED.iter().map(|(y, t)| (*y, t.to_string())).collect();
     if let Ok(entries) = fs::read_dir(cache_dir) {
         for e in entries.flatten() {
             let path = e.path();
-            let year = path.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<i32>().ok());
+            let year = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse::<i32>().ok());
             if let (Some(year), Ok(text)) = (year, fs::read_to_string(&path)) {
                 years.insert(year, text);
             }
@@ -218,7 +258,14 @@ mod tests {
     fn parses_official_csv_with_bom_and_crlf() {
         let days = parse_dgpa_csv(SAMPLE).unwrap();
         assert_eq!(days.len(), 3);
-        assert_eq!(days[0], CalendarDay { date: d(2023, 1, 2), kind: DayKind::Holiday, note: "補假".into() });
+        assert_eq!(
+            days[0],
+            CalendarDay {
+                date: d(2023, 1, 2),
+                kind: DayKind::Holiday,
+                note: "補假".into()
+            }
+        );
         assert_eq!(days[1].kind, DayKind::Workday);
     }
 
@@ -246,7 +293,11 @@ mod tests {
     fn lists_only_days_that_differ_from_the_weekend_rule_from_a_date_on() {
         let mut cal = Calendar::default();
         cal.add_official(parse_dgpa_csv(SAMPLE).unwrap());
-        let dates = |from| cal.official_changes(from).map(|d| d.date).collect::<Vec<_>>();
+        let dates = |from| {
+            cal.official_changes(from)
+                .map(|d| d.date)
+                .collect::<Vec<_>>()
+        };
         // 1/8 是本來就放的星期日，不列。
         assert_eq!(dates(d(2023, 1, 1)), vec![d(2023, 1, 2), d(2023, 1, 7)]);
         assert_eq!(dates(d(2023, 1, 3)), vec![d(2023, 1, 7)]);
@@ -259,11 +310,26 @@ mod tests {
             cal.add_official(parse_dgpa_csv(text).unwrap());
         }
         let note = |y, m, day| cal.note(d(y, m, day)).unwrap_or_default().to_owned();
-        assert_eq!(note(2026, 2, 20), "小年夜補假", "小年夜 falls on a Sunday five days before");
-        assert_eq!((note(2026, 4, 3), note(2026, 4, 6)), ("兒童節補假".into(), "清明節補假".into()), "Saturday → Friday, Sunday → Monday");
-        assert_eq!((note(2027, 2, 9), note(2027, 2, 10)), ("春節補假".into(), "春節補假".into()));
+        assert_eq!(
+            note(2026, 2, 20),
+            "小年夜補假",
+            "小年夜 falls on a Sunday five days before"
+        );
+        assert_eq!(
+            (note(2026, 4, 3), note(2026, 4, 6)),
+            ("兒童節補假".into(), "清明節補假".into()),
+            "Saturday → Friday, Sunday → Monday"
+        );
+        assert_eq!(
+            (note(2027, 2, 9), note(2027, 2, 10)),
+            ("春節補假".into(), "春節補假".into())
+        );
         assert_eq!(note(2027, 12, 24), "行憲紀念日補假");
-        assert_eq!(note(2027, 12, 31), "補假", "next year's New Year's Day is not published yet");
+        assert_eq!(
+            note(2027, 12, 31),
+            "補假",
+            "next year's New Year's Day is not published yet"
+        );
     }
 
     #[test]

@@ -57,7 +57,17 @@ impl Countdown {
         let canvas = Canvas::new(gfx)?;
         let brush = unsafe { canvas.rt.CreateSolidColorBrush(&TRANSPARENT, None)? };
         let icons = Icons::new(&canvas.rt);
-        Ok(Self { hwnd, canvas, gfx: gfx.clone(), brush, icons, format: None, last: None, opacity: 0.0, visible: false })
+        Ok(Self {
+            hwnd,
+            canvas,
+            gfx: gfx.clone(),
+            brush,
+            icons,
+            format: None,
+            last: None,
+            opacity: 0.0,
+            visible: false,
+        })
     }
 
     pub fn hwnd(&self) -> HWND {
@@ -71,7 +81,15 @@ impl Countdown {
             return Ok(f.clone());
         }
         let f = unsafe {
-            let f = self.gfx.dwrite.CreateTextFormat(&HSTRING::from(theme::FONT_FAMILY), None, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, theme::FONT_SIZE_BODY * s, &HSTRING::from(LOCALE))?;
+            let f = self.gfx.dwrite.CreateTextFormat(
+                &HSTRING::from(theme::FONT_FAMILY),
+                None,
+                DWRITE_FONT_WEIGHT_BOLD,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                theme::FONT_SIZE_BODY * s,
+                &HSTRING::from(LOCALE),
+            )?;
             f.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
             f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
@@ -83,7 +101,13 @@ impl Countdown {
     }
 
     /// 每一格呼叫：`shown` 是這一格要不要顯示、顯示什麼（`None` 就淡出收起來）。
-    pub fn update(&mut self, shown: Option<Shown>, dt: f32, s: f32, palette: &Palette) -> Result<()> {
+    pub fn update(
+        &mut self,
+        shown: Option<Shown>,
+        dt: f32,
+        s: f32,
+        palette: &Palette,
+    ) -> Result<()> {
         self.opacity = fade(self.opacity, shown.is_some(), dt);
         if self.opacity <= 0.0 {
             self.last = None;
@@ -95,8 +119,14 @@ impl Countdown {
             return Ok(());
         }
         // 淡出時停在最後畫的那個樣子。
-        let Some(shown) = shown.or_else(|| self.last.as_ref().map(|(sh, _)| sh.clone())) else { return Ok(()) };
-        if self.last.as_ref().is_some_and(|(sh, o)| *sh == shown && (*o - self.opacity).abs() < 1e-3) {
+        let Some(shown) = shown.or_else(|| self.last.as_ref().map(|(sh, _)| sh.clone())) else {
+            return Ok(());
+        };
+        if self
+            .last
+            .as_ref()
+            .is_some_and(|(sh, o)| *sh == shown && (*o - self.opacity).abs() < 1e-3)
+        {
             return Ok(());
         }
         let origin = self.paint(&shown, s, palette)?;
@@ -116,7 +146,10 @@ impl Countdown {
         let format = self.format(s)?;
         let text_w = unsafe {
             let wide: Vec<u16> = WIDEST.encode_utf16().collect();
-            let layout = self.gfx.dwrite.CreateTextLayout(&wide, &format, f32::MAX, f32::MAX)?;
+            let layout = self
+                .gfx
+                .dwrite
+                .CreateTextLayout(&wide, &format, f32::MAX, f32::MAX)?;
             let mut m = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut m)?;
             m.width.ceil()
@@ -124,10 +157,30 @@ impl Countdown {
         let (h, pad, icon, gap) = (HEIGHT_DIP * s, PAD_DIP * s, ICON_DIP * s, GAP_DIP * s);
         let margin = (theme::SHADOW_POPUP_BLUR * s).ceil();
         let pill_w = pad + icon + gap + text_w + pad;
-        let pill = D2D_RECT_F { left: margin, top: margin, right: margin + pill_w, bottom: margin + h };
-        self.canvas.ensure_size((pill.right + margin).ceil() as i32, (pill.bottom + margin).ceil() as i32)?;
-        let tint = if shown.focusing { palette.accent } else { palette.success };
-        let doc = self.icons.doc(if shown.focusing { Icon::Tomato } else { Icon::Cup }, tint, icon);
+        let pill = D2D_RECT_F {
+            left: margin,
+            top: margin,
+            right: margin + pill_w,
+            bottom: margin + h,
+        };
+        self.canvas.ensure_size(
+            (pill.right + margin).ceil() as i32,
+            (pill.bottom + margin).ceil() as i32,
+        )?;
+        let tint = if shown.focusing {
+            palette.accent
+        } else {
+            palette.success
+        };
+        let doc = self.icons.doc(
+            if shown.focusing {
+                Icon::Tomato
+            } else {
+                Icon::Cup
+            },
+            tint,
+            icon,
+        );
         let rt = &self.canvas.rt;
         let brush = &self.brush;
         let radius = h / 2.0;
@@ -135,7 +188,11 @@ impl Countdown {
             rt.BeginDraw();
             rt.Clear(Some(&TRANSPARENT));
             popup_shadow(rt, brush, pill, radius, s * 0.5, palette);
-            let rounded = D2D1_ROUNDED_RECT { rect: pill, radiusX: radius, radiusY: radius };
+            let rounded = D2D1_ROUNDED_RECT {
+                rect: pill,
+                radiusX: radius,
+                radiusY: radius,
+            };
             brush.SetColor(&palette.surface_raised.d2d());
             rt.FillRoundedRectangle(&rounded, brush);
             brush.SetColor(&tint.with_alpha(TINT_ALPHA));
@@ -143,13 +200,28 @@ impl Countdown {
             brush.SetColor(&tint.d2d());
             rt.DrawRoundedRectangle(&rounded, brush, BORDER_DIP * s, None);
             if let Some(doc) = &doc {
-                self.icons.draw(doc, &Matrix3x2::translation(pill.left + pad, pill.top + (h - icon) / 2.0));
+                self.icons.draw(
+                    doc,
+                    &Matrix3x2::translation(pill.left + pad, pill.top + (h - icon) / 2.0),
+                );
                 rt.SetTransform(&Matrix3x2::identity());
             }
             let wide: Vec<u16> = shown.text.encode_utf16().collect();
-            let text_rect = D2D_RECT_F { left: pill.left + pad + icon + gap, top: pill.top, right: pill.right - pad, bottom: pill.bottom };
+            let text_rect = D2D_RECT_F {
+                left: pill.left + pad + icon + gap,
+                top: pill.top,
+                right: pill.right - pad,
+                bottom: pill.bottom,
+            };
             brush.SetColor(&palette.text.d2d());
-            rt.DrawText(&wide, &format, &text_rect, brush, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+            rt.DrawText(
+                &wide,
+                &format,
+                &text_rect,
+                brush,
+                D2D1_DRAW_TEXT_OPTIONS_NONE,
+                DWRITE_MEASURING_MODE_NATURAL,
+            );
             rt.EndDraw(None, None)?;
         }
         let x = (shown.head.X - margin - pill_w / 2.0).round() as i32;
@@ -177,7 +249,11 @@ pub fn clock_text(secs: i64) -> String {
 /// 淡入淡出推進一格：要顯示就往 1 走、到了停住；不顯示就往 0 走。
 fn fade(opacity: f32, showing: bool, dt: f32) -> f32 {
     let step = dt / FADE_SECS;
-    if showing { (opacity + step).min(1.0) } else { (opacity - step).max(0.0) }
+    if showing {
+        (opacity + step).min(1.0)
+    } else {
+        (opacity - step).max(0.0)
+    }
 }
 
 #[cfg(test)]
@@ -192,7 +268,10 @@ mod tests {
             o = fade(o, true, 0.035);
             seen.push(o);
         }
-        assert!(seen[10..].iter().all(|&o| o == 1.0), "once faded in it stays at full opacity: {seen:?}");
+        assert!(
+            seen[10..].iter().all(|&o| o == 1.0),
+            "once faded in it stays at full opacity: {seen:?}"
+        );
         assert_eq!(fade(1.0, false, 1.0), 0.0);
         assert_eq!(clock_text(1498), "24:58");
     }

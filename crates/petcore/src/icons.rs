@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 
 use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_F;
-use windows::Win32::Graphics::Direct2D::{ID2D1DeviceContext5, ID2D1RenderTarget, ID2D1SvgDocument};
+use windows::Win32::Graphics::Direct2D::{
+    ID2D1DeviceContext5, ID2D1RenderTarget, ID2D1SvgDocument,
+};
 use windows::Win32::UI::Shell::SHCreateMemStream;
 use windows::core::Interface;
 use windows_numerics::Matrix3x2;
@@ -82,7 +84,10 @@ impl Icons {
         if target.is_none() {
             log!("Direct2D SVG unavailable; icons disabled");
         }
-        Self { target, docs: HashMap::new() }
+        Self {
+            target,
+            docs: HashMap::new(),
+        }
     }
 
     /// 換縮放比例時呼叫（舊大小的不會再用到）。
@@ -102,10 +107,20 @@ impl Icons {
             self.docs.clear();
         }
         // 原檔寫死 24×24 並用 currentColor 上色：改成填滿畫布、換成實際顏色。
-        let text = icon.svg().replace("currentColor", &format!("#{rgb:06x}")).replace("width=\"24\"", "width=\"100%\"").replace("height=\"24\"", "height=\"100%\"");
+        let text = icon
+            .svg()
+            .replace("currentColor", &format!("#{rgb:06x}"))
+            .replace("width=\"24\"", "width=\"100%\"")
+            .replace("height=\"24\"", "height=\"100%\"");
         let doc = unsafe {
             let stream = SHCreateMemStream(Some(text.as_bytes()))?;
-            target.CreateSvgDocument(&stream, D2D_SIZE_F { width: size, height: size })
+            target.CreateSvgDocument(
+                &stream,
+                D2D_SIZE_F {
+                    width: size,
+                    height: size,
+                },
+            )
         };
         match doc {
             Ok(doc) => {

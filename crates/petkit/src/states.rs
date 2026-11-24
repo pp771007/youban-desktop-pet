@@ -28,7 +28,10 @@ pub const ROLL: &str = "roll";
 pub const EAT: &str = "eat";
 
 /// 規範裡所有的狀態（設定程式驗證「補動作」的對象用）。
-pub const ALL: [&str; 18] = [IDLE, WALK, DRAG, FALL, SLEEP, NOTIFY, BLINK, HAPPY, SIT, LAND, YAWN, WAKE, TALK, HOP, LOOK, DOZE, CLIMB, DIZZY];
+pub const ALL: [&str; 18] = [
+    IDLE, WALK, DRAG, FALL, SLEEP, NOTIFY, BLINK, HAPPY, SIT, LAND, YAWN, WAKE, TALK, HOP, LOOK,
+    DOZE, CLIMB, DIZZY,
+];
 
 /// 缺圖時怎麼辦。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,8 +50,18 @@ pub struct StateDefaults {
     pub height_ratio: f32,
 }
 
-const fn d(fallback: Option<Fallback>, looping: bool, fps: f32, height_ratio: f32) -> StateDefaults {
-    StateDefaults { fallback, looping, fps, height_ratio }
+const fn d(
+    fallback: Option<Fallback>,
+    looping: bool,
+    fps: f32,
+    height_ratio: f32,
+) -> StateDefaults {
+    StateDefaults {
+        fallback,
+        looping,
+        fps,
+        height_ratio,
+    }
 }
 
 const TO_IDLE: Option<Fallback> = Some(Fallback::State(IDLE));

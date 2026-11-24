@@ -8,7 +8,9 @@ use std::io::Write;
 use petkit::config::write_atomic;
 use serde::Serialize;
 
-use windows::Win32::System::Threading::{GR_GDIOBJECTS, GR_USEROBJECTS, GetCurrentProcess, GetGuiResources, GetProcessHandleCount};
+use windows::Win32::System::Threading::{
+    GR_GDIOBJECTS, GR_USEROBJECTS, GetCurrentProcess, GetGuiResources, GetProcessHandleCount,
+};
 
 use crate::log;
 use crate::memwatch;
@@ -97,9 +99,26 @@ struct Report {
 impl Soak {
     pub fn new(duration_secs: u64, now: f64) -> Self {
         let only = std::env::var(ONLY_ENV).ok();
-        let script: Vec<Action> = SCRIPT.iter().copied().filter(|a| only.as_deref().is_none_or(|g| group(*a) == g)).collect();
-        let script = if script.is_empty() { SCRIPT.to_vec() } else { script };
-        Self { duration: duration_secs as f64, start: now, next_action: now + 1.0, next_sample: now, step: 0, samples: Vec::new(), script, actions_done: 0 }
+        let script: Vec<Action> = SCRIPT
+            .iter()
+            .copied()
+            .filter(|a| only.as_deref().is_none_or(|g| group(*a) == g))
+            .collect();
+        let script = if script.is_empty() {
+            SCRIPT.to_vec()
+        } else {
+            script
+        };
+        Self {
+            duration: duration_secs as f64,
+            start: now,
+            next_action: now + 1.0,
+            next_sample: now,
+            step: 0,
+            samples: Vec::new(),
+            script,
+            actions_done: 0,
+        }
     }
 
     pub fn finished(&self, now: f64) -> bool {
@@ -112,12 +131,22 @@ impl Soak {
             self.next_sample += SAMPLE_EVERY_SECS;
             let (gdi, user, mut handles) = unsafe {
                 let p = GetCurrentProcess();
-                (GetGuiResources(p, GR_GDIOBJECTS), GetGuiResources(p, GR_USEROBJECTS), 0u32)
+                (
+                    GetGuiResources(p, GR_GDIOBJECTS),
+                    GetGuiResources(p, GR_USEROBJECTS),
+                    0u32,
+                )
             };
             unsafe {
                 let _ = GetProcessHandleCount(GetCurrentProcess(), &mut handles);
             }
-            self.samples.push(Sample { secs: now - self.start, private_bytes: memwatch::sample().private_bytes, gdi, user, handles });
+            self.samples.push(Sample {
+                secs: now - self.start,
+                private_bytes: memwatch::sample().private_bytes,
+                gdi,
+                user,
+                handles,
+            });
         }
         if now < self.next_action {
             return None;
@@ -131,7 +160,12 @@ impl Soak {
 
     pub fn report(&self) -> bool {
         let median = |from: f64, to: f64| {
-            let mut v: Vec<f64> = self.samples.iter().filter(|s| s.secs >= from && s.secs < to).map(|s| s.private_bytes as f64).collect();
+            let mut v: Vec<f64> = self
+                .samples
+                .iter()
+                .filter(|s| s.secs >= from && s.secs < to)
+                .map(|s| s.private_bytes as f64)
+                .collect();
             v.sort_by(f64::total_cmp);
             v.get(v.len() / 2).copied().unwrap_or(0.0)
         };
@@ -146,17 +180,33 @@ impl Soak {
             first_avg_bytes: first,
             last_avg_bytes: last,
             growth_bytes: growth,
-            max_bytes: self.samples.iter().map(|s| s.private_bytes).max().unwrap_or(0),
+            max_bytes: self
+                .samples
+                .iter()
+                .map(|s| s.private_bytes)
+                .max()
+                .unwrap_or(0),
         };
         if let Ok(mut f) = fs::File::create(paths::logs_dir().join("soak.csv")) {
             let _ = writeln!(f, "secs,private_bytes,gdi,user,handles");
             for s in &self.samples {
-                let _ = writeln!(f, "{:.1},{},{},{},{}", s.secs, s.private_bytes, s.gdi, s.user, s.handles);
+                let _ = writeln!(
+                    f,
+                    "{:.1},{},{},{},{}",
+                    s.secs, s.private_bytes, s.gdi, s.user, s.handles
+                );
             }
         }
         let json = serde_json::to_vec_pretty(&report).unwrap_or_default();
         let _ = write_atomic(&paths::local_dir().join("soak-result.json"), &json);
-        log!("soak done: pass={} actions={} first={:.0}KB last={:.0}KB growth={:.0}KB", report.pass, report.actions, first / 1024.0, last / 1024.0, growth / 1024.0);
+        log!(
+            "soak done: pass={} actions={} first={:.0}KB last={:.0}KB growth={:.0}KB",
+            report.pass,
+            report.actions,
+            first / 1024.0,
+            last / 1024.0,
+            growth / 1024.0
+        );
         report.pass
     }
 }

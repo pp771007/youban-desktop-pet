@@ -32,7 +32,10 @@ pub struct Ctx<'a> {
 
 impl Ctx<'_> {
     pub fn card(&mut self, key: impl Into<String>, card: Card) {
-        self.out.push(Request::Card { key: key.into(), card });
+        self.out.push(Request::Card {
+            key: key.into(),
+            card,
+        });
     }
 
     pub fn info(&mut self, title: impl Into<String>, detail: Option<String>) {
@@ -115,7 +118,11 @@ impl ModuleHost {
 
     /// 讓載入的模組剛好是 `wanted`（照這個順序）：沒列到的丟掉，缺的用 `make` 建。
     /// 回傳被丟掉的模組 id，呼叫端要收掉它們留下的卡片。
-    pub fn sync(&mut self, wanted: &[&'static str], make: impl Fn(&str) -> Box<dyn Module>) -> Vec<&'static str> {
+    pub fn sync(
+        &mut self,
+        wanted: &[&'static str],
+        make: impl Fn(&str) -> Box<dyn Module>,
+    ) -> Vec<&'static str> {
         let mut old = std::mem::take(&mut self.modules);
         for &id in wanted {
             match old.iter().position(|m| m.id() == id) {
@@ -130,17 +137,35 @@ impl ModuleHost {
         self.modules.iter().map(|m| m.id()).collect()
     }
 
-    pub fn tick(&mut self, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+    pub fn tick(
+        &mut self,
+        now: NaiveDateTime,
+        config: &Config,
+        out: &mut Vec<(&'static str, Request)>,
+    ) {
         self.each(now, config, out, |m, ctx| m.tick(ctx));
     }
 
     /// 送事件給全部模組。
-    pub fn broadcast(&mut self, event: &ModuleEvent, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+    pub fn broadcast(
+        &mut self,
+        event: &ModuleEvent,
+        now: NaiveDateTime,
+        config: &Config,
+        out: &mut Vec<(&'static str, Request)>,
+    ) {
         self.each(now, config, out, |m, ctx| m.on_event(event, ctx));
     }
 
     /// 送事件給某一個模組。
-    pub fn send(&mut self, id: &str, event: &ModuleEvent, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
+    pub fn send(
+        &mut self,
+        id: &str,
+        event: &ModuleEvent,
+        now: NaiveDateTime,
+        config: &Config,
+        out: &mut Vec<(&'static str, Request)>,
+    ) {
         self.each(now, config, out, |m, ctx| {
             if m.id() == id {
                 m.on_event(event, ctx);
@@ -156,7 +181,13 @@ impl ModuleHost {
             .map(|(i, m)| MenuGroup {
                 module: m.id(),
                 name: m.name(),
-                items: m.menu(now, config).into_iter().map(|(local, label, icon)| (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)).collect(),
+                items: m
+                    .menu(now, config)
+                    .into_iter()
+                    .map(|(local, label, icon)| {
+                        (MENU_BASE + i as u32 * MENU_STRIDE + local, label, icon)
+                    })
+                    .collect(),
             })
             .collect()
     }
@@ -166,26 +197,52 @@ impl ModuleHost {
     }
 
     /// 上次沒按掉的卡交給丟出它的模組；那個模組還在、也還要這張卡才回傳（連同模組 id）。
-    pub fn restore_card(&mut self, owner: &str, key: &str, card: Card, now: NaiveDateTime) -> Option<(&'static str, Card)> {
+    pub fn restore_card(
+        &mut self,
+        owner: &str,
+        key: &str,
+        card: Card,
+        now: NaiveDateTime,
+    ) -> Option<(&'static str, Card)> {
         let m = self.modules.iter_mut().find(|m| m.id() == owner)?;
         let id = m.id();
         m.restore_card(key, card, now).map(|c| (id, c))
     }
 
     /// 選單編號 → 交給對應的模組。
-    pub fn menu_clicked(&mut self, menu_id: u32, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
-        let Some(offset) = menu_id.checked_sub(MENU_BASE) else { return };
+    pub fn menu_clicked(
+        &mut self,
+        menu_id: u32,
+        now: NaiveDateTime,
+        config: &Config,
+        out: &mut Vec<(&'static str, Request)>,
+    ) {
+        let Some(offset) = menu_id.checked_sub(MENU_BASE) else {
+            return;
+        };
         let (index, local) = ((offset / MENU_STRIDE) as usize, offset % MENU_STRIDE);
-        let Some(id) = self.modules.get(index).map(|m| m.id()) else { return };
+        let Some(id) = self.modules.get(index).map(|m| m.id()) else {
+            return;
+        };
         self.send(id, &ModuleEvent::Menu(local), now, config, out);
     }
 
     /// 對每個模組做一件事；出錯的模組直接移除，並發一張通知卡。
-    fn each(&mut self, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>, mut f: impl FnMut(&mut dyn Module, &mut Ctx)) {
+    fn each(
+        &mut self,
+        now: NaiveDateTime,
+        config: &Config,
+        out: &mut Vec<(&'static str, Request)>,
+        mut f: impl FnMut(&mut dyn Module, &mut Ctx),
+    ) {
         let mut failed = Vec::new();
         for (i, m) in self.modules.iter_mut().enumerate() {
             let mut requests = Vec::new();
-            let mut ctx = Ctx { now, config, out: &mut requests };
+            let mut ctx = Ctx {
+                now,
+                config,
+                out: &mut requests,
+            };
             let result = catch_unwind(AssertUnwindSafe(|| f(m.as_mut(), &mut ctx)));
             let id = m.id();
             out.extend(requests.into_iter().map(|r| (id, r)));
@@ -196,7 +253,16 @@ impl ModuleHost {
         }
         for (i, name) in failed.into_iter().rev() {
             self.modules.remove(i);
-            out.push(("core", Request::Card { key: "info".into(), card: Card::warning(format!("「{name}」出了問題，已暫時停用"), Some("重新啟動柚伴後會再試一次".into())) }));
+            out.push((
+                "core",
+                Request::Card {
+                    key: "info".into(),
+                    card: Card::warning(
+                        format!("「{name}」出了問題，已暫時停用"),
+                        Some("重新啟動柚伴後會再試一次".into()),
+                    ),
+                },
+            ));
         }
     }
 }
@@ -248,7 +314,12 @@ mod tests {
 
     #[test]
     fn sync_turns_modules_off_and_back_on() {
-        let now = || chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+        let now = || {
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+                .unwrap()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+        };
         let make = |id: &str| -> Box<dyn Module> {
             match id {
                 "fine" => Box::new(Fine(0)),
@@ -259,16 +330,26 @@ mod tests {
         assert!(host.sync(&["fine"], make).is_empty());
         assert_eq!(host.ids(), ["fine"]);
         assert_eq!(host.menu(now(), &Config::default()).len(), 1);
-        assert_eq!(host.sync(&[], make), ["fine"], "turned off → reported so its cards can be withdrawn");
+        assert_eq!(
+            host.sync(&[], make),
+            ["fine"],
+            "turned off → reported so its cards can be withdrawn"
+        );
         assert!(host.ids().is_empty());
-        assert!(host.menu(now(), &Config::default()).is_empty(), "a turned-off module leaves nothing in the menu");
+        assert!(
+            host.menu(now(), &Config::default()).is_empty(),
+            "a turned-off module leaves nothing in the menu"
+        );
         host.sync(&["fine"], make);
         assert_eq!(host.ids(), ["fine"]);
     }
 
     #[test]
     fn panicking_module_is_removed_and_others_keep_running() {
-        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+        let now = chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
         let mut host = ModuleHost::new(vec![Box::new(Boom), Box::new(Fine(0))]);
         let config = Config::default();
         let mut out = Vec::new();
@@ -282,6 +363,8 @@ mod tests {
         assert_eq!(menu.len(), 1);
         out.clear();
         host.menu_clicked(menu[0].items[0].0, now, &config, &mut out);
-        assert!(matches!(&out[0].1, Request::Card { card: Card::Info { title, .. }, .. } if title == "menu"));
+        assert!(
+            matches!(&out[0].1, Request::Card { card: Card::Info { title, .. }, .. } if title == "menu")
+        );
     }
 }

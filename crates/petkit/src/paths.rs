@@ -16,7 +16,9 @@ pub const CORE_EXE: &str = "Youban.exe";
 pub const SETTINGS_EXE: &str = "YoubanSettings.exe";
 
 fn base_dir(var: &str) -> PathBuf {
-    env::var_os(var).map(PathBuf::from).unwrap_or_else(env::temp_dir)
+    env::var_os(var)
+        .map(PathBuf::from)
+        .unwrap_or_else(env::temp_dir)
 }
 
 fn env_dir(var: &str) -> PathBuf {
@@ -32,7 +34,13 @@ pub fn migrate_legacy_dirs() -> Vec<String> {
         if new.exists() {
             continue;
         }
-        let Some(old) = LEGACY_APP_DIRS.iter().map(|d| base_dir(var).join(d)).find(|d| d.is_dir()) else { continue };
+        let Some(old) = LEGACY_APP_DIRS
+            .iter()
+            .map(|d| base_dir(var).join(d))
+            .find(|d| d.is_dir())
+        else {
+            continue;
+        };
         if let Err(e) = std::fs::rename(&old, &new) {
             problems.push(format!("{} -> {}: {e}", old.display(), new.display()));
         }
@@ -91,10 +99,18 @@ pub fn status_file() -> PathBuf {
 /// 桌寵包資料夾：執行檔旁邊的 `pets/`，開發時往上找到 repo 的 `pets/`。
 pub fn pets_dir() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
-    exe.ancestors().skip(1).take(PETS_SEARCH_DEPTH).map(|d| d.join(PETS_DIR)).find(|d| d.is_dir())
+    exe.ancestors()
+        .skip(1)
+        .take(PETS_SEARCH_DEPTH)
+        .map(|d| d.join(PETS_DIR))
+        .find(|d| d.is_dir())
 }
 
 /// 跟目前這支程式放在同一個資料夾的另一支程式（核心找設定程式、設定程式找核心）。
 pub fn sibling_exe(name: &str) -> Option<PathBuf> {
-    env::current_exe().ok()?.parent().map(|d| d.join(name)).filter(|p| p.is_file())
+    env::current_exe()
+        .ok()?
+        .parent()
+        .map(|d| d.join(name))
+        .filter(|p| p.is_file())
 }

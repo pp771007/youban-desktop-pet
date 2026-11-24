@@ -8,7 +8,10 @@ use petkit::pack::{PetPack, StateAnim};
 use petkit::states;
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
 use windows::Win32::Graphics::Direct2D::{ID2D1Bitmap, ID2D1RenderTarget};
-use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS, DeleteObject};
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
+    DeleteObject,
+};
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, HICON, ICONINFO};
@@ -63,7 +66,8 @@ struct Trimmed {
 
 impl Wic {
     pub fn new() -> Result<Self> {
-        let factory = unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
+        let factory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)? };
         Ok(Self { factory })
     }
 
@@ -78,13 +82,28 @@ impl Wic {
             )?;
             let frame = decoder.GetFrame(0)?;
             let converter = self.factory.CreateFormatConverter()?;
-            converter.Initialize(&frame, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
-            let bitmap = self.factory.CreateBitmapFromSource(&converter, WICBitmapCacheOnLoad)?;
+            converter.Initialize(
+                &frame,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
+            let bitmap = self
+                .factory
+                .CreateBitmapFromSource(&converter, WICBitmapCacheOnLoad)?;
             let (mut w, mut h) = (0, 0);
             bitmap.GetSize(&mut w, &mut h)?;
-            let full = WICRect { X: 0, Y: 0, Width: w as i32, Height: h as i32 };
+            let full = WICRect {
+                X: 0,
+                Y: 0,
+                Width: w as i32,
+                Height: h as i32,
+            };
             let rect = {
-                let lock = bitmap.Lock(&full, (WICBitmapLockRead.0 | WICBitmapLockWrite.0) as u32)?;
+                let lock =
+                    bitmap.Lock(&full, (WICBitmapLockRead.0 | WICBitmapLockWrite.0) as u32)?;
                 let stride = lock.GetStride()?;
                 let mut size = 0;
                 let mut ptr = std::ptr::null_mut();
@@ -93,8 +112,16 @@ impl Wic {
                 clean_and_bound(pixels, w, h, stride)
             };
             Ok(match rect {
-                Some((rect, center_x)) => Trimmed { bitmap, rect, center_x },
-                None => Trimmed { bitmap, rect: full, center_x: w as f32 / 2.0 },
+                Some((rect, center_x)) => Trimmed {
+                    bitmap,
+                    rect,
+                    center_x,
+                },
+                None => Trimmed {
+                    bitmap,
+                    rect: full,
+                    center_x: w as f32 / 2.0,
+                },
             })
         }
     }
@@ -104,13 +131,24 @@ impl Wic {
             let clipper = self.factory.CreateBitmapClipper()?;
             clipper.Initialize(&t.bitmap, &t.rect)?;
             let scaler = self.factory.CreateBitmapScaler()?;
-            scaler.Initialize(&clipper, width.max(1), height.max(1), WICBitmapInterpolationModeHighQualityCubic)?;
+            scaler.Initialize(
+                &clipper,
+                width.max(1),
+                height.max(1),
+                WICBitmapInterpolationModeHighQualityCubic,
+            )?;
             Ok(scaler)
         }
     }
 
     /// 載入整隻桌寵，縮成 `base_height`（實體像素）為站姿身高的大小。
-    pub fn load_pet(&self, pack: &PetPack, rt: &ID2D1RenderTarget, base_height: f32, dpi: u32) -> Result<SpriteSet> {
+    pub fn load_pet(
+        &self,
+        pack: &PetPack,
+        rt: &ID2D1RenderTarget,
+        base_height: f32,
+        dpi: u32,
+    ) -> Result<SpriteSet> {
         let mut out = HashMap::new();
         let (mut max_w, mut max_h) = (0.0f32, 0.0f32);
         for (state, anim) in &pack.states {
@@ -122,16 +160,36 @@ impl Wic {
             out.insert(state.clone(), loaded);
         }
         debug_assert!(out.contains_key(states::IDLE));
-        Ok(SpriteSet { states: out, dpi, base_height, max_width: max_w, max_height: max_h })
+        Ok(SpriteSet {
+            states: out,
+            dpi,
+            base_height,
+            max_width: max_w,
+            max_height: max_h,
+        })
     }
 
-    fn load_state(&self, anim: &StateAnim, rt: &ID2D1RenderTarget, base_height: f32) -> Result<LoadedState> {
+    fn load_state(
+        &self,
+        anim: &StateAnim,
+        rt: &ID2D1RenderTarget,
+        base_height: f32,
+    ) -> Result<LoadedState> {
         let target_h = base_height * anim.height_ratio;
         let mut variants = Vec::with_capacity(anim.variants.len());
         for v in &anim.variants {
-            let trimmed: Vec<Trimmed> = v.frames.iter().map(|p| self.load_trimmed(p)).collect::<Result<_>>()?;
+            let trimmed: Vec<Trimmed> = v
+                .frames
+                .iter()
+                .map(|p| self.load_trimmed(p))
+                .collect::<Result<_>>()?;
             // 同一組動作用同一個縮放比例，動作之間的高低差（跳起來、蹲下）才會保留。
-            let tallest = trimmed.iter().map(|t| t.rect.Height).max().unwrap_or(1).max(1) as f32;
+            let tallest = trimmed
+                .iter()
+                .map(|t| t.rect.Height)
+                .max()
+                .unwrap_or(1)
+                .max(1) as f32;
             let scale = target_h / tallest;
             let mut frames = Vec::with_capacity(trimmed.len());
             for t in &trimmed {
@@ -139,53 +197,121 @@ impl Wic {
                 let h = (t.rect.Height as f32 * scale).round() as u32;
                 let scaler = self.scaled(t, w, h)?;
                 let bitmap = unsafe { rt.CreateBitmapFromWicBitmap(&scaler, None)? };
-                frames.push(Frame { bitmap, width: w as f32, height: h as f32, center_x: t.center_x * scale });
+                frames.push(Frame {
+                    bitmap,
+                    width: w as f32,
+                    height: h as f32,
+                    center_x: t.center_x * scale,
+                });
             }
-            variants.push(LoadedVariant { weight: v.weight, procedural: v.procedural, durations_ms: v.durations_ms.clone(), frames });
+            variants.push(LoadedVariant {
+                weight: v.weight,
+                procedural: v.procedural,
+                durations_ms: v.durations_ms.clone(),
+                frames,
+            });
         }
-        Ok(LoadedState { looping: anim.looping, variants })
+        Ok(LoadedState {
+            looping: anim.looping,
+            variants,
+        })
     }
 
     /// 解碼編進執行檔的 PNG，縮到長邊 `max_side`（實體像素）：回傳（點陣圖, 寬, 高）。
-    pub fn load_embedded(&self, png: &[u8], rt: &ID2D1RenderTarget, max_side: f32) -> Result<(ID2D1Bitmap, f32, f32)> {
+    pub fn load_embedded(
+        &self,
+        png: &[u8],
+        rt: &ID2D1RenderTarget,
+        max_side: f32,
+    ) -> Result<(ID2D1Bitmap, f32, f32)> {
         unsafe {
             let stream = self.factory.CreateStream()?;
             stream.InitializeFromMemory(png)?;
-            let decoder = self.factory.CreateDecoderFromStream(&stream, std::ptr::null(), WICDecodeMetadataCacheOnDemand)?;
+            let decoder = self.factory.CreateDecoderFromStream(
+                &stream,
+                std::ptr::null(),
+                WICDecodeMetadataCacheOnDemand,
+            )?;
             self.shrink(&decoder, rt, max_side)
         }
     }
 
     /// 同 `load_embedded`，讀檔案（右鍵選單上的桌寵小圖）。
-    pub fn load_file(&self, path: &Path, rt: &ID2D1RenderTarget, max_side: f32) -> Result<(ID2D1Bitmap, f32, f32)> {
+    pub fn load_file(
+        &self,
+        path: &Path,
+        rt: &ID2D1RenderTarget,
+        max_side: f32,
+    ) -> Result<(ID2D1Bitmap, f32, f32)> {
         unsafe {
-            let decoder = self.factory.CreateDecoderFromFilename(&HSTRING::from(path.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
+            let decoder = self.factory.CreateDecoderFromFilename(
+                &HSTRING::from(path.as_os_str()),
+                None,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )?;
             self.shrink(&decoder, rt, max_side)
         }
     }
 
-    fn shrink(&self, decoder: &IWICBitmapDecoder, rt: &ID2D1RenderTarget, max_side: f32) -> Result<(ID2D1Bitmap, f32, f32)> {
+    fn shrink(
+        &self,
+        decoder: &IWICBitmapDecoder,
+        rt: &ID2D1RenderTarget,
+        max_side: f32,
+    ) -> Result<(ID2D1Bitmap, f32, f32)> {
         unsafe {
             let frame = decoder.GetFrame(0)?;
             let converter = self.factory.CreateFormatConverter()?;
-            converter.Initialize(&frame, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
+            converter.Initialize(
+                &frame,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
             let (mut w, mut h) = (0, 0);
             converter.GetSize(&mut w, &mut h)?;
             let scale = max_side / w.max(h).max(1) as f32;
-            let (sw, sh) = (((w as f32 * scale).round() as u32).max(1), ((h as f32 * scale).round() as u32).max(1));
+            let (sw, sh) = (
+                ((w as f32 * scale).round() as u32).max(1),
+                ((h as f32 * scale).round() as u32).max(1),
+            );
             let scaler = self.factory.CreateBitmapScaler()?;
-            scaler.Initialize(&converter, sw, sh, WICBitmapInterpolationModeHighQualityCubic)?;
-            Ok((rt.CreateBitmapFromWicBitmap(&scaler, None)?, sw as f32, sh as f32))
+            scaler.Initialize(
+                &converter,
+                sw,
+                sh,
+                WICBitmapInterpolationModeHighQualityCubic,
+            )?;
+            Ok((
+                rt.CreateBitmapFromWicBitmap(&scaler, None)?,
+                sw as f32,
+                sh as f32,
+            ))
         }
     }
 
     /// 整張解碼成預乘 BGRA（切圖工具用）：回傳（寬, 高, 像素）。
     pub fn decode_premultiplied(&self, path: &Path) -> Result<(usize, usize, Vec<u8>)> {
         unsafe {
-            let decoder = self.factory.CreateDecoderFromFilename(&HSTRING::from(path.as_os_str()), None, GENERIC_READ, WICDecodeMetadataCacheOnDemand)?;
+            let decoder = self.factory.CreateDecoderFromFilename(
+                &HSTRING::from(path.as_os_str()),
+                None,
+                GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )?;
             let frame = decoder.GetFrame(0)?;
             let converter = self.factory.CreateFormatConverter()?;
-            converter.Initialize(&frame, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
+            converter.Initialize(
+                &frame,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
             let (mut w, mut h) = (0, 0);
             converter.GetSize(&mut w, &mut h)?;
             let mut buf = vec![0u8; (w * h * BYTES_PER_PIXEL) as usize];
@@ -197,10 +323,18 @@ impl Wic {
     /// 把預乘 BGRA 的像素存成 PNG（截圖工具用）。
     pub fn save_png(&self, path: &Path, width: u32, height: u32, pixels: &[u8]) -> Result<()> {
         unsafe {
-            let bitmap = self.factory.CreateBitmapFromMemory(width, height, &GUID_WICPixelFormat32bppPBGRA, width * BYTES_PER_PIXEL, pixels)?;
+            let bitmap = self.factory.CreateBitmapFromMemory(
+                width,
+                height,
+                &GUID_WICPixelFormat32bppPBGRA,
+                width * BYTES_PER_PIXEL,
+                pixels,
+            )?;
             let stream = self.factory.CreateStream()?;
             stream.InitializeFromFilename(&HSTRING::from(path.as_os_str()), GENERIC_WRITE.0)?;
-            let encoder = self.factory.CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
+            let encoder = self
+                .factory
+                .CreateEncoder(&GUID_ContainerFormatPng, std::ptr::null())?;
             encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
             let mut frame = None;
             let mut props = None;
@@ -223,7 +357,14 @@ impl Wic {
             // 圖示要「未預乘」的 BGRA。
             let scaler = self.scaled(&t, w, h)?;
             let converter = self.factory.CreateFormatConverter()?;
-            converter.Initialize(&scaler, &GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeCustom)?;
+            converter.Initialize(
+                &scaler,
+                &GUID_WICPixelFormat32bppBGRA,
+                WICBitmapDitherTypeNone,
+                None,
+                0.0,
+                WICBitmapPaletteTypeCustom,
+            )?;
             let stride = size * BYTES_PER_PIXEL;
             let mut buf = vec![0u8; (stride * size) as usize];
             let ox = (size - w) / 2;
@@ -247,7 +388,13 @@ impl Wic {
             let color = CreateDIBSection(None, &bmi, DIB_RGB_COLORS, &mut bits, None, 0)?;
             std::ptr::copy_nonoverlapping(buf.as_ptr(), bits as *mut u8, buf.len());
             let mask = CreateBitmap(size as i32, size as i32, 1, 1, None);
-            let info = ICONINFO { fIcon: true.into(), xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
+            let info = ICONINFO {
+                fIcon: true.into(),
+                xHotspot: 0,
+                yHotspot: 0,
+                hbmMask: mask,
+                hbmColor: color,
+            };
             let icon = CreateIconIndirect(&info);
             let _ = DeleteObject(color.into());
             let _ = DeleteObject(mask.into());
@@ -263,7 +410,12 @@ fn clean_and_bound(pixels: &mut [u8], w: u32, h: u32, stride: u32) -> Option<(WI
     let (mut mass, mut moment) = (0u64, 0u64);
     for y in 0..h {
         let row = &mut pixels[(y * stride) as usize..(y * stride + w * BYTES_PER_PIXEL) as usize];
-        for (x, px) in row.as_chunks_mut::<{ BYTES_PER_PIXEL as usize }>().0.iter_mut().enumerate() {
+        for (x, px) in row
+            .as_chunks_mut::<{ BYTES_PER_PIXEL as usize }>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
             let a = px[3];
             if a <= ALPHA_NOISE {
                 px.fill(0);
@@ -285,7 +437,12 @@ fn clean_and_bound(pixels: &mut [u8], w: u32, h: u32, stride: u32) -> Option<(WI
         }
     }
     (min_x <= max_x).then(|| {
-        let rect = WICRect { X: min_x as i32, Y: min_y as i32, Width: (max_x - min_x + 1) as i32, Height: (max_y - min_y + 1) as i32 };
+        let rect = WICRect {
+            X: min_x as i32,
+            Y: min_y as i32,
+            Width: (max_x - min_x + 1) as i32,
+            Height: (max_y - min_y + 1) as i32,
+        };
         // +0.5：像素的中心在格子中間。
         (rect, moment as f32 / mass as f32 + 0.5 - min_x as f32)
     })
@@ -306,7 +463,10 @@ mod tests {
         let (rect, center) = clean_and_bound(&mut px, w, h, w * BYTES_PER_PIXEL).unwrap();
         assert_eq!(rect.Width, 20);
         // 重心 = (0+…+9+19)/11 + 半格 ≈ 6.3：被鈴鐺拉過去一點點，遠不到外框中心。
-        assert!((center - (64.0 / 11.0 + 0.5)).abs() < 0.01, "center {center}");
+        assert!(
+            (center - (64.0 / 11.0 + 0.5)).abs() < 0.01,
+            "center {center}"
+        );
     }
 
     #[test]

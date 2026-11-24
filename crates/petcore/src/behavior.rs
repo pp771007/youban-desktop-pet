@@ -242,7 +242,15 @@ pub fn block_platforms(blocks: &[Rect], ceiling: f32, pet_height: f32) -> Vec<Pl
         .enumerate()
         .filter(|(_, b)| b.top - pet_height >= ceiling)
         // 禁止範圍的邊另外處理（走進去就爬過去、會亮紅光），不算視窗的邊。
-        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left, sides: (None, None), bottom: b.bottom })
+        .map(|(i, b)| Platform {
+            left: b.left,
+            right: b.right,
+            y: b.top,
+            window: BLOCK_WINDOW_BASE - i as isize,
+            window_left: b.left,
+            sides: (None, None),
+            bottom: b.bottom,
+        })
         .collect()
 }
 
@@ -259,7 +267,8 @@ impl Glow {
     /// 同一條牆線上（不管亮哪一段）。
     fn same_line(&self, other: &Glow) -> bool {
         match (self, other) {
-            (Glow::Floor { y: a, .. }, Glow::Floor { y: b, .. }) | (Glow::Wall { x: a, .. }, Glow::Wall { x: b, .. }) => (a - b).abs() < 1.0,
+            (Glow::Floor { y: a, .. }, Glow::Floor { y: b, .. })
+            | (Glow::Wall { x: a, .. }, Glow::Wall { x: b, .. }) => (a - b).abs() < 1.0,
             _ => false,
         }
     }
@@ -312,7 +321,12 @@ impl Env {
         self.wall_right = self.wall_right.min(area.right);
         self.min_x = self.wall_left + self.pet_half_width;
         self.max_x = (self.wall_right - self.pet_half_width).max(self.min_x);
-        let (top, bottom, left, right) = (self.ceiling + self.pet_height, self.ground_y, self.wall_left, self.wall_right);
+        let (top, bottom, left, right) = (
+            self.ceiling + self.pet_height,
+            self.ground_y,
+            self.wall_left,
+            self.wall_right,
+        );
         self.platforms.retain_mut(|p| {
             p.left = p.left.max(left);
             p.right = p.right.min(right);
@@ -333,11 +347,19 @@ pub enum Pivot {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Input {
-    PointerDown { x: f32, y: f32 },
-    PointerMove { x: f32, y: f32 },
+    PointerDown {
+        x: f32,
+        y: f32,
+    },
+    PointerMove {
+        x: f32,
+        y: f32,
+    },
     PointerUp,
     /// 滑鼠在桌寵身上移動（沒按著）。
-    Hover { x: f32 },
+    Hover {
+        x: f32,
+    },
 }
 
 /// 頭上冒出來的表情特效（由繪圖層用向量畫）。
@@ -399,10 +421,19 @@ pub enum Demo {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Mode {
-    Idle { until: f64 },
-    Walk { dir: f32, until: f64, speed_mul: f32 },
+    Idle {
+        until: f64,
+    },
+    Walk {
+        dir: f32,
+        until: f64,
+        speed_mul: f32,
+    },
     Drag,
-    Fall { vx: f32, vy: f32 },
+    Fall {
+        vx: f32,
+        vy: f32,
+    },
     Land,
     Sleep,
     Happy,
@@ -414,31 +445,58 @@ enum Mode {
     Doze,
     Yawn,
     /// 坐下來休息一陣子。
-    Sit { until: f64 },
+    Sit {
+        until: f64,
+    },
     Petted,
     /// 爬螢幕邊：`side` -1 = 左邊、1 = 右邊。
-    Climb { side: f32, target_y: f32 },
+    Climb {
+        side: f32,
+        target_y: f32,
+    },
     /// 爬到定點，貼在牆上停一下。
-    Cling { side: f32, until: f64 },
+    Cling {
+        side: f32,
+        until: f64,
+    },
     /// 爬禁止範圍或視窗的邊（`side` 同 `Climb`：範圍在牠的哪一邊），爬到頂端 `top` 就翻上去、往前走 `across` 遠。
     /// `glow`：禁止範圍是看不見的牆，爬的那段亮紅光；視窗本來就看得到，不亮。
-    ClimbOver { side: f32, top: f32, across: f32, glow: bool },
+    ClimbOver {
+        side: f32,
+        top: f32,
+        across: f32,
+        glow: bool,
+    },
     /// 講話（頭上有對話泡泡）。
-    Talk { until: f64 },
+    Talk {
+        until: f64,
+    },
     Spin,
     /// 往 `dir` 翻滾一段。
-    Roll { dir: f32 },
+    Roll {
+        dir: f32,
+    },
     /// 追著滑鼠跑。
-    Chase { until: f64 },
+    Chase {
+        until: f64,
+    },
     /// 撲向滑鼠。
-    Pounce { dir: f32 },
+    Pounce {
+        dir: f32,
+    },
     /// 被甩暈，搖搖晃晃站不穩；`respun` = 中途那次螺旋已經冒過了。
-    Dizzy { respun: bool },
+    Dizzy {
+        respun: bool,
+    },
     /// 去拿桌面上的點心或球。
-    Fetch { since: f64 },
+    Fetch {
+        since: f64,
+    },
     Eat,
     /// 站在視窗邊緣蹲低，接著跳出去（`Leap` 決定跳到哪）。
-    Crouch { leap: Leap },
+    Crouch {
+        leap: Leap,
+    },
 }
 
 /// 一次跳躍：落到 `(x, y)`（腳底），弧線最高點在 `apex_y`。
@@ -649,14 +707,29 @@ impl Pet {
 
     /// 開口講話 `secs` 秒：只有在原地閒著時才換成講話動作（走路、睡覺、被拎著就照原本的動作，泡泡照樣出現）。
     pub fn talk(&mut self, secs: f32, now: f64) {
-        if matches!(self.mode, Mode::Idle { .. } | Mode::Sit { .. } | Mode::Look | Mode::Talk { .. }) {
-            self.set_mode(Mode::Talk { until: now + secs as f64 }, now);
+        if matches!(
+            self.mode,
+            Mode::Idle { .. } | Mode::Sit { .. } | Mode::Look | Mode::Talk { .. }
+        ) {
+            self.set_mode(
+                Mode::Talk {
+                    until: now + secs as f64,
+                },
+                now,
+            );
         }
     }
 
     /// 開心地跳一下（紀念日）。
     pub fn cheer(&mut self, now: f64) {
-        if !matches!(self.mode, Mode::Drag | Mode::Fall { .. } | Mode::Climb { .. } | Mode::Cling { .. } | Mode::ClimbOver { .. }) {
+        if !matches!(
+            self.mode,
+            Mode::Drag
+                | Mode::Fall { .. }
+                | Mode::Climb { .. }
+                | Mode::Cling { .. }
+                | Mode::ClimbOver { .. }
+        ) {
             self.emote(Emote::Hearts);
             self.set_mode(Mode::Happy, now);
         }
@@ -718,12 +791,20 @@ impl Pet {
     pub fn input(&mut self, input: Input, now: f64, env: &Env) -> bool {
         match input {
             Input::PointerDown { x, y } => {
-                self.press = Some(Press { start_x: x, start_y: y, grab_dx: x - self.x, grab_dy: y - self.y, dragging: false });
+                self.press = Some(Press {
+                    start_x: x,
+                    start_y: y,
+                    grab_dx: x - self.x,
+                    grab_dy: y - self.y,
+                    dragging: false,
+                });
                 self.last_pointer_x = self.x;
                 self.last_pointer_y = self.y;
             }
             Input::PointerMove { x, y } => {
-                let Some(mut press) = self.press else { return false };
+                let Some(mut press) = self.press else {
+                    return false;
+                };
                 if !press.dragging {
                     let threshold = DRAG_THRESHOLD_DIP * env.px_per_dip;
                     if (x - press.start_x).hypot(y - press.start_y) < threshold {
@@ -741,7 +822,9 @@ impl Pet {
                 self.y = y - press.grab_dy;
             }
             Input::PointerUp => {
-                let Some(press) = self.press.take() else { return false };
+                let Some(press) = self.press.take() else {
+                    return false;
+                };
                 if press.dragging {
                     // 甩著放手會帶著速度飛出去。
                     let max = MAX_THROW_DIP * env.px_per_dip;
@@ -774,11 +857,24 @@ impl Pet {
 
     /// 摸摸頭：滑鼠在身上來回晃，短時間內換方向夠多次就開心。
     fn hover(&mut self, x: f32, now: f64) {
-        if !matches!(self.mode, Mode::Idle { .. } | Mode::Walk { .. } | Mode::Hop | Mode::Look | Mode::Stretch | Mode::Doze | Mode::Yawn | Mode::Sit { .. } | Mode::Talk { .. }) {
+        if !matches!(
+            self.mode,
+            Mode::Idle { .. }
+                | Mode::Walk { .. }
+                | Mode::Hop
+                | Mode::Look
+                | Mode::Stretch
+                | Mode::Doze
+                | Mode::Yawn
+                | Mode::Sit { .. }
+                | Mode::Talk { .. }
+        ) {
             self.hover_last_x = None;
             return;
         }
-        let Some(last) = self.hover_last_x.replace(x) else { return };
+        let Some(last) = self.hover_last_x.replace(x) else {
+            return;
+        };
         let dx = x - last;
         if dx.abs() < PET_MIN_STEP_PX {
             return;
@@ -805,7 +901,12 @@ impl Pet {
             self.set_mode(Mode::Fetch { since: now }, now);
         } else if self.teased(env, now) {
             self.emote(Emote::Alert);
-            self.set_mode(Mode::Chase { until: now + CHASE_SECS as f64 }, now);
+            self.set_mode(
+                Mode::Chase {
+                    until: now + CHASE_SECS as f64,
+                },
+                now,
+            );
         }
         let t = (now - self.mode_start) as f32;
         match self.mode {
@@ -840,13 +941,20 @@ impl Pet {
                     self.set_idle(now);
                 }
             }
-            Mode::Walk { dir, until, speed_mul } => {
+            Mode::Walk {
+                dir,
+                until,
+                speed_mul,
+            } => {
                 self.stand(env, now);
                 if !matches!(self.mode, Mode::Walk { .. }) {
                     return false;
                 }
                 let ease = walk_ease(t, (until - now) as f32);
-                let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * speed_mul * ease;
+                let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP)
+                    * env.px_per_dip
+                    * speed_mul
+                    * ease;
                 let prev_x = self.x;
                 self.x += dir * speed * dt;
                 if let Some(b) = self.entering_block(prev_x, env) {
@@ -855,9 +963,19 @@ impl Pet {
                     }
                     // 頂端上面沒空間翻過去：當成牆，轉頭。
                     let wall = if dir > 0.0 { b.left } else { b.right };
-                    self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                    self.bump = Some((
+                        Glow::Wall {
+                            x: wall,
+                            y: self.y - env.pet_height / 2.0,
+                        },
+                        now,
+                    ));
                     self.x = prev_x;
-                    self.mode = Mode::Walk { dir: -dir, until, speed_mul };
+                    self.mode = Mode::Walk {
+                        dir: -dir,
+                        until,
+                        speed_mul,
+                    };
                     self.facing_left = dir > 0.0;
                     return false;
                 }
@@ -880,13 +998,31 @@ impl Pet {
                     hit_wall = (hi >= env.max_x).then_some(1.0);
                 }
                 self.facing_left = dir < 0.0;
-                self.mode = Mode::Walk { dir, until, speed_mul };
+                self.mode = Mode::Walk {
+                    dir,
+                    until,
+                    speed_mul,
+                };
                 // 撞到活動範圍的邊（看不見的牆）轉頭：那一段亮一下，轉頭走開後再淡掉。
                 if let Some(side) = hit_wall
-                    && (if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 })
+                    && (if side < 0.0 {
+                        env.invisible_walls.0
+                    } else {
+                        env.invisible_walls.1
+                    })
                 {
-                    let wall = if side < 0.0 { env.wall_left } else { env.wall_right };
-                    self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                    let wall = if side < 0.0 {
+                        env.wall_left
+                    } else {
+                        env.wall_right
+                    };
+                    self.bump = Some((
+                        Glow::Wall {
+                            x: wall,
+                            y: self.y - env.pet_height / 2.0,
+                        },
+                        now,
+                    ));
                 }
                 if let Some(side) = hit_wall
                     && self.may_climb(env)
@@ -908,11 +1044,15 @@ impl Pet {
                 let k = (dt * 12.0).min(1.0);
                 self.drag_vx += (vx - self.drag_vx) * k;
                 self.drag_vy += (vy - self.drag_vy) * k;
-                let target = (-self.drag_vx * DRAG_ANGLE_PER_SPEED / env.px_per_dip).clamp(-DRAG_MAX_ANGLE, DRAG_MAX_ANGLE);
-                let accel = (target - self.drag_angle) * DRAG_SPRING - self.drag_angle_vel * DRAG_DAMPING;
+                let target = (-self.drag_vx * DRAG_ANGLE_PER_SPEED / env.px_per_dip)
+                    .clamp(-DRAG_MAX_ANGLE, DRAG_MAX_ANGLE);
+                let accel =
+                    (target - self.drag_angle) * DRAG_SPRING - self.drag_angle_vel * DRAG_DAMPING;
                 self.drag_angle_vel += accel * dt;
                 self.drag_angle += self.drag_angle_vel * dt;
-                if self.drag_vx.abs() > SWEAT_SPEED_DIP * env.px_per_dip && now - self.last_sweat >= SWEAT_EVERY_SECS {
+                if self.drag_vx.abs() > SWEAT_SPEED_DIP * env.px_per_dip
+                    && now - self.last_sweat >= SWEAT_EVERY_SECS
+                {
                     self.last_sweat = now;
                     self.emote(Emote::Sweat);
                 }
@@ -929,7 +1069,13 @@ impl Pet {
                     self.y = head_room;
                     vy = 0.0;
                     if env.invisible_ceiling {
-                        self.bump = Some((Glow::Floor { x: self.x, y: env.ceiling }, now));
+                        self.bump = Some((
+                            Glow::Floor {
+                                x: self.x,
+                                y: env.ceiling,
+                            },
+                            now,
+                        ));
                     }
                 }
                 // 從側面撞上禁止範圍就彈回來；從頂端邊緣走下去時腳已經離開頂端、半個身體還壓在上面，
@@ -939,11 +1085,21 @@ impl Pet {
                 {
                     if prev_y > b.top {
                         let wall = if self.x > prev_x { b.left } else { b.right };
-                        self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                        self.bump = Some((
+                            Glow::Wall {
+                                x: wall,
+                                y: self.y - env.pet_height / 2.0,
+                            },
+                            now,
+                        ));
                         self.x = prev_x;
                         vx = -vx * WALL_BOUNCE;
                     } else if self.x < b.left || self.x > b.right {
-                        self.x = if self.x < b.left { b.left - env.pet_half_width } else { b.right + env.pet_half_width };
+                        self.x = if self.x < b.left {
+                            b.left - env.pet_half_width
+                        } else {
+                            b.right + env.pet_half_width
+                        };
                     }
                 }
                 // 往螢幕邊飛就反彈；從牆上往外跳時人在邊界外但正在往內飛，不算撞牆。
@@ -951,7 +1107,13 @@ impl Pet {
                     let left = vx < 0.0;
                     if (left && env.invisible_walls.0) || (!left && env.invisible_walls.1) {
                         let wall = if left { env.wall_left } else { env.wall_right };
-                        self.bump = Some((Glow::Wall { x: wall, y: self.y - env.pet_height / 2.0 }, now));
+                        self.bump = Some((
+                            Glow::Wall {
+                                x: wall,
+                                y: self.y - env.pet_height / 2.0,
+                            },
+                            now,
+                        ));
                     }
                     self.x = self.x.clamp(env.min_x, env.max_x);
                     vx = -vx * WALL_BOUNCE;
@@ -969,12 +1131,35 @@ impl Pet {
                     self.grab = None;
                     self.x = g.x;
                     self.y = self.y.min(g.bottom);
-                    self.set_mode(Mode::ClimbOver { side: g.side, top: g.top, across: g.across, glow: false }, now);
+                    self.set_mode(
+                        Mode::ClimbOver {
+                            side: g.side,
+                            top: g.top,
+                            across: g.across,
+                            glow: false,
+                        },
+                        now,
+                    );
                     return false;
                 }
                 // 往下掉時穿過某個平台的高度 → 落在上面（往上飛時不會被擋）。
-                let platform = (vy > 0.0).then(|| env.platforms.iter().filter(|p| p.y >= prev_y && p.y <= self.y && self.x >= p.left && self.x <= p.right).min_by(|a, b| a.y.total_cmp(&b.y))).flatten();
-                if let Some(top) = platform.map(|p| p.y).or((self.y >= env.ground_y).then_some(env.ground_y)) {
+                let platform = (vy > 0.0)
+                    .then(|| {
+                        env.platforms
+                            .iter()
+                            .filter(|p| {
+                                p.y >= prev_y
+                                    && p.y <= self.y
+                                    && self.x >= p.left
+                                    && self.x <= p.right
+                            })
+                            .min_by(|a, b| a.y.total_cmp(&b.y))
+                    })
+                    .flatten();
+                if let Some(top) = platform
+                    .map(|p| p.y)
+                    .or((self.y >= env.ground_y).then_some(env.ground_y))
+                {
                     // 落在哪就站在哪：起飛前站的視窗還在原地的話，不換掉會被 `stand` 拉回去。
                     self.riding = platform.map(|p| (p.window, p.window_left));
                     self.grab = None;
@@ -993,7 +1178,11 @@ impl Pet {
             }
             Mode::Roll { dir } => {
                 let (lo, hi) = walk_bounds(env);
-                self.slide_to((self.x + dir * ROLL_DIST_HEIGHTS * env.pet_height / ROLL_SECS * dt).clamp(lo, hi), env);
+                self.slide_to(
+                    (self.x + dir * ROLL_DIST_HEIGHTS * env.pet_height / ROLL_SECS * dt)
+                        .clamp(lo, hi),
+                    env,
+                );
                 self.stand(env, now);
                 if matches!(self.mode, Mode::Roll { .. }) {
                     self.finish_after(t, ROLL_SECS, now);
@@ -1004,7 +1193,9 @@ impl Pet {
                 if !matches!(self.mode, Mode::Chase { .. }) {
                     return false;
                 }
-                let target = env.cursor.filter(|c| self.cursor_reachable(*c, env, f32::INFINITY));
+                let target = env
+                    .cursor
+                    .filter(|c| self.cursor_reachable(*c, env, f32::INFINITY));
                 match target {
                     Some((cx, _)) if now < until => {
                         let dx = cx - self.x;
@@ -1014,7 +1205,9 @@ impl Pet {
                             self.emote(Emote::Note);
                             self.set_mode(Mode::Pounce { dir }, now);
                         } else {
-                            let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * CHASE_SPEED_MUL;
+                            let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP)
+                                * env.px_per_dip
+                                * CHASE_SPEED_MUL;
                             let (lo, hi) = walk_bounds(env);
                             let x = (self.x + dir * speed * dt).clamp(lo, hi);
                             if x == self.x || !self.slide_to(x, env) {
@@ -1034,7 +1227,10 @@ impl Pet {
                 let p = t / POUNCE_SECS;
                 if (JUMP_CROUCH..1.0 - JUMP_LAND).contains(&p) {
                     let (lo, hi) = walk_bounds(env);
-                    self.slide_to((self.x + dir * POUNCE_SPEED_HEIGHTS * env.pet_height * dt).clamp(lo, hi), env);
+                    self.slide_to(
+                        (self.x + dir * POUNCE_SPEED_HEIGHTS * env.pet_height * dt).clamp(lo, hi),
+                        env,
+                    );
                 }
                 self.stand(env, now);
                 if matches!(self.mode, Mode::Pounce { .. }) && t >= POUNCE_SECS {
@@ -1104,8 +1300,14 @@ impl Pet {
             }
             Mode::Notify => self.stand(env, now),
             Mode::Climb { side, target_y } => {
-                self.x = if side < 0.0 { env.wall_left } else { env.wall_right };
-                let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * CLIMB_SPEED_MUL;
+                self.x = if side < 0.0 {
+                    env.wall_left
+                } else {
+                    env.wall_right
+                };
+                let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP)
+                    * env.px_per_dip
+                    * CLIMB_SPEED_MUL;
                 self.y -= speed * dt;
                 if self.y <= target_y {
                     self.y = target_y;
@@ -1113,7 +1315,9 @@ impl Pet {
                     self.set_mode(Mode::Cling { side, until }, now);
                 }
             }
-            Mode::ClimbOver { side, top, across, .. } => {
+            Mode::ClimbOver {
+                side, top, across, ..
+            } => {
                 let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip;
                 self.y -= speed * CLIMB_SPEED_MUL * dt;
                 if self.y <= top {
@@ -1123,7 +1327,14 @@ impl Pet {
                     self.riding = None;
                     self.facing_left = side < 0.0;
                     let secs = (across + env.pet_half_width) / speed + 2.0 * WALK_EASE_SECS;
-                    self.set_mode(Mode::Walk { dir: side, until: now + secs as f64, speed_mul: 1.0 }, now);
+                    self.set_mode(
+                        Mode::Walk {
+                            dir: side,
+                            until: now + secs as f64,
+                            speed_mul: 1.0,
+                        },
+                        now,
+                    );
                 }
             }
             Mode::Crouch { leap } => {
@@ -1138,10 +1349,17 @@ impl Pet {
                 }
             }
             Mode::Cling { side, until } => {
-                self.x = if side < 0.0 { env.wall_left } else { env.wall_right };
+                self.x = if side < 0.0 {
+                    env.wall_left
+                } else {
+                    env.wall_right
+                };
                 if now >= until {
                     // 往外、往上跳下來。
-                    let (vx, vy) = (-side * LEAP_OUT_DIP * env.px_per_dip, -LEAP_UP_DIP * env.px_per_dip);
+                    let (vx, vy) = (
+                        -side * LEAP_OUT_DIP * env.px_per_dip,
+                        -LEAP_UP_DIP * env.px_per_dip,
+                    );
                     self.facing_left = vx < 0.0;
                     // 從橫躺變回直立時，身體整個移進螢幕裡（不然起跳那一下有半隻在螢幕外）。
                     self.x = if side < 0.0 { env.min_x } else { env.max_x };
@@ -1158,7 +1376,21 @@ impl Pet {
         if self.facing_left == self.last_facing_left {
             return;
         }
-        let grounded = matches!(self.mode, Mode::Idle { .. } | Mode::Walk { .. } | Mode::Look | Mode::Hop | Mode::Stretch | Mode::Doze | Mode::Yawn | Mode::Sit { .. } | Mode::Notify | Mode::Talk { .. } | Mode::Chase { .. } | Mode::Fetch { .. });
+        let grounded = matches!(
+            self.mode,
+            Mode::Idle { .. }
+                | Mode::Walk { .. }
+                | Mode::Look
+                | Mode::Hop
+                | Mode::Stretch
+                | Mode::Doze
+                | Mode::Yawn
+                | Mode::Sit { .. }
+                | Mode::Notify
+                | Mode::Talk { .. }
+                | Mode::Chase { .. }
+                | Mode::Fetch { .. }
+        );
         self.turn_from = grounded.then_some((self.last_facing_left, now));
         self.last_facing_left = self.facing_left;
     }
@@ -1222,7 +1454,11 @@ impl Pet {
                 let sway = (std::f32::consts::TAU * DIZZY_SWAY_HZ * t).sin();
                 pose.rotation_deg = DIZZY_SWAY_DEG * sway * settle;
                 pose.scale_y = 1.0 - 0.03 * sway.abs() * settle;
-                pose.lift = -0.02 * (std::f32::consts::TAU * DIZZY_SWAY_HZ * 2.0 * t).sin().abs() * settle;
+                pose.lift = -0.02
+                    * (std::f32::consts::TAU * DIZZY_SWAY_HZ * 2.0 * t)
+                        .sin()
+                        .abs()
+                    * settle;
             }
             Mode::Fetch { .. } => {
                 let step = STEPS_PER_SEC * FETCH_SPEED_MUL;
@@ -1255,9 +1491,15 @@ impl Pet {
                 pose.scale_y = 1.0 + 0.05 * s;
                 pose.scale_x = 1.0 - 0.025 * s;
             }
-            Mode::Walk { speed_mul, until, .. } => {
+            Mode::Walk {
+                speed_mul, until, ..
+            } => {
                 let step = STEPS_PER_SEC * speed_mul.max(1.0);
-                let bounce = if speed_mul >= RUN_SPEED_MUL { 0.08 } else { 0.05 };
+                let bounce = if speed_mul >= RUN_SPEED_MUL {
+                    0.08
+                } else {
+                    0.05
+                };
                 // 起步、停步時步伐也跟著變小（緩入緩出）。
                 let ease = walk_ease(t, (until - now) as f32);
                 pose.lift = -bounce * ease * (pi * t * step).sin().abs();
@@ -1272,7 +1514,8 @@ impl Pet {
             Mode::Fall { vx, .. } => {
                 pose.scale_y = 1.08;
                 pose.scale_x = 0.94;
-                pose.rotation_deg = (vx * TUMBLE_DEG_PER_SPEED / self.px_per_dip_hint).clamp(-MAX_TUMBLE_DEG, MAX_TUMBLE_DEG);
+                pose.rotation_deg = (vx * TUMBLE_DEG_PER_SPEED / self.px_per_dip_hint)
+                    .clamp(-MAX_TUMBLE_DEG, MAX_TUMBLE_DEG);
             }
             Mode::Land => {
                 // 阻尼彈簧：一落地壓到最扁，接著彈過頭一點點，再停穩（跟隨動作）。
@@ -1289,7 +1532,11 @@ impl Pet {
             Mode::Stretch => {
                 // 先往下蹲、再往上伸長、最後彈回來。
                 let p = (t / STRETCH_SECS).min(1.0);
-                let s = if p < 0.25 { -(pi * p / 0.25).sin() * 0.4 } else { (pi * (p - 0.25) / 0.75).sin() };
+                let s = if p < 0.25 {
+                    -(pi * p / 0.25).sin() * 0.4
+                } else {
+                    (pi * (p - 0.25) / 0.75).sin()
+                };
                 pose.scale_y = 1.0 + 0.09 * s;
                 pose.scale_x = 1.0 - 0.05 * s;
             }
@@ -1358,30 +1605,56 @@ impl Pet {
         let mut out = Vec::new();
         let (h, hw) = (env.pet_height, env.pet_half_width);
         let wall_mid = self.y - hw;
-        let invisible_side = |side: f32| if side < 0.0 { env.invisible_walls.0 } else { env.invisible_walls.1 };
+        let invisible_side = |side: f32| {
+            if side < 0.0 {
+                env.invisible_walls.0
+            } else {
+                env.invisible_walls.1
+            }
+        };
         match self.mode {
-            Mode::ClimbOver { glow: true, .. } => out.push(Glow::Wall { x: self.x, y: wall_mid }),
+            Mode::ClimbOver { glow: true, .. } => out.push(Glow::Wall {
+                x: self.x,
+                y: wall_mid,
+            }),
             Mode::Climb { side, .. } | Mode::Cling { side, .. } => {
                 if invisible_side(side) {
-                    out.push(Glow::Wall { x: self.x, y: wall_mid });
+                    out.push(Glow::Wall {
+                        x: self.x,
+                        y: wall_mid,
+                    });
                 }
                 // 爬到頭頂碰到活動範圍的頂：頂上那一段（橫的）也亮。
                 if env.invisible_ceiling && self.y - h <= env.ceiling + BLOCK_TOUCH_PX {
-                    out.push(Glow::Floor { x: self.x - side * hw, y: env.ceiling });
+                    out.push(Glow::Floor {
+                        x: self.x - side * hw,
+                        y: env.ceiling,
+                    });
                 }
             }
             Mode::Drag | Mode::Fall { .. } | Mode::ClimbOver { .. } => {}
             _ => {
                 let body_mid = self.y - h / 2.0;
                 if env.invisible_walls.0 && self.x <= env.min_x + BLOCK_TOUCH_PX {
-                    out.push(Glow::Wall { x: env.wall_left, y: body_mid });
+                    out.push(Glow::Wall {
+                        x: env.wall_left,
+                        y: body_mid,
+                    });
                 }
                 if env.invisible_walls.1 && self.x >= env.max_x - BLOCK_TOUCH_PX {
-                    out.push(Glow::Wall { x: env.wall_right, y: body_mid });
+                    out.push(Glow::Wall {
+                        x: env.wall_right,
+                        y: body_mid,
+                    });
                 }
-                let on_block = env.blocks.iter().any(|b| (self.y - b.top).abs() < 1.0 && self.x + hw > b.left && self.x - hw < b.right);
+                let on_block = env.blocks.iter().any(|b| {
+                    (self.y - b.top).abs() < 1.0 && self.x + hw > b.left && self.x - hw < b.right
+                });
                 if on_block || (env.invisible_floor && (self.y - env.ground_y).abs() < 1.0) {
-                    out.push(Glow::Floor { x: self.x, y: self.y });
+                    out.push(Glow::Floor {
+                        x: self.x,
+                        y: self.y,
+                    });
                 }
             }
         }
@@ -1398,7 +1671,9 @@ impl Pet {
     /// 身體站在 `(x, y)` 時會碰到的禁止範圍。
     fn block_at(&self, x: f32, y: f32, env: &Env) -> Option<Rect> {
         let (hw, h, e) = (env.pet_half_width, env.pet_height, BLOCK_TOUCH_PX);
-        env.blocks.iter().copied().find(|b| x + hw > b.left + e && x - hw < b.right - e && y > b.top + e && y - h < b.bottom - e)
+        env.blocks.iter().copied().find(|b| {
+            x + hw > b.left + e && x - hw < b.right - e && y > b.top + e && y - h < b.bottom - e
+        })
     }
 
     /// 從 `prev_x` 走到現在的位置，是不是剛走進某個禁止範圍（本來就在裡面的不算，讓牠走得出來）。
@@ -1428,7 +1703,15 @@ impl Pet {
         let side = dir.signum();
         self.x = if side > 0.0 { b.left } else { b.right };
         self.riding = None;
-        self.set_mode(Mode::ClimbOver { side, top: b.top, across: b.right - b.left, glow: true }, now);
+        self.set_mode(
+            Mode::ClimbOver {
+                side,
+                top: b.top,
+                across: b.right - b.left,
+                glow: true,
+            },
+            now,
+        );
         true
     }
 
@@ -1456,22 +1739,35 @@ impl Pet {
             };
             (reach >= self.y - h && crossed(at)).then_some((at, p.y, p.right - p.left))
         });
-        let Some((at, top, width)) = edge else { return false };
+        let Some((at, top, width)) = edge else {
+            return false;
+        };
         if self.block_at(at, self.y, env).is_some() || self.rand01() >= chance {
             return false;
         }
         self.x = at;
         self.riding = None;
         // 翻上去後走一小段停下來（不會一路走到另一頭掉下去）。
-        let across = (width - env.pet_half_width * 2.0).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
-        self.set_mode(Mode::ClimbOver { side: dir.signum(), top, across, glow: false }, now);
+        let across =
+            (width - env.pet_half_width * 2.0).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
+        self.set_mode(
+            Mode::ClimbOver {
+                side: dir.signum(),
+                top,
+                across,
+                glow: false,
+            },
+            now,
+        );
         true
     }
 
     /// 站在某個平台上往 `dir` 走，這一步跨出了它的邊緣：看前面有什麼決定跳、停下來看、還是照樣走下去掉落
     /// （規則見 `STEP_OVER_GAP_WIDTHS` 那組常數）。回傳 `true` = 換了動作。
     fn at_platform_edge(&mut self, prev_x: f32, dir: f32, env: &Env, now: f64) -> bool {
-        let Some(here) = env.platforms.iter().find(|p| (p.y - self.y).abs() <= PLATFORM_SNAP_PX && prev_x >= p.left && prev_x <= p.right) else {
+        let Some(here) = env.platforms.iter().find(|p| {
+            (p.y - self.y).abs() <= PLATFORM_SNAP_PX && prev_x >= p.left && prev_x <= p.right
+        }) else {
             return false;
         };
         let edge = if dir > 0.0 { here.right } else { here.left };
@@ -1486,18 +1782,31 @@ impl Pet {
             .iter()
             .filter(|p| !std::ptr::eq(*p, here))
             .filter_map(|p| {
-                let (near, far) = if dir > 0.0 { (p.left, p.right) } else { (-p.right, -p.left) };
+                let (near, far) = if dir > 0.0 {
+                    (p.left, p.right)
+                } else {
+                    (-p.right, -p.left)
+                };
                 (far > edge * dir + hw).then(|| (p, (near - edge * dir).max(0.0)))
             })
             .filter(|(_, gap)| *gap <= LEAP_LOOK_WIDTHS * width)
             .min_by(|(a, ga), (b, gb)| ga.total_cmp(gb).then(a.y.total_cmp(&b.y)));
-        let Some((target, gap)) = ahead else { return false };
+        let Some((target, gap)) = ahead else {
+            return false;
+        };
         let (target, gap) = (*target, gap);
         let rise = self.y - target.y;
-        let near = if dir > 0.0 { target.left.max(edge) } else { target.right.min(edge) };
+        let near = if dir > 0.0 {
+            target.left.max(edge)
+        } else {
+            target.right.min(edge)
+        };
         let reach = LEAP_REACH_WIDTHS * width;
         let leap = if gap > reach {
-            if gap > LEAP_TRY_WIDTHS * width || rise > LEAP_UP_HEIGHTS * h || self.rand01() >= LEAP_TRY_FAR_CHANCE {
+            if gap > LEAP_TRY_WIDTHS * width
+                || rise > LEAP_UP_HEIGHTS * h
+                || self.rand01() >= LEAP_TRY_FAR_CHANCE
+            {
                 // 太遠：停在邊緣探頭看看。
                 self.x = prev_x;
                 self.emote(Emote::Question);
@@ -1508,20 +1817,53 @@ impl Pet {
             }
             // 只差一點：用力跳，最後還是差一點點搆到邊緣。
             let x = near - dir * hw * LEAP_MISS_HALF_WIDTHS;
-            Leap { x, y: target.y, apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h, grab: None, miss: true }
+            Leap {
+                x,
+                y: target.y,
+                apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h,
+                grab: None,
+                miss: true,
+            }
         } else if rise <= LEAP_UP_HEIGHTS * h {
-            let x = (near + dir * hw * LEAP_LAND_INSET_HALF_WIDTHS).clamp(target.left, target.right).clamp(env.min_x, env.max_x);
-            Leap { x, y: target.y, apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h, grab: None, miss: false }
+            let x = (near + dir * hw * LEAP_LAND_INSET_HALF_WIDTHS)
+                .clamp(target.left, target.right)
+                .clamp(env.min_x, env.max_x);
+            Leap {
+                x,
+                y: target.y,
+                apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h,
+                grab: None,
+                miss: false,
+            }
         } else {
             // 對面高很多：跳過去抓住側邊。側邊要真的是視窗的邊、在前面（不是在頭頂上）、露出來的那截往下伸到搆得到的地方，頂上也要站得下。
-            let (side_x, reach) = if dir > 0.0 { (target.left, target.sides.0) } else { (target.right, target.sides.1) };
-            let Some(reach) = reach.filter(|r| *r >= self.y - h) else { return false };
+            let (side_x, reach) = if dir > 0.0 {
+                (target.left, target.sides.0)
+            } else {
+                (target.right, target.sides.1)
+            };
+            let Some(reach) = reach.filter(|r| *r >= self.y - h) else {
+                return false;
+            };
             if (side_x - edge) * dir < 0.0 || target.y - h < env.ceiling {
                 return false;
             }
             let grab_y = (self.y - LEAP_UP_HEIGHTS * h).clamp(target.y, reach);
-            let across = (target.right - target.left - width).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
-            Leap { x: side_x, y: grab_y, apex_y: grab_y, grab: Some(Grab { x: side_x, side: dir, top: target.y, bottom: reach, across }), miss: false }
+            let across = (target.right - target.left - width).max(0.0)
+                * self.rand_range(WINDOW_TOP_WALK_FRACTION);
+            Leap {
+                x: side_x,
+                y: grab_y,
+                apex_y: grab_y,
+                grab: Some(Grab {
+                    x: side_x,
+                    side: dir,
+                    top: target.y,
+                    bottom: reach,
+                    across,
+                }),
+                miss: false,
+            }
         };
         self.x = prev_x;
         self.facing_left = dir < 0.0;
@@ -1536,7 +1878,11 @@ impl Pet {
         let rise = (self.y - leap.apex_y).max(1.0);
         let vy = -(2.0 * g * rise).sqrt();
         let up_secs = -vy / g;
-        let secs = if leap.grab.is_some() { up_secs } else { up_secs + (2.0 * (leap.y - leap.apex_y).max(0.0) / g).sqrt() };
+        let secs = if leap.grab.is_some() {
+            up_secs
+        } else {
+            up_secs + (2.0 * (leap.y - leap.apex_y).max(0.0) / g).sqrt()
+        };
         let drag_kept = (1.0 - (-AIR_DRAG * secs).exp()) / AIR_DRAG;
         ((leap.x - self.x) / drag_kept, vy)
     }
@@ -1545,18 +1891,40 @@ impl Pet {
     fn small_gap_y(&self, x: f32, y: f32, env: &Env) -> Option<f32> {
         let max_gap = STEP_OVER_GAP_WIDTHS * 2.0 * env.pet_half_width;
         let level = |p: &&Platform| (p.y - y).abs() <= PLATFORM_SNAP_PX;
-        let left = env.platforms.iter().filter(level).filter(|p| p.right <= x && x - p.right <= max_gap);
-        left.flat_map(|a| env.platforms.iter().filter(level).filter(move |b| b.left >= x && b.left - a.right <= max_gap).map(move |_| a.y)).next()
+        let left = env
+            .platforms
+            .iter()
+            .filter(level)
+            .filter(|p| p.right <= x && x - p.right <= max_gap);
+        left.flat_map(|a| {
+            env.platforms
+                .iter()
+                .filter(level)
+                .filter(move |b| b.left >= x && b.left - a.right <= max_gap)
+                .map(move |_| a.y)
+        })
+        .next()
     }
 
     /// 被放進禁止範圍裡：往比較近的那一邊走出去。
     fn walk_out_of(&mut self, b: Rect, env: &Env, now: f64) {
         let (to_left, to_right) = (self.x - b.left, b.right - self.x);
-        let (dir, dist) = if to_left <= to_right { (-1.0, to_left) } else { (1.0, to_right) };
+        let (dir, dist) = if to_left <= to_right {
+            (-1.0, to_left)
+        } else {
+            (1.0, to_right)
+        };
         let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip;
         let secs = (dist + env.pet_half_width) / speed + 2.0 * WALK_EASE_SECS;
         self.facing_left = dir < 0.0;
-        self.set_mode(Mode::Walk { dir, until: now + secs as f64, speed_mul: 1.0 }, now);
+        self.set_mode(
+            Mode::Walk {
+                dir,
+                until: now + secs as f64,
+                speed_mul: 1.0,
+            },
+            now,
+        );
     }
 
     /// 動畫預覽工具用：直接開始某個動作（平常這些是隨機或由輸入觸發的）。
@@ -1577,10 +1945,22 @@ impl Pet {
                 self.emote(Emote::Hearts);
                 self.set_mode(Mode::Petted, now);
             }
-            Demo::Walk { secs } => self.set_mode(Mode::Walk { dir: 1.0, until: now + secs as f64, speed_mul: 1.0 }, now),
+            Demo::Walk { secs } => self.set_mode(
+                Mode::Walk {
+                    dir: 1.0,
+                    until: now + secs as f64,
+                    speed_mul: 1.0,
+                },
+                now,
+            ),
             Demo::ClimbLeft => self.start_climb(-1.0, env, now),
             Demo::Sleep => self.set_mode(Mode::Sleep, now),
-            Demo::Sit => self.set_mode(Mode::Sit { until: now + SIT_SECS.0 as f64 }, now),
+            Demo::Sit => self.set_mode(
+                Mode::Sit {
+                    until: now + SIT_SECS.0 as f64,
+                },
+                now,
+            ),
             Demo::Yawn => self.set_mode(Mode::Yawn, now),
             Demo::Talk => self.set_mode(Mode::Talk { until: now + 3.0 }, now),
             Demo::Dizzy => {
@@ -1595,21 +1975,34 @@ impl Pet {
     fn start_climb(&mut self, side: f32, env: &Env, now: f64) {
         let lowest = env.ground_y - env.pet_height * CLIMB_MIN_RISE_HEIGHTS;
         // 頂端要留一個身高（轉 90 度後桌寵的寬度在牆上往上長）。
-        let highest = (env.ceiling + env.pet_height).max(env.ground_y - env.pet_height * CLIMB_MAX_RISE_HEIGHTS).min(lowest);
+        let highest = (env.ceiling + env.pet_height)
+            .max(env.ground_y - env.pet_height * CLIMB_MAX_RISE_HEIGHTS)
+            .min(lowest);
         let target_y = highest + (lowest - highest) * self.rand01();
-        self.x = if side < 0.0 { env.wall_left } else { env.wall_right };
+        self.x = if side < 0.0 {
+            env.wall_left
+        } else {
+            env.wall_right
+        };
         self.set_mode(Mode::Climb { side, target_y }, now);
     }
 
     /// 滑鼠靠近時轉頭看它、身體微微往那邊傾。
     fn look_at_cursor(&mut self, env: &Env) {
         let target = match env.cursor {
-            Some((cx, cy)) if (cx - self.x).abs() < env.pet_height * LOOK_AT_CURSOR_HEIGHTS && (cy - self.y).abs() < env.pet_height * LOOK_AT_CURSOR_HEIGHTS => {
+            Some((cx, cy))
+                if (cx - self.x).abs() < env.pet_height * LOOK_AT_CURSOR_HEIGHTS
+                    && (cy - self.y).abs() < env.pet_height * LOOK_AT_CURSOR_HEIGHTS =>
+            {
                 // 滑鼠就在正上方時不要左右亂轉。
                 if (cx - self.x).abs() > env.pet_height * 0.15 {
                     self.facing_left = cx < self.x;
                 }
-                if self.facing_left { -LEAN_DEG } else { LEAN_DEG }
+                if self.facing_left {
+                    -LEAN_DEG
+                } else {
+                    LEAN_DEG
+                }
             }
             _ => 0.0,
         };
@@ -1619,8 +2012,22 @@ impl Pet {
     /// 有人拿滑鼠在牠旁邊快速左右晃（像拿逗貓棒）：牠正閒著、不是安靜模式就要撲過去。
     fn teased(&mut self, env: &Env, now: f64) -> bool {
         let h = env.pet_height;
-        let idle = env.activity != Activity::Calm && matches!(self.mode, Mode::Idle { .. } | Mode::Walk { .. } | Mode::Look | Mode::Sit { .. } | Mode::Stretch | Mode::Yawn | Mode::Hop | Mode::Talk { .. });
-        let near = env.cursor.filter(|&(cx, cy)| idle && (cx - self.x).abs() > env.pet_half_width && self.cursor_reachable((cx, cy), env, h * TEASE_NOTICE_HEIGHTS));
+        let idle = env.activity != Activity::Calm
+            && matches!(
+                self.mode,
+                Mode::Idle { .. }
+                    | Mode::Walk { .. }
+                    | Mode::Look
+                    | Mode::Sit { .. }
+                    | Mode::Stretch
+                    | Mode::Yawn
+                    | Mode::Hop
+                    | Mode::Talk { .. }
+            );
+        let near = env.cursor.filter(|&(cx, cy)| {
+            idle && (cx - self.x).abs() > env.pet_half_width
+                && self.cursor_reachable((cx, cy), env, h * TEASE_NOTICE_HEIGHTS)
+        });
         let Some((cx, _)) = near else {
             self.tease_anchor_x = None;
             self.tease_reversals.clear();
@@ -1637,7 +2044,8 @@ impl Pet {
             self.tease_reversals.push(now);
         }
         self.tease_dir = dir;
-        self.tease_reversals.retain(|t| now - t <= TEASE_WINDOW_SECS);
+        self.tease_reversals
+            .retain(|t| now - t <= TEASE_WINDOW_SECS);
         if self.tease_reversals.len() < TEASE_REVERSALS {
             return false;
         }
@@ -1654,7 +2062,17 @@ impl Pet {
     fn notices_item(&self, env: &Env, now: f64) -> bool {
         env.item.is_some_and(|i| i.wanted)
             && now >= self.ignore_item_until
-            && matches!(self.mode, Mode::Idle { .. } | Mode::Walk { .. } | Mode::Sit { .. } | Mode::Look | Mode::Stretch | Mode::Yawn | Mode::Doze | Mode::Talk { .. })
+            && matches!(
+                self.mode,
+                Mode::Idle { .. }
+                    | Mode::Walk { .. }
+                    | Mode::Sit { .. }
+                    | Mode::Look
+                    | Mode::Stretch
+                    | Mode::Yawn
+                    | Mode::Doze
+                    | Mode::Talk { .. }
+            )
     }
 
     /// 跑去拿東西：同一層就跑過去（東西還在空中就跑到它底下等）；搆到了點心就吃、球就踢；
@@ -1675,7 +2093,13 @@ impl Pet {
             if item.food {
                 self.set_mode(Mode::Eat, now);
             } else {
-                let dir = if dx.abs() > 1.0 { dx.signum() } else if self.facing_left { -1.0 } else { 1.0 };
+                let dir = if dx.abs() > 1.0 {
+                    dx.signum()
+                } else if self.facing_left {
+                    -1.0
+                } else {
+                    1.0
+                };
                 self.happen(Happening::Kicked { dir });
                 self.emote(Emote::Note);
                 self.set_mode(Mode::Hop, now);
@@ -1683,10 +2107,15 @@ impl Pet {
             return;
         }
         if (same_level || !item.grounded) && dx.abs() > reach * 0.5 {
-            let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP) * env.px_per_dip * FETCH_SPEED_MUL;
+            let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP)
+                * env.px_per_dip
+                * FETCH_SPEED_MUL;
             let (lo, hi) = walk_bounds(env);
             // 隔著禁止範圍就過不去，跟搆不到一樣等一下就放棄。
-            if self.slide_to((self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi), env) {
+            if self.slide_to(
+                (self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi),
+                env,
+            ) {
                 return;
             }
         }
@@ -1701,7 +2130,12 @@ impl Pet {
     fn cursor_reachable(&self, (cx, cy): (f32, f32), env: &Env, max_dx: f32) -> bool {
         let h = env.pet_height;
         let (lo, hi) = walk_bounds(env);
-        cy <= self.y + h * 0.5 && cy >= self.y - h * CHASE_MAX_ABOVE_HEIGHTS && (cx - self.x).abs() <= max_dx && cx >= lo - h && cx <= hi + h && self.block_at(cx, self.y, env).is_none()
+        cy <= self.y + h * 0.5
+            && cy >= self.y - h * CHASE_MAX_ABOVE_HEIGHTS
+            && (cx - self.x).abs() <= max_dx
+            && cx >= lo - h
+            && cx <= hi + h
+            && self.block_at(cx, self.y, env).is_none()
     }
 
     fn finish_after(&mut self, t: f32, secs: f32, now: f64) {
@@ -1719,12 +2153,22 @@ impl Pet {
         self.px_per_dip_hint = env.px_per_dip;
         // 站著的視窗被拖動：跟著視窗一起移動（上下左右都跟）。
         if let Some((window, last_left)) = self.riding
-            && let Some(left) = env.platforms.iter().find(|p| p.window == window).map(|p| p.window_left)
+            && let Some(left) = env
+                .platforms
+                .iter()
+                .find(|p| p.window == window)
+                .map(|p| p.window_left)
         {
             let dx = left - last_left;
             let x = (self.x + dx).clamp(env.min_x, env.max_x);
-            if let Some(p) = env.platforms.iter().find(|p| p.window == window && x >= p.left && x <= p.right) {
-                if (dx.abs() + (p.y - self.y).abs()) > RIDE_NOTICE_PX && now - self.last_ride_notice >= RIDE_NOTICE_EVERY_SECS {
+            if let Some(p) = env
+                .platforms
+                .iter()
+                .find(|p| p.window == window && x >= p.left && x <= p.right)
+            {
+                if (dx.abs() + (p.y - self.y).abs()) > RIDE_NOTICE_PX
+                    && now - self.last_ride_notice >= RIDE_NOTICE_EVERY_SECS
+                {
                     self.last_ride_notice = now;
                     self.happen(Happening::Riding);
                 }
@@ -1735,7 +2179,9 @@ impl Pet {
             }
         }
         self.x = self.x.clamp(env.min_x, env.max_x);
-        if let Some(p) = env.platforms.iter().find(|p| (p.y - self.y).abs() <= PLATFORM_SNAP_PX && self.x >= p.left && self.x <= p.right) {
+        if let Some(p) = env.platforms.iter().find(|p| {
+            (p.y - self.y).abs() <= PLATFORM_SNAP_PX && self.x >= p.left && self.x <= p.right
+        }) {
             self.y = p.y;
             self.riding = Some((p.window, p.window_left));
         } else if let Some(y) = self.small_gap_y(self.x, self.y, env) {
@@ -1751,18 +2197,37 @@ impl Pet {
     }
 
     fn pick_next_activity(&mut self, now: f64, env: &Env) {
-        let doze = if env.idle_input_secs >= DOZE_AFTER_IDLE_SECS { NEXT_DOZE } else { 0.0 };
+        let doze = if env.idle_input_secs >= DOZE_AFTER_IDLE_SECS {
+            NEXT_DOZE
+        } else {
+            0.0
+        };
         let walk = match env.activity {
             Activity::Lively => NEXT_WALK * 1.5,
             Activity::Normal => NEXT_WALK,
             Activity::Calm => 0.0,
         };
         self.activity = env.activity;
-        let sit = if env.activity == Activity::Calm { NEXT_SIT * SIT_CALM_MUL } else { NEXT_SIT };
+        let sit = if env.activity == Activity::Calm {
+            NEXT_SIT * SIT_CALM_MUL
+        } else {
+            NEXT_SIT
+        };
         let moving = env.activity != Activity::Calm;
         let spin = NEXT_SPIN;
         let roll = if moving { NEXT_ROLL } else { 0.0 };
-        let choices = [walk, NEXT_HOP, NEXT_LOOK, NEXT_STRETCH, doze, NEXT_YAWN, sit, spin, roll, NEXT_IDLE];
+        let choices = [
+            walk,
+            NEXT_HOP,
+            NEXT_LOOK,
+            NEXT_STRETCH,
+            doze,
+            NEXT_YAWN,
+            sit,
+            spin,
+            roll,
+            NEXT_IDLE,
+        ];
         let total: f32 = choices.iter().sum();
         let mut pick = self.rand01() * total;
         let mut index = choices.len() - 1;
@@ -1777,9 +2242,24 @@ impl Pet {
             0 => {
                 let dir = if self.rand01() < 0.5 { -1.0 } else { 1.0 };
                 let until = now + self.rand_range(WALK_SECS) as f64;
-                let run_chance = if env.activity == Activity::Lively { RUN_CHANCE_LIVELY } else { RUN_CHANCE };
-                let speed_mul = if self.rand01() < run_chance { RUN_SPEED_MUL } else { self.rand_range(WALK_SPEED_MUL) };
-                self.set_mode(Mode::Walk { dir, until, speed_mul }, now);
+                let run_chance = if env.activity == Activity::Lively {
+                    RUN_CHANCE_LIVELY
+                } else {
+                    RUN_CHANCE
+                };
+                let speed_mul = if self.rand01() < run_chance {
+                    RUN_SPEED_MUL
+                } else {
+                    self.rand_range(WALK_SPEED_MUL)
+                };
+                self.set_mode(
+                    Mode::Walk {
+                        dir,
+                        until,
+                        speed_mul,
+                    },
+                    now,
+                );
             }
             1 => {
                 if self.rand01() < NOTE_ON_HOP_CHANCE {
@@ -1931,7 +2411,10 @@ mod tests {
         assert!(run(&mut pet, &mut now, 2.0, &env), "should land within 2s");
         assert_eq!(pet.y, env.ground_y);
         assert_ne!(pet.state(), states::FALL);
-        assert!(pet.drain_emotes().contains(&Emote::Dust), "landing kicks up dust");
+        assert!(
+            pet.drain_emotes().contains(&Emote::Dust),
+            "landing kicks up dust"
+        );
     }
 
     #[test]
@@ -1941,7 +2424,11 @@ mod tests {
         pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, 0.0, &env);
         pet.input(Input::PointerMove { x: 502.0, y: 951.0 }, 0.0, &env);
         pet.input(Input::PointerUp, 0.0, &env);
-        assert!([states::HAPPY, states::SPIN].contains(&pet.state()), "a click hops or spins, got {}", pet.state());
+        assert!(
+            [states::HAPPY, states::SPIN].contains(&pet.state()),
+            "a click hops or spins, got {}",
+            pet.state()
+        );
         assert_eq!((pet.x, pet.y), (500.0, 1000.0));
         assert_eq!(pet.drain_emotes(), vec![Emote::Hearts]);
     }
@@ -1958,7 +2445,12 @@ mod tests {
             assert!((env.wall_left..=env.wall_right).contains(&pet.x));
             assert!(pet.y <= env.ground_y);
             if !matches!(pet.state(), states::CLIMB | states::FALL | states::LAND) {
-                assert!((env.min_x..=env.max_x).contains(&pet.x), "x = {} in {}", pet.x, pet.state());
+                assert!(
+                    (env.min_x..=env.max_x).contains(&pet.x),
+                    "x = {} in {}",
+                    pet.x,
+                    pet.state()
+                );
                 assert_eq!(pet.y, env.ground_y);
             }
         }
@@ -1978,7 +2470,17 @@ mod tests {
             // 眨眼只是待機中閃一下的畫面，看 pose 才看得到。
             seen.insert(pet.pose(now).state);
         }
-        for s in [states::IDLE, states::WALK, states::HOP, states::LOOK, states::WAKE, states::DOZE, states::YAWN, states::SIT, states::BLINK] {
+        for s in [
+            states::IDLE,
+            states::WALK,
+            states::HOP,
+            states::LOOK,
+            states::WAKE,
+            states::DOZE,
+            states::YAWN,
+            states::SIT,
+            states::BLINK,
+        ] {
             assert!(seen.contains(s), "never saw {s} in 10 minutes: {seen:?}");
         }
     }
@@ -2016,7 +2518,14 @@ mod tests {
         pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, now, &env);
         for i in 0..30 {
             now += DT as f64;
-            pet.input(Input::PointerMove { x: 500.0 + i as f32 * 60.0, y: 700.0 }, now, &env);
+            pet.input(
+                Input::PointerMove {
+                    x: 500.0 + i as f32 * 60.0,
+                    y: 700.0,
+                },
+                now,
+                &env,
+            );
             pet.update(now, DT, &env);
         }
         assert!(pet.drain_emotes().contains(&Emote::Sweat));
@@ -2079,7 +2588,14 @@ mod tests {
 
     /// 拖著往右甩、放手：會往右飛一段，撞到右邊反彈，最後落地。
     fn throw_right(pet: &mut Pet, now: &mut f64, env: &Env) {
-        pet.input(Input::PointerDown { x: pet.x, y: pet.y - 50.0 }, *now, env);
+        pet.input(
+            Input::PointerDown {
+                x: pet.x,
+                y: pet.y - 50.0,
+            },
+            *now,
+            env,
+        );
         for _ in 0..10 {
             *now += DT as f64;
             let (x, y) = (pet.x + 30.0, pet.y - 50.0 - 10.0);
@@ -2103,14 +2619,25 @@ mod tests {
             hit_wall |= pet.x >= env.max_x;
         }
         assert!(hit_wall, "flew right into the wall");
-        assert!(pet.x < env.max_x && pet.x > released_at - 400.0, "bounced back a little");
+        assert!(
+            pet.x < env.max_x && pet.x > released_at - 400.0,
+            "bounced back a little"
+        );
         assert_eq!(pet.y, env.ground_y);
     }
 
     #[test]
     fn lands_on_a_window_top_and_walks_off_its_edge() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 }];
+        env.platforms = vec![Platform {
+            left: 400.0,
+            right: 600.0,
+            y: 700.0,
+            window: 1,
+            window_left: 400.0,
+            sides: (None, None),
+            bottom: 1000.0,
+        }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 1000.0, now, 6);
         pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, now, &env);
@@ -2135,11 +2662,29 @@ mod tests {
     /// 回傳：牠最後站在哪個視窗（`None` = 地上）、途中有沒有抓著側邊爬、有沒有停下來探頭。
     fn walk_to_right_edge(right: Platform, seed: u64) -> (Option<isize>, bool, bool) {
         let mut env = env();
-        env.platforms = vec![Platform { left: 200.0, right: 800.0, y: 700.0, window: 1, window_left: 200.0, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 }, right];
+        env.platforms = vec![
+            Platform {
+                left: 200.0,
+                right: 800.0,
+                y: 700.0,
+                window: 1,
+                window_left: 200.0,
+                sides: (Some(1000.0), Some(1000.0)),
+                bottom: 1000.0,
+            },
+            right,
+        ];
         let mut now = 0.0;
         let mut pet = Pet::new(700.0, 700.0, now, seed);
         pet.stand(&env, now);
-        pet.set_mode(Mode::Walk { dir: 1.0, until: now + 6.0, speed_mul: 1.0 }, now);
+        pet.set_mode(
+            Mode::Walk {
+                dir: 1.0,
+                until: now + 6.0,
+                speed_mul: 1.0,
+            },
+            now,
+        );
         let (mut climbed, mut looked) = (false, false);
         for _ in 0..(30.0 / DT) as usize {
             now += DT as f64;
@@ -2150,13 +2695,28 @@ mod tests {
                 break;
             }
         }
-        let on = (pet.y < env.ground_y).then(|| env.platforms.iter().find(|p| (p.y - pet.y).abs() < 1.0 && pet.x >= p.left && pet.x <= p.right).map(|p| p.window)).flatten();
+        let on = (pet.y < env.ground_y)
+            .then(|| {
+                env.platforms
+                    .iter()
+                    .find(|p| (p.y - pet.y).abs() < 1.0 && pet.x >= p.left && pet.x <= p.right)
+                    .map(|p| p.window)
+            })
+            .flatten();
         (on, climbed, looked)
     }
 
     /// 右邊的視窗：左邊緣在 `left`、頂端在 `y`。
     fn right_window(left: f32, y: f32) -> Platform {
-        Platform { left, right: left + 600.0, y, window: 2, window_left: left, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 }
+        Platform {
+            left,
+            right: left + 600.0,
+            y,
+            window: 2,
+            window_left: left,
+            sides: (Some(1000.0), Some(1000.0)),
+            bottom: 1000.0,
+        }
     }
 
     #[test]
@@ -2194,7 +2754,14 @@ mod tests {
                     other => panic!("gap at {left}, seed {seed}: {other:?}"),
                 }
             }
-            assert!(if may_try { looked > fell && fell > 0 } else { fell == 0 }, "gap at {left}: looked {looked}, fell {fell}");
+            assert!(
+                if may_try {
+                    looked > fell && fell > 0
+                } else {
+                    fell == 0
+                },
+                "gap at {left}: looked {looked}, fell {fell}"
+            );
         }
     }
 
@@ -2202,8 +2769,24 @@ mod tests {
     fn thrown_from_one_window_onto_another_stays_there() {
         let mut env = env();
         env.platforms = vec![
-            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 },
-            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0, sides: (None, None), bottom: 1000.0 },
+            Platform {
+                left: 400.0,
+                right: 900.0,
+                y: 700.0,
+                window: 1,
+                window_left: 400.0,
+                sides: (None, None),
+                bottom: 1000.0,
+            },
+            Platform {
+                left: 400.0,
+                right: 900.0,
+                y: 400.0,
+                window: 2,
+                window_left: 400.0,
+                sides: (None, None),
+                bottom: 1000.0,
+            },
         ];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
@@ -2213,14 +2796,25 @@ mod tests {
         pet.input(Input::PointerMove { x: 500.0, y: 300.0 }, now, &env);
         pet.input(Input::PointerUp, now, &env);
         run(&mut pet, &mut now, 2.0, &env);
-        assert_eq!(pet.y, 400.0, "stays on the upper window instead of snapping back to the one it was picked from");
+        assert_eq!(
+            pet.y, 400.0,
+            "stays on the upper window instead of snapping back to the one it was picked from"
+        );
         assert_eq!(pet.riding_window(), Some(2));
     }
 
     #[test]
     fn window_moving_away_drops_the_pet() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 }];
+        env.platforms = vec![Platform {
+            left: 400.0,
+            right: 600.0,
+            y: 700.0,
+            window: 1,
+            window_left: 400.0,
+            sides: (None, None),
+            bottom: 1000.0,
+        }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
         run(&mut pet, &mut now, 0.1, &env);
@@ -2248,7 +2842,15 @@ mod tests {
     fn climbs_up_the_side_of_a_window_and_stands_on_top() {
         let mut env = env();
         env.activity = Activity::Lively;
-        env.platforms = vec![Platform { left: 700.0, right: 1100.0, y: 600.0, window: 1, window_left: 700.0, sides: (Some(950.0), Some(950.0)), bottom: 950.0 }];
+        env.platforms = vec![Platform {
+            left: 700.0,
+            right: 1100.0,
+            y: 600.0,
+            window: 1,
+            window_left: 700.0,
+            sides: (Some(950.0), Some(950.0)),
+            bottom: 950.0,
+        }];
         let mut now = 0.0;
         let mut pet = Pet::new(300.0, 1000.0, now, 17);
         let (mut climbed, mut on_top) = (false, false);
@@ -2257,13 +2859,19 @@ mod tests {
             pet.update(now, DT, &env);
             if pet.state() == states::CLIMB && (pet.x == 700.0 || pet.x == 1100.0) {
                 climbed = true;
-                assert!(pet.glows(&env, now).is_empty(), "a window is visible: no red glow");
+                assert!(
+                    pet.glows(&env, now).is_empty(),
+                    "a window is visible: no red glow"
+                );
             } else if climbed && pet.y == 600.0 && pet.state() != states::CLIMB {
                 on_top = true;
                 break;
             }
         }
-        assert!(climbed && on_top, "climbed the window's side {climbed}, stood on its top {on_top}");
+        assert!(
+            climbed && on_top,
+            "climbed the window's side {climbed}, stood on its top {on_top}"
+        );
     }
 
     #[test]
@@ -2271,8 +2879,24 @@ mod tests {
         let mut env = env();
         env.activity = Activity::Lively;
         env.platforms = vec![
-            Platform { left: 300.0, right: 1500.0, y: 750.0, window: 1, window_left: 300.0, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 },
-            Platform { left: 900.0, right: 1300.0, y: 450.0, window: 2, window_left: 900.0, sides: (Some(800.0), Some(800.0)), bottom: 800.0 },
+            Platform {
+                left: 300.0,
+                right: 1500.0,
+                y: 750.0,
+                window: 1,
+                window_left: 300.0,
+                sides: (Some(1000.0), Some(1000.0)),
+                bottom: 1000.0,
+            },
+            Platform {
+                left: 900.0,
+                right: 1300.0,
+                y: 450.0,
+                window: 2,
+                window_left: 900.0,
+                sides: (Some(800.0), Some(800.0)),
+                bottom: 800.0,
+            },
         ];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 750.0, now, 17);
@@ -2293,7 +2917,10 @@ mod tests {
         for _ in 0..(900.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            assert!(!(pet.state() == states::CLIMB && (pet.x == 900.0 || pet.x == 1300.0)), "climbed thin air up to a floating window");
+            assert!(
+                !(pet.state() == states::CLIMB && (pet.x == 900.0 || pet.x == 1300.0)),
+                "climbed thin air up to a floating window"
+            );
         }
     }
 
@@ -2309,7 +2936,10 @@ mod tests {
             pet.update(now, DT, &env);
             if pet.state() == states::CLIMB {
                 climbed = true;
-                assert!(pet.x == env.wall_left || pet.x == env.wall_right, "feet stay on the wall");
+                assert!(
+                    pet.x == env.wall_left || pet.x == env.wall_right,
+                    "feet stay on the wall"
+                );
                 assert!(pet.pose(now).climb.is_some());
                 highest = highest.min(pet.y);
             } else if climbed && pet.y == env.ground_y && (env.min_x..=env.max_x).contains(&pet.x) {
@@ -2317,10 +2947,22 @@ mod tests {
                 break;
             }
         }
-        assert!(climbed, "walked into a wall and climbed it at least once in 15 minutes");
-        assert!(highest <= env.ground_y - env.pet_height, "climbed at least one body height");
-        assert!(highest >= env.ceiling + env.pet_height, "kept room below the top of the screen");
-        assert!(leapt_and_landed, "leapt off and landed back on the floor inside the screen");
+        assert!(
+            climbed,
+            "walked into a wall and climbed it at least once in 15 minutes"
+        );
+        assert!(
+            highest <= env.ground_y - env.pet_height,
+            "climbed at least one body height"
+        );
+        assert!(
+            highest >= env.ceiling + env.pet_height,
+            "kept room below the top of the screen"
+        );
+        assert!(
+            leapt_and_landed,
+            "leapt off and landed back on the floor inside the screen"
+        );
     }
 
     #[test]
@@ -2341,27 +2983,66 @@ mod tests {
         let mut env = env();
         env.activity = Activity::Lively;
         env.platforms = vec![
-            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0, sides: (None, None), bottom: 1000.0 },
-            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0, sides: (None, None), bottom: 1000.0 },
+            Platform {
+                left: 500.0,
+                right: 900.0,
+                y: 600.0,
+                window: 1,
+                window_left: 500.0,
+                sides: (None, None),
+                bottom: 1000.0,
+            },
+            Platform {
+                left: 1300.0,
+                right: 1600.0,
+                y: 600.0,
+                window: 2,
+                window_left: 1300.0,
+                sides: (None, None),
+                bottom: 1000.0,
+            },
         ];
-        let area = Rect { left: 400.0, top: 300.0, right: 1000.0, bottom: 800.0 };
+        let area = Rect {
+            left: 400.0,
+            top: 300.0,
+            right: 1000.0,
+            bottom: 800.0,
+        };
         env.confine_to(area);
-        assert_eq!(env.platforms.len(), 1, "window tops outside the area are not offered");
+        assert_eq!(
+            env.platforms.len(),
+            1,
+            "window tops outside the area are not offered"
+        );
         let mut now = 0.0;
         let mut pet = Pet::new(600.0, 800.0, now, 21);
         for _ in 0..(600.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            assert!((area.left..=area.right).contains(&pet.x) && pet.y <= area.bottom, "left the area at ({}, {})", pet.x, pet.y);
+            assert!(
+                (area.left..=area.right).contains(&pet.x) && pet.y <= area.bottom,
+                "left the area at ({}, {})",
+                pet.x,
+                pet.y
+            );
         }
-        assert!(pet.y == area.bottom || pet.y == 600.0, "stands on the area's bottom edge or the window top inside it, y = {}", pet.y);
+        assert!(
+            pet.y == area.bottom || pet.y == 600.0,
+            "stands on the area's bottom edge or the window top inside it, y = {}",
+            pet.y
+        );
     }
 
     /// 活動範圍的頂與兩側都是看不見的牆：碰到就亮那一段，往上跳也不會飛出頂端。
     #[test]
     fn the_allowed_area_glows_where_the_pet_touches_its_top_and_sides() {
         let mut env = env();
-        let area = Rect { left: 400.0, top: 650.0, right: 1000.0, bottom: 950.0 };
+        let area = Rect {
+            left: 400.0,
+            top: 650.0,
+            right: 1000.0,
+            bottom: 950.0,
+        };
         env.confine_to(area);
         let (mut now, mut pet) = (0.0, Pet::new(600.0, 950.0, 0.0, 9));
         // 走到邊：撞到牆轉頭，那段亮起來；站在角落時腳下的底邊也一起亮。
@@ -2371,29 +3052,52 @@ mod tests {
             now += DT as f64;
             pet.update(now, DT, &env);
             let lit = pet.glows(&env, now);
-            let side = lit.iter().any(|g| matches!(g, Glow::Wall { x, .. } if *x == area.left || *x == area.right));
+            let side = lit
+                .iter()
+                .any(|g| matches!(g, Glow::Wall { x, .. } if *x == area.left || *x == area.right));
             side_glow |= side;
-            corner |= side && lit.iter().any(|g| matches!(g, Glow::Floor { y, .. } if *y == area.bottom));
+            corner |= side
+                && lit
+                    .iter()
+                    .any(|g| matches!(g, Glow::Floor { y, .. } if *y == area.bottom));
         }
         assert!(side_glow, "touching a side of the area lights it up");
-        assert!(corner, "in a corner the side and the bottom light up together");
+        assert!(
+            corner,
+            "in a corner the side and the bottom light up together"
+        );
         // 爬到頂：亮頂上那段。
         pet.start_demo(Demo::ClimbLeft, now, &env);
         let mut top_glow = false;
         for _ in 0..(10.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            top_glow |= pet.glows(&env, now).iter().any(|g| matches!(g, Glow::Floor { y, .. } if *y == area.top));
-            assert!(pet.y - env.pet_height >= area.top - 1.0, "head went through the top of the area at y = {}", pet.y);
+            top_glow |= pet
+                .glows(&env, now)
+                .iter()
+                .any(|g| matches!(g, Glow::Floor { y, .. } if *y == area.top));
+            assert!(
+                pet.y - env.pet_height >= area.top - 1.0,
+                "head went through the top of the area at y = {}",
+                pet.y
+            );
         }
-        assert!(top_glow, "climbing up to the top of the area lights up the top");
+        assert!(
+            top_glow,
+            "climbing up to the top of the area lights up the top"
+        );
     }
 
     /// 地上一塊禁止範圍：散步走過去會爬上去、從頂端走過，身體從來不會跑進去。
     #[test]
     fn climbs_over_a_forbidden_area_instead_of_walking_into_it() {
         let mut env = env();
-        let block = Rect { left: 600.0, top: 850.0, right: 800.0, bottom: 1000.0 };
+        let block = Rect {
+            left: 600.0,
+            top: 850.0,
+            right: 800.0,
+            bottom: 1000.0,
+        };
         env.blocks = vec![block];
         env.platforms = block_platforms(&env.blocks, env.ceiling, env.pet_height);
         let mut now = 0.0;
@@ -2403,28 +3107,56 @@ mod tests {
         for _ in 0..(40.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            assert!(pet.block_at(pet.x, pet.y, &env).is_none() || pet.state() == states::CLIMB, "inside the forbidden area at ({}, {}) while {}", pet.x, pet.y, pet.state());
-            assert_eq!(!pet.glows(&env, now).is_empty(), pet.state() == states::CLIMB || (pet.y == block.top && pet.state() != states::FALL),"glows only along the forbidden area's edge and top (state {}, y {})", pet.state(), pet.y);
+            assert!(
+                pet.block_at(pet.x, pet.y, &env).is_none() || pet.state() == states::CLIMB,
+                "inside the forbidden area at ({}, {}) while {}",
+                pet.x,
+                pet.y,
+                pet.state()
+            );
+            assert_eq!(
+                !pet.glows(&env, now).is_empty(),
+                pet.state() == states::CLIMB || (pet.y == block.top && pet.state() != states::FALL),
+                "glows only along the forbidden area's edge and top (state {}, y {})",
+                pet.state(),
+                pet.y
+            );
             climbed |= pet.state() == states::CLIMB;
             on_top |= pet.y == block.top;
             beyond |= on_top && pet.x > block.right && pet.y == env.ground_y;
         }
-        assert!(climbed && on_top && beyond, "climbed {climbed}, walked on top {on_top}, got down the far side {beyond}");
+        assert!(
+            climbed && on_top && beyond,
+            "climbed {climbed}, walked on top {on_top}, got down the far side {beyond}"
+        );
     }
 
     #[test]
     fn dropped_inside_a_forbidden_area_walks_out() {
         let mut env = env();
-        env.blocks = vec![Rect { left: 400.0, top: 700.0, right: 900.0, bottom: 1000.0 }];
+        env.blocks = vec![Rect {
+            left: 400.0,
+            top: 700.0,
+            right: 900.0,
+            bottom: 1000.0,
+        }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 1000.0, now, 8);
         run(&mut pet, &mut now, 10.0, &env);
-        assert!(pet.block_at(pet.x, pet.y, &env).is_none(), "still inside at x = {}", pet.x);
+        assert!(
+            pet.block_at(pet.x, pet.y, &env).is_none(),
+            "still inside at x = {}",
+            pet.x
+        );
     }
 
     /// 滑鼠在 `cx` 附近左右晃（每 0.15 秒換一次邊）。
     fn wiggle(cx: f32, now: f64) -> f32 {
-        if (now / 0.15) as i64 % 2 == 0 { cx - 40.0 } else { cx + 40.0 }
+        if (now / 0.15) as i64 % 2 == 0 {
+            cx - 40.0
+        } else {
+            cx + 40.0
+        }
     }
 
     #[test]
@@ -2436,7 +3168,10 @@ mod tests {
         for _ in 0..(600.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            assert!(!matches!(pet.mode, Mode::Chase { .. } | Mode::Pounce { .. }), "came to a resting cursor at {now:.1}s");
+            assert!(
+                !matches!(pet.mode, Mode::Chase { .. } | Mode::Pounce { .. }),
+                "came to a resting cursor at {now:.1}s"
+            );
         }
         // 在牠旁邊晃：跑過去撲。
         let mut pounced = false;
@@ -2454,7 +3189,10 @@ mod tests {
             now += DT as f64;
             env.cursor = Some((wiggle(1000.0, now), 300.0));
             pet.update(now, DT, &env);
-            assert!(!matches!(pet.mode, Mode::Chase { .. }), "a cursor high up the screen is out of reach");
+            assert!(
+                !matches!(pet.mode, Mode::Chase { .. }),
+                "a cursor high up the screen is out of reach"
+            );
         }
     }
 
@@ -2462,7 +3200,17 @@ mod tests {
     fn rides_along_when_its_window_is_dragged() {
         let mut env = env();
         env.activity = Activity::Calm;
-        let window = |dx: f32, dy: f32| vec![Platform { left: 400.0 + dx, right: 900.0 + dx, y: 700.0 + dy, window: 7, window_left: 400.0 + dx, sides: (None, None), bottom: 1000.0 }];
+        let window = |dx: f32, dy: f32| {
+            vec![Platform {
+                left: 400.0 + dx,
+                right: 900.0 + dx,
+                y: 700.0 + dy,
+                window: 7,
+                window_left: 400.0 + dx,
+                sides: (None, None),
+                bottom: 1000.0,
+            }]
+        };
         env.platforms = window(0.0, 0.0);
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
@@ -2474,14 +3222,24 @@ mod tests {
             run(&mut pet, &mut now, DT, &env);
         }
         assert_eq!(pet.y, 550.0, "stays on the window top as it rises");
-        assert!((pet.x - (start_x + 200.0)).abs() < 1.0, "carried 200px to the right, x = {}", pet.x);
+        assert!(
+            (pet.x - (start_x + 200.0)).abs() < 1.0,
+            "carried 200px to the right, x = {}",
+            pet.x
+        );
         assert!(pet.drain_happenings().contains(&Happening::Riding));
     }
 
     #[test]
     fn runs_to_food_and_eats_it() {
         let mut env = env();
-        env.item = Some(ItemView { x: 1200.0, y: 1000.0, food: true, grounded: true, wanted: true });
+        env.item = Some(ItemView {
+            x: 1200.0,
+            y: 1000.0,
+            food: true,
+            grounded: true,
+            wanted: true,
+        });
         let (mut now, mut pet) = (0.0, Pet::new(500.0, 1000.0, 0.0, 4));
         let mut ate = false;
         for _ in 0..(60.0 / DT) as usize {
@@ -2493,23 +3251,43 @@ mod tests {
             }
         }
         assert!(ate, "ate the food");
-        assert!((pet.x - 1200.0).abs() <= env.pet_height * FETCH_REACH_HEIGHTS, "ate it where it lay, x = {}", pet.x);
+        assert!(
+            (pet.x - 1200.0).abs() <= env.pet_height * FETCH_REACH_HEIGHTS,
+            "ate it where it lay, x = {}",
+            pet.x
+        );
     }
 
     #[test]
     fn kicks_a_ball_but_ignores_one_it_is_done_with() {
         let mut env = env();
-        env.item = Some(ItemView { x: 700.0, y: 1000.0, food: false, grounded: true, wanted: true });
+        env.item = Some(ItemView {
+            x: 700.0,
+            y: 1000.0,
+            food: false,
+            grounded: true,
+            wanted: true,
+        });
         let (mut now, mut pet) = (0.0, Pet::new(500.0, 1000.0, 0.0, 4));
         let mut kicked = None;
         for _ in 0..(30.0 / DT) as usize {
             now += DT as f64;
             pet.update(now, DT, &env);
-            kicked = kicked.or(pet.drain_happenings().into_iter().find(|h| matches!(h, Happening::Kicked { .. })));
+            kicked = kicked.or(pet
+                .drain_happenings()
+                .into_iter()
+                .find(|h| matches!(h, Happening::Kicked { .. })));
         }
-        assert_eq!(kicked, Some(Happening::Kicked { dir: 1.0 }), "kicked it away from itself");
+        assert_eq!(
+            kicked,
+            Some(Happening::Kicked { dir: 1.0 }),
+            "kicked it away from itself"
+        );
 
-        env.item = Some(ItemView { wanted: false, ..env.item.unwrap() });
+        env.item = Some(ItemView {
+            wanted: false,
+            ..env.item.unwrap()
+        });
         let mut pet = Pet::new(500.0, 1000.0, now, 4);
         for _ in 0..(30.0 / DT) as usize {
             now += DT as f64;
@@ -2522,14 +3300,29 @@ mod tests {
     fn gives_up_on_food_it_cannot_reach() {
         let mut env = env();
         // 落在高高的視窗頂上（這個測試環境裡沒有那個平台，牠上不去）。
-        env.item = Some(ItemView { x: 600.0, y: 400.0, food: true, grounded: true, wanted: true });
+        env.item = Some(ItemView {
+            x: 600.0,
+            y: 400.0,
+            food: true,
+            grounded: true,
+            wanted: true,
+        });
         let (mut now, mut pet) = (0.0, Pet::new(500.0, 1000.0, 0.0, 4));
         run(&mut pet, &mut now, FETCH_PATIENCE_SECS as f32 + 1.0, &env);
-        assert!(!matches!(pet.mode, Mode::Fetch { .. } | Mode::Eat), "gave up");
+        assert!(
+            !matches!(pet.mode, Mode::Fetch { .. } | Mode::Eat),
+            "gave up"
+        );
         assert!(pet.ignore_item_until > now, "and stops trying for a while");
         // 有人把它拿起來丟到牠旁邊：馬上又去拿。
         pet.item_tossed();
-        env.item = Some(ItemView { x: 600.0, y: 1000.0, food: true, grounded: true, wanted: true });
+        env.item = Some(ItemView {
+            x: 600.0,
+            y: 1000.0,
+            food: true,
+            grounded: true,
+            wanted: true,
+        });
         let mut went = false;
         for _ in 0..(3.0 / DT) as usize {
             now += DT as f64;
@@ -2569,6 +3362,9 @@ mod tests {
         let env = env();
         let mut pet = Pet::new(500.0, 1000.0, 0.0, 3);
         let states: Vec<&str> = (0..50).map(|i| click(&mut pet, &env, i as f64)).collect();
-        assert!(states.contains(&states::SPIN) && states.contains(&states::HAPPY), "{states:?}");
+        assert!(
+            states.contains(&states::SPIN) && states.contains(&states::HAPPY),
+            "{states:?}"
+        );
     }
 }

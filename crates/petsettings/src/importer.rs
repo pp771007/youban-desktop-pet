@@ -38,7 +38,9 @@ impl std::fmt::Display for ImportError {
 
 /// 解碼 → 去背（需要的話）→ 清霧 → 找出每一隻、裁切 → 縮小，回傳整理好的 PNG（依閱讀順序，至少一張）。
 pub fn prepare_all(bytes: &[u8]) -> Result<Vec<Vec<u8>>, ImportError> {
-    let mut img = image::load_from_memory(bytes).map_err(|e| ImportError::Decode(e.to_string()))?.to_rgba8();
+    let mut img = image::load_from_memory(bytes)
+        .map_err(|e| ImportError::Decode(e.to_string()))?
+        .to_rgba8();
     if !has_transparent_border(&img) {
         remove_background(&mut img);
     }
@@ -55,13 +57,20 @@ pub fn prepare_all(bytes: &[u8]) -> Result<Vec<Vec<u8>>, ImportError> {
     pieces
         .into_iter()
         .map(|p| {
-            let mut img = RgbaImage::from_raw(p.width as u32, p.height as u32, p.pixels).expect("piece size matches its pixels");
+            let mut img = RgbaImage::from_raw(p.width as u32, p.height as u32, p.pixels)
+                .expect("piece size matches its pixels");
             if img.width().max(img.height()) > MAX_SIDE {
                 let scale = MAX_SIDE as f32 / img.width().max(img.height()) as f32;
-                img = imageops::resize(&img, (img.width() as f32 * scale) as u32, (img.height() as f32 * scale) as u32, imageops::FilterType::Lanczos3);
+                img = imageops::resize(
+                    &img,
+                    (img.width() as f32 * scale) as u32,
+                    (img.height() as f32 * scale) as u32,
+                    imageops::FilterType::Lanczos3,
+                );
             }
             let mut out = Vec::new();
-            img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png).map_err(|e| ImportError::Decode(e.to_string()))?;
+            img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+                .map_err(|e| ImportError::Decode(e.to_string()))?;
             Ok(out)
         })
         .collect()
@@ -69,7 +78,9 @@ pub fn prepare_all(bytes: &[u8]) -> Result<Vec<Vec<u8>>, ImportError> {
 
 fn border(img: &RgbaImage) -> impl Iterator<Item = (u32, u32)> + '_ {
     let (w, h) = img.dimensions();
-    (0..w).flat_map(move |x| [(x, 0), (x, h - 1)]).chain((0..h).flat_map(move |y| [(0, y), (w - 1, y)]))
+    (0..w)
+        .flat_map(move |x| [(x, 0), (x, h - 1)])
+        .chain((0..h).flat_map(move |y| [(0, y), (w - 1, y)]))
 }
 
 fn has_transparent_border(img: &RgbaImage) -> bool {
@@ -105,7 +116,9 @@ fn remove_background(img: &mut RgbaImage) {
     });
     let idx = |x: u32, y: u32| (y * w + x) as usize;
     let mut is_bg = vec![false; (w * h) as usize];
-    let mut stack: Vec<(u32, u32)> = border(img).filter(|&(x, y)| distance(img.get_pixel(x, y), bg) <= BG_TOLERANCE).collect();
+    let mut stack: Vec<(u32, u32)> = border(img)
+        .filter(|&(x, y)| distance(img.get_pixel(x, y), bg) <= BG_TOLERANCE)
+        .collect();
     for &(x, y) in &stack {
         is_bg[idx(x, y)] = true;
     }
@@ -129,10 +142,16 @@ fn remove_background(img: &mut RgbaImage) {
                 continue;
             }
             // 緊貼背景的那一圈：越像背景越透明，邊緣才不會有一圈白邊。
-            let touches_bg = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(|(dx, dy)| {
-                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                nx >= 0 && ny >= 0 && nx < w as i32 && ny < h as i32 && is_bg[idx(nx as u32, ny as u32)]
-            });
+            let touches_bg = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                .iter()
+                .any(|(dx, dy)| {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    nx >= 0
+                        && ny >= 0
+                        && nx < w as i32
+                        && ny < h as i32
+                        && is_bg[idx(nx as u32, ny as u32)]
+                });
             if touches_bg {
                 let p = img.get_pixel_mut(x, y);
                 let t = ((distance(p, bg) - BG_TOLERANCE) / EDGE_SOFTNESS).clamp(0.0, 1.0);
@@ -150,7 +169,8 @@ mod tests {
 
     fn png(img: &RgbaImage) -> Vec<u8> {
         let mut out = Vec::new();
-        img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png).unwrap();
+        img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+            .unwrap();
         out
     }
 
@@ -162,7 +182,10 @@ mod tests {
     fn a_four_pose_sheet_on_white_becomes_four_frames_in_reading_order() {
         let mut img = RgbaImage::from_pixel(400, 400, Rgba([255, 255, 255, 255]));
         // 四隻大小不同，切出來才分得出誰是誰。
-        for (i, (x0, y0)) in [(30u32, 30u32), (230, 40), (40, 230), (240, 240)].into_iter().enumerate() {
+        for (i, (x0, y0)) in [(30u32, 30u32), (230, 40), (40, 230), (240, 240)]
+            .into_iter()
+            .enumerate()
+        {
             let size = 100 + i as u32 * 10;
             for y in y0..y0 + size.min(150) {
                 for x in x0..x0 + 100 {
@@ -171,8 +194,14 @@ mod tests {
             }
         }
         let frames = prepare_all(&png(&img)).unwrap();
-        let heights: Vec<u32> = frames.iter().map(|f| image::load_from_memory(f).unwrap().height()).collect();
-        assert_eq!(heights, [100 + 2 * PAD, 110 + 2 * PAD, 120 + 2 * PAD, 130 + 2 * PAD]);
+        let heights: Vec<u32> = frames
+            .iter()
+            .map(|f| image::load_from_memory(f).unwrap().height())
+            .collect();
+        assert_eq!(
+            heights,
+            [100 + 2 * PAD, 110 + 2 * PAD, 120 + 2 * PAD, 130 + 2 * PAD]
+        );
     }
 
     #[test]
@@ -182,14 +211,32 @@ mod tests {
         for y in 30..80 {
             for x in 20..70 {
                 let edge = x == 20 || x == 69 || y == 30 || y == 79;
-                img.put_pixel(x, y, if edge { Rgba([40, 25, 20, 255]) } else { Rgba([230, 150, 80, 255]) });
+                img.put_pixel(
+                    x,
+                    y,
+                    if edge {
+                        Rgba([40, 25, 20, 255])
+                    } else {
+                        Rgba([230, 150, 80, 255])
+                    },
+                );
             }
         }
         img.put_pixel(40, 50, Rgba([255, 255, 255, 255]));
-        let out = image::load_from_memory(&prepare(&png(&img)).unwrap()).unwrap().to_rgba8();
-        assert_eq!(out.dimensions(), (50 + 2 * PAD, 50 + 2 * PAD), "trimmed to the character plus padding");
+        let out = image::load_from_memory(&prepare(&png(&img)).unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(
+            out.dimensions(),
+            (50 + 2 * PAD, 50 + 2 * PAD),
+            "trimmed to the character plus padding"
+        );
         assert_eq!(out.get_pixel(0, 0)[3], 0, "background gone");
-        assert_eq!(out.get_pixel(PAD + 20, PAD + 20)[3], 255, "white eye inside the outline stays");
+        assert_eq!(
+            out.get_pixel(PAD + 20, PAD + 20)[3],
+            255,
+            "white eye inside the outline stays"
+        );
     }
 
     #[test]
@@ -200,7 +247,9 @@ mod tests {
                 img.put_pixel(x, y, Rgba([250, 250, 250, 255])); // 白色的角色：不能當成背景挖掉
             }
         }
-        let out = image::load_from_memory(&prepare(&png(&img)).unwrap()).unwrap().to_rgba8();
+        let out = image::load_from_memory(&prepare(&png(&img)).unwrap())
+            .unwrap()
+            .to_rgba8();
         assert_eq!(out.dimensions(), (30 + 2 * PAD, 40 + 2 * PAD));
         assert_eq!(out.get_pixel(PAD + 5, PAD + 5)[3], 255);
     }

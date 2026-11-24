@@ -7,7 +7,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+use windows::Win32::System::ProcessStatus::{
+    GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+};
 use windows::Win32::System::Threading::GetCurrentProcess;
 
 const CSV_FILE: &str = "memory.csv";
@@ -46,17 +48,35 @@ pub struct Sample {
 }
 
 pub fn sample() -> Sample {
-    let mut c = PROCESS_MEMORY_COUNTERS_EX { cb: size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32, ..Default::default() };
+    let mut c = PROCESS_MEMORY_COUNTERS_EX {
+        cb: size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+        ..Default::default()
+    };
     unsafe {
-        let _ = GetProcessMemoryInfo(GetCurrentProcess(), &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS, c.cb);
+        let _ = GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut c as *mut _ as *mut PROCESS_MEMORY_COUNTERS,
+            c.cb,
+        );
     }
-    Sample { private_bytes: c.PrivateUsage, working_set: c.WorkingSetSize }
+    Sample {
+        private_bytes: c.PrivateUsage,
+        working_set: c.WorkingSetSize,
+    }
 }
 
 impl MemWatch {
     pub fn new(now: Instant) -> Self {
-        let secs = std::env::var(INTERVAL_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_INTERVAL_SECS);
-        Self { path: crate::paths::logs_dir().join(CSV_FILE), interval: Duration::from_secs(secs.max(1)), next: now, recent: VecDeque::with_capacity(TREND_SAMPLES) }
+        let secs = std::env::var(INTERVAL_ENV)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_INTERVAL_SECS);
+        Self {
+            path: crate::paths::logs_dir().join(CSV_FILE),
+            interval: Duration::from_secs(secs.max(1)),
+            next: now,
+            recent: VecDeque::with_capacity(TREND_SAMPLES),
+        }
     }
 
     /// 到了取樣時間就記一筆；最近 24 小時一路往上漲時回傳 `Leak`（回報一次就重新累積，不會一直響）。
@@ -82,15 +102,25 @@ impl MemWatch {
     }
 
     fn write_csv(&self, s: Sample) {
-        let unix = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        if fs::metadata(&self.path).map(|m| m.len() > MAX_CSV_BYTES).unwrap_or(false) {
+        let unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if fs::metadata(&self.path)
+            .map(|m| m.len() > MAX_CSV_BYTES)
+            .unwrap_or(false)
+        {
             let _ = fs::rename(&self.path, self.path.with_extension("csv.old"));
         }
         let new_file = !self.path.exists();
         if let Some(dir) = self.path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&self.path) {
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
             if new_file {
                 let _ = f.write_all(CSV_HEADER.as_bytes());
             }
@@ -116,7 +146,11 @@ fn rising(samples: &[usize]) -> Option<Leak> {
     // 嚴格往上：平平的一段最後突然變高（剛好在忙）不算漏。
     let climbing = medians.windows(2).all(|w| w[1] > w[0]);
     let (from, to) = (medians[0], medians[TREND_BLOCKS - 1]);
-    (climbing && to >= from + LEAK_ALERT_BYTES).then(|| Leak { from_bytes: from, to_bytes: to, samples: samples.to_vec() })
+    (climbing && to >= from + LEAK_ALERT_BYTES).then(|| Leak {
+        from_bytes: from,
+        to_bytes: to,
+        samples: samples.to_vec(),
+    })
 }
 
 #[cfg(test)]
@@ -126,7 +160,12 @@ mod tests {
     const MB: usize = 1024 * 1024;
 
     fn watch() -> MemWatch {
-        MemWatch { path: PathBuf::new(), interval: Duration::from_secs(1), next: Instant::now(), recent: VecDeque::new() }
+        MemWatch {
+            path: PathBuf::new(),
+            interval: Duration::from_secs(1),
+            next: Instant::now(),
+            recent: VecDeque::new(),
+        }
     }
 
     #[test]
@@ -136,11 +175,16 @@ mod tests {
         for i in 0..TREND_SAMPLES * 2 {
             // 一天漲 20MB，加上上下 2MB 的擺盪。
             let wobble = if i % 3 == 0 { 2 * MB } else { 0 };
-            if w.record(15 * MB + i * 20 * MB / TREND_SAMPLES + wobble).is_some() {
+            if w.record(15 * MB + i * 20 * MB / TREND_SAMPLES + wobble)
+                .is_some()
+            {
                 reports += 1;
             }
         }
-        assert_eq!(reports, 2, "once per full day of climbing, not every sample");
+        assert_eq!(
+            reports, 2,
+            "once per full day of climbing, not every sample"
+        );
     }
 
     #[test]
@@ -148,7 +192,11 @@ mod tests {
         let mut w = watch();
         for i in 0..TREND_SAMPLES * 3 {
             // 用量在 16～22MB 之間來回（開提醒卡、換桌寵），而且有一段時間偏高後又降回來。
-            let busy = if (TREND_SAMPLES..TREND_SAMPLES + 30).contains(&i) { 12 * MB } else { 0 };
+            let busy = if (TREND_SAMPLES..TREND_SAMPLES + 30).contains(&i) {
+                12 * MB
+            } else {
+                0
+            };
             let swing = [16, 22, 18, 20][i % 4] * MB;
             assert!(w.record(swing + busy).is_none(), "sample {i}");
         }

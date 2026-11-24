@@ -12,9 +12,13 @@ use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
 use windows::Win32::Graphics::DirectWrite::*;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VIRTUAL_KEY, VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SPACE, VK_UP,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, PCWSTR, Result, w};
 use windows_numerics::{Matrix3x2, Vector2};
@@ -63,7 +67,14 @@ pub struct Item {
 impl Item {
     /// 一般的一列（有圖示、沒打勾、沒有下一層）。
     pub fn entry(id: u32, label: impl Into<String>, icon: Icon) -> Entry {
-        Entry::Item(Self { id, label: label.into(), icon: Some(icon), picture: None, checked: false, children: Vec::new() })
+        Entry::Item(Self {
+            id,
+            label: label.into(),
+            icon: Some(icon),
+            picture: None,
+            checked: false,
+            children: Vec::new(),
+        })
     }
 }
 
@@ -110,14 +121,31 @@ impl MenuPainter {
         let canvas = Canvas::new(gfx)?;
         let brush = unsafe { canvas.rt.CreateSolidColorBrush(&TRANSPARENT, None)? };
         let icons = Icons::new(&canvas.rt);
-        Ok(Self { canvas, gfx: gfx.clone(), brush, icons, pictures: HashMap::new(), entries: Vec::new(), rows: Vec::new(), card: D2D_RECT_F::default(), lead: 0.0, scale: 0.0 })
+        Ok(Self {
+            canvas,
+            gfx: gfx.clone(),
+            brush,
+            icons,
+            pictures: HashMap::new(),
+            entries: Vec::new(),
+            rows: Vec::new(),
+            card: D2D_RECT_F::default(),
+            lead: 0.0,
+            scale: 0.0,
+        })
     }
 
     /// 把這些項目要用的圖檔先讀進來（讀不到就只是沒有小圖）。
     pub fn load_pictures(&mut self, wic: &Wic, entries: &[Entry], s: f32) {
         let size = PICTURE_DIP * s;
         for e in entries {
-            let Entry::Item(Item { picture: Some(path), .. }) = e else { continue };
+            let Entry::Item(Item {
+                picture: Some(path),
+                ..
+            }) = e
+            else {
+                continue;
+            };
             if self.pictures.contains_key(path) {
                 continue;
             }
@@ -135,7 +163,11 @@ impl MenuPainter {
             let f = self.gfx.dwrite.CreateTextFormat(
                 &HSTRING::from(theme::FONT_FAMILY),
                 None,
-                if bold { DWRITE_FONT_WEIGHT_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL },
+                if bold {
+                    DWRITE_FONT_WEIGHT_BOLD
+                } else {
+                    DWRITE_FONT_WEIGHT_NORMAL
+                },
                 DWRITE_FONT_STYLE_NORMAL,
                 DWRITE_FONT_STRETCH_NORMAL,
                 size * self.scale,
@@ -152,10 +184,22 @@ impl MenuPainter {
             self.icons.clear();
             self.scale = s;
         }
-        let (body, bold, caption) = (self.format(theme::FONT_SIZE_BODY, false)?, self.format(theme::FONT_SIZE_BODY, true)?, self.format(theme::FONT_SIZE_CAPTION, true)?);
+        let (body, bold, caption) = (
+            self.format(theme::FONT_SIZE_BODY, false)?,
+            self.format(theme::FONT_SIZE_BODY, true)?,
+            self.format(theme::FONT_SIZE_CAPTION, true)?,
+        );
         let side = theme::SPACE_3 * s;
         let icon = ICON_DIP * s;
-        let has_picture = entries.iter().any(|e| matches!(e, Entry::Item(Item { picture: Some(_), .. })));
+        let has_picture = entries.iter().any(|e| {
+            matches!(
+                e,
+                Entry::Item(Item {
+                    picture: Some(_),
+                    ..
+                })
+            )
+        });
         self.lead = if has_picture { PICTURE_DIP } else { ICON_DIP } * s;
         let text_left = side + self.lead + side;
         let mut texts = Vec::new();
@@ -164,15 +208,27 @@ impl MenuPainter {
             let text = match e {
                 Entry::Header(label) => Some((label.as_str(), &caption, side + side)),
                 Entry::Item(item) => {
-                    let trailing = if trailing_icon(item).is_some() { TRAILING_GAP_DIP * s + icon + side } else { side };
-                    Some((item.label.as_str(), if item.checked { &bold } else { &body }, text_left + trailing))
+                    let trailing = if trailing_icon(item).is_some() {
+                        TRAILING_GAP_DIP * s + icon + side
+                    } else {
+                        side
+                    };
+                    Some((
+                        item.label.as_str(),
+                        if item.checked { &bold } else { &body },
+                        text_left + trailing,
+                    ))
                 }
                 Entry::Separator => None,
             };
             texts.push(match text {
                 Some((label, format, extra)) => {
                     let wide: Vec<u16> = label.encode_utf16().collect();
-                    let layout = unsafe { self.gfx.dwrite.CreateTextLayout(&wide, format, f32::MAX, f32::MAX)? };
+                    let layout = unsafe {
+                        self.gfx
+                            .dwrite
+                            .CreateTextLayout(&wide, format, f32::MAX, f32::MAX)?
+                    };
                     let mut m = DWRITE_TEXT_METRICS::default();
                     unsafe { layout.GetMetrics(&mut m)? };
                     width = width.max((m.widthIncludingTrailingWhitespace + extra).ceil());
@@ -192,17 +248,35 @@ impl MenuPainter {
                 Entry::Item(_) => ROW_DIP,
                 Entry::Separator => SEPARATOR_DIP,
             } * s;
-            let rect = D2D_RECT_F { left, top: y, right: left + width, bottom: y + h };
+            let rect = D2D_RECT_F {
+                left,
+                top: y,
+                right: left + width,
+                bottom: y + h,
+            };
             let text = text.map(|(layout, th)| {
-                let x = if matches!(e, Entry::Header(_)) { left + side } else { left + text_left };
+                let x = if matches!(e, Entry::Header(_)) {
+                    left + side
+                } else {
+                    left + text_left
+                };
                 // 小標題貼著下面那組，不置中。
-                let ty = if matches!(e, Entry::Header(_)) { rect.bottom - th - theme::SPACE_1 * s } else { y + (h - th) / 2.0 };
+                let ty = if matches!(e, Entry::Header(_)) {
+                    rect.bottom - th - theme::SPACE_1 * s
+                } else {
+                    y + (h - th) / 2.0
+                };
                 (layout, Vector2 { X: x, Y: ty })
             });
             self.rows.push(Row { rect, text });
             y += h;
         }
-        self.card = D2D_RECT_F { left: margin, top: margin, right: left + width + pad, bottom: y + pad };
+        self.card = D2D_RECT_F {
+            left: margin,
+            top: margin,
+            right: left + width + pad,
+            bottom: y + pad,
+        };
         self.entries = entries;
         let w = (self.card.right + margin).ceil() as i32;
         let h = (self.card.bottom + margin).ceil() as i32;
@@ -212,10 +286,21 @@ impl MenuPainter {
 
     /// 視窗內座標落在哪一個能點的項目上。
     fn hit(&self, x: f32, y: f32) -> Option<usize> {
-        self.rows.iter().zip(&self.entries).position(|(r, e)| matches!(e, Entry::Item(_)) && x >= r.rect.left && x < r.rect.right && y >= r.rect.top && y < r.rect.bottom)
+        self.rows.iter().zip(&self.entries).position(|(r, e)| {
+            matches!(e, Entry::Item(_))
+                && x >= r.rect.left
+                && x < r.rect.right
+                && y >= r.rect.top
+                && y < r.rect.bottom
+        })
     }
 
-    pub fn paint(&mut self, palette: &Palette, hover: Option<usize>, pressed: Option<usize>) -> Result<()> {
+    pub fn paint(
+        &mut self,
+        palette: &Palette,
+        hover: Option<usize>,
+        pressed: Option<usize>,
+    ) -> Result<()> {
         let s = self.scale;
         let icon = ICON_DIP * s;
         let side = theme::SPACE_3 * s;
@@ -234,7 +319,17 @@ impl MenuPainter {
                 item.icon
             };
             let lead = lead.and_then(|ic| self.icons.doc(ic, palette.accent, icon));
-            let trail = trailing_icon(item).and_then(|(ic, accent)| self.icons.doc(ic, if accent { palette.accent } else { palette.text_muted }, icon));
+            let trail = trailing_icon(item).and_then(|(ic, accent)| {
+                self.icons.doc(
+                    ic,
+                    if accent {
+                        palette.accent
+                    } else {
+                        palette.text_muted
+                    },
+                    icon,
+                )
+            });
             docs.push((lead, trail));
         }
         let rt = &self.canvas.rt;
@@ -244,19 +339,37 @@ impl MenuPainter {
             rt.BeginDraw();
             rt.Clear(Some(&TRANSPARENT));
             popup_shadow(rt, brush, self.card, radius, s, palette);
-            let card = D2D1_ROUNDED_RECT { rect: self.card, radiusX: radius, radiusY: radius };
+            let card = D2D1_ROUNDED_RECT {
+                rect: self.card,
+                radiusX: radius,
+                radiusY: radius,
+            };
             brush.SetColor(&palette.surface_raised.d2d());
             rt.FillRoundedRectangle(&card, brush);
             brush.SetColor(&palette.border.d2d());
             rt.DrawRoundedRectangle(&card, brush, s, None);
 
-            for (i, ((row, e), (lead, trail))) in self.rows.iter().zip(&self.entries).zip(&docs).enumerate() {
+            for (i, ((row, e), (lead, trail))) in
+                self.rows.iter().zip(&self.entries).zip(&docs).enumerate()
+            {
                 let r = row.rect;
                 match e {
                     Entry::Separator => {
                         let mid = ((r.top + r.bottom) / 2.0).floor() + 0.5;
                         brush.SetColor(&palette.border.d2d());
-                        rt.DrawLine(Vector2 { X: r.left + side, Y: mid }, Vector2 { X: r.right - side, Y: mid }, brush, s, None);
+                        rt.DrawLine(
+                            Vector2 {
+                                X: r.left + side,
+                                Y: mid,
+                            },
+                            Vector2 {
+                                X: r.right - side,
+                                Y: mid,
+                            },
+                            brush,
+                            s,
+                            None,
+                        );
                     }
                     Entry::Header(_) => {
                         if let Some((layout, at)) = &row.text {
@@ -266,23 +379,54 @@ impl MenuPainter {
                     }
                     Entry::Item(item) => {
                         if hover == Some(i) || pressed == Some(i) {
-                            let fill = if pressed == Some(i) { palette.border } else { palette.accent_soft };
+                            let fill = if pressed == Some(i) {
+                                palette.border
+                            } else {
+                                palette.accent_soft
+                            };
                             brush.SetColor(&fill.d2d());
                             let rr = theme::RADIUS_SM * s;
-                            rt.FillRoundedRectangle(&D2D1_ROUNDED_RECT { rect: r, radiusX: rr, radiusY: rr }, brush);
+                            rt.FillRoundedRectangle(
+                                &D2D1_ROUNDED_RECT {
+                                    rect: r,
+                                    radiusX: rr,
+                                    radiusY: rr,
+                                },
+                                brush,
+                            );
                         }
                         let mid_y = (r.top + r.bottom) / 2.0;
-                        if let Some((bitmap, bw, bh)) = item.picture.as_ref().and_then(|p| self.pictures.get(p)) {
+                        if let Some((bitmap, bw, bh)) =
+                            item.picture.as_ref().and_then(|p| self.pictures.get(p))
+                        {
                             let cx = r.left + side + self.lead / 2.0;
-                            let dest = D2D_RECT_F { left: cx - bw / 2.0, top: mid_y - bh / 2.0, right: cx + bw / 2.0, bottom: mid_y + bh / 2.0 };
-                            rt.DrawBitmap(bitmap, Some(&dest), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+                            let dest = D2D_RECT_F {
+                                left: cx - bw / 2.0,
+                                top: mid_y - bh / 2.0,
+                                right: cx + bw / 2.0,
+                                bottom: mid_y + bh / 2.0,
+                            };
+                            rt.DrawBitmap(
+                                bitmap,
+                                Some(&dest),
+                                1.0,
+                                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                                None,
+                            );
                         }
                         let icon_y = mid_y - icon / 2.0;
                         if let Some(doc) = lead {
-                            self.icons.draw(doc, &Matrix3x2::translation(r.left + side + (self.lead - icon) / 2.0, icon_y));
+                            self.icons.draw(
+                                doc,
+                                &Matrix3x2::translation(
+                                    r.left + side + (self.lead - icon) / 2.0,
+                                    icon_y,
+                                ),
+                            );
                         }
                         if let Some(doc) = trail {
-                            self.icons.draw(doc, &Matrix3x2::translation(r.right - side - icon, icon_y));
+                            self.icons
+                                .draw(doc, &Matrix3x2::translation(r.right - side - icon, icon_y));
                         }
                         rt.SetTransform(&Matrix3x2::identity());
                         if let Some((layout, at)) = &row.text {
@@ -305,7 +449,9 @@ impl MenuPainter {
 
     /// 能點的項目裡，從 `from` 往上或往下一個（鍵盤）。
     fn step(&self, from: Option<usize>, down: bool) -> Option<usize> {
-        let items: Vec<usize> = (0..self.entries.len()).filter(|&i| self.item(i).is_some()).collect();
+        let items: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.item(i).is_some())
+            .collect();
         let pos = from.and_then(|h| items.iter().position(|&i| i == h));
         let next = match (pos, down) {
             (None, true) => 0,
@@ -317,7 +463,13 @@ impl MenuPainter {
     }
 
     /// 截圖工具用：排版並畫一個選單（不開視窗）。
-    pub fn render(&mut self, entries: Vec<Entry>, palette: &Palette, s: f32, hover: Option<usize>) -> Result<(i32, i32)> {
+    pub fn render(
+        &mut self,
+        entries: Vec<Entry>,
+        palette: &Palette,
+        s: f32,
+        hover: Option<usize>,
+    ) -> Result<(i32, i32)> {
         let size = self.layout(entries, s)?;
         self.paint(palette, hover, None)?;
         Ok(size)
@@ -347,8 +499,28 @@ struct Level {
 impl Level {
     fn new(class: PCWSTR, ex_style: WINDOW_EX_STYLE) -> Result<Self> {
         let instance = unsafe { GetModuleHandleW(None)? };
-        let hwnd = unsafe { CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | ex_style, class, w!("柚伴選單"), WS_POPUP, 0, 0, 1, 1, None, None, Some(instance.into()), None)? };
-        Ok(Self { hwnd, hover: None, pressed: None, origin: POINT::default() })
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | ex_style,
+                class,
+                w!("柚伴選單"),
+                WS_POPUP,
+                0,
+                0,
+                1,
+                1,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )?
+        };
+        Ok(Self {
+            hwnd,
+            hover: None,
+            pressed: None,
+            origin: POINT::default(),
+        })
     }
 
     fn redraw(&self, painter: &mut MenuPainter, palette: &Palette) -> Result<()> {
@@ -368,7 +540,12 @@ impl Drop for Level {
 /// 卡片（不含陰影）在螢幕上的範圍。
 fn card_on_screen(level: &Level, painter: &MenuPainter) -> RECT {
     let (o, c) = (level.origin, painter.card);
-    RECT { left: o.x + c.left as i32, top: o.y + c.top as i32, right: o.x + c.right as i32, bottom: o.y + c.bottom as i32 }
+    RECT {
+        left: o.x + c.left as i32,
+        top: o.y + c.top as i32,
+        right: o.x + c.right as i32,
+        bottom: o.y + c.bottom as i32,
+    }
 }
 
 /// 打開中的選單。收掉（`drop`）時連視窗一起關。
@@ -389,12 +566,25 @@ pub struct PopupMenu {
 }
 
 impl PopupMenu {
-    pub fn open(gfx: &Gfx, wic: &Wic, class: PCWSTR, entries: Vec<Entry>, palette: Palette, dpi_scale: f32) -> Result<Self> {
+    pub fn open(
+        gfx: &Gfx,
+        wic: &Wic,
+        class: PCWSTR,
+        entries: Vec<Entry>,
+        palette: Palette,
+        dpi_scale: f32,
+    ) -> Result<Self> {
         let mut anchor = POINT::default();
         let work = unsafe {
             let _ = GetCursorPos(&mut anchor);
-            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-            let _ = GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &mut info);
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            let _ = GetMonitorInfoW(
+                MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST),
+                &mut info,
+            );
             info.rcWork
         };
         let mut painter = MenuPainter::new(gfx)?;
@@ -414,23 +604,54 @@ impl PopupMenu {
         let margin = painter.card.left as i32;
         let (cw, ch) = (w - 2 * margin, h - 2 * margin);
         // 貼著滑鼠開，太靠螢幕邊緣就往左、往上翻。
-        let x = if anchor.x + cw > work.right { anchor.x - cw } else { anchor.x };
-        let y = if anchor.y + ch > work.bottom { anchor.y - ch } else { anchor.y };
+        let x = if anchor.x + cw > work.right {
+            anchor.x - cw
+        } else {
+            anchor.x
+        };
+        let y = if anchor.y + ch > work.bottom {
+            anchor.y - ch
+        } else {
+            anchor.y
+        };
         let mut main = Level::new(class, WINDOW_EX_STYLE(0))?;
-        main.origin = POINT { x: x.max(work.left) - margin, y: y.max(work.top) - margin };
+        main.origin = POINT {
+            x: x.max(work.left) - margin,
+            y: y.max(work.top) - margin,
+        };
         main.redraw(&mut painter, &palette)?;
         unsafe {
             let _ = ShowWindow(main.hwnd, SW_SHOW);
-            let _ = SetWindowPos(main.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            let _ = SetWindowPos(
+                main.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE,
+            );
             // 拿到焦點才收得到 Esc、方向鍵，點選單外面時也才會失去焦點而收起來。
             let _ = SetForegroundWindow(main.hwnd);
         }
-        Ok(Self { main, painter, sub: None, sub_painters, close_sub_at: None, keys_in_sub: false, class, palette, work })
+        Ok(Self {
+            main,
+            painter,
+            sub: None,
+            sub_painters,
+            close_sub_at: None,
+            keys_in_sub: false,
+            class,
+            palette,
+            work,
+        })
     }
 
     /// 兩層的視窗（定時重新放到最上層時用，後面的在上面）。
     pub fn hwnds(&self) -> Vec<HWND> {
-        std::iter::once(self.main.hwnd).chain(self.sub.as_ref().map(|(_, l)| l.hwnd)).collect()
+        std::iter::once(self.main.hwnd)
+            .chain(self.sub.as_ref().map(|(_, l)| l.hwnd))
+            .collect()
     }
 
     fn sub_index(&self) -> Option<usize> {
@@ -442,8 +663,12 @@ impl PopupMenu {
     }
 
     fn redraw_sub(&mut self) -> Result<()> {
-        let Some((i, level)) = &self.sub else { return Ok(()) };
-        let Some(p) = self.sub_painters.get_mut(i) else { return Ok(()) };
+        let Some((i, level)) = &self.sub else {
+            return Ok(());
+        };
+        let Some(p) = self.sub_painters.get_mut(i) else {
+            return Ok(());
+        };
         level.redraw(p, &self.palette)
     }
 
@@ -454,21 +679,43 @@ impl PopupMenu {
             return Ok(());
         }
         self.close_sub();
-        let Some(p) = self.sub_painters.get_mut(&index) else { return Ok(()) };
+        let Some(p) = self.sub_painters.get_mut(&index) else {
+            return Ok(());
+        };
         let margin = p.card.left as i32;
-        let (cw, ch) = ((p.card.right - p.card.left) as i32, (p.card.bottom - p.card.top) as i32);
+        let (cw, ch) = (
+            (p.card.right - p.card.left) as i32,
+            (p.card.bottom - p.card.top) as i32,
+        );
         let parent = card_on_screen(&self.main, &self.painter);
         let row_top = self.main.origin.y + self.painter.rows[index].rect.top as i32;
         let pad = (theme::SPACE_1 * self.painter.scale) as i32;
         // 接在第一層右邊（第一列跟展開的那一列對齊）；右邊放不下就放左邊。
-        let x = if parent.right + cw <= self.work.right { parent.right - pad } else { parent.left - cw + pad };
-        let y = (row_top - pad).min(self.work.bottom - ch).max(self.work.top);
+        let x = if parent.right + cw <= self.work.right {
+            parent.right - pad
+        } else {
+            parent.left - cw + pad
+        };
+        let y = (row_top - pad)
+            .min(self.work.bottom - ch)
+            .max(self.work.top);
         let mut level = Level::new(self.class, WS_EX_NOACTIVATE)?;
-        level.origin = POINT { x: x - margin, y: y - margin };
+        level.origin = POINT {
+            x: x - margin,
+            y: y - margin,
+        };
         level.redraw(p, &self.palette)?;
         unsafe {
             let _ = ShowWindow(level.hwnd, SW_SHOWNOACTIVATE);
-            let _ = SetWindowPos(level.hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(
+                level.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
         self.sub = Some((index, level));
         Ok(())
@@ -490,12 +737,16 @@ impl PopupMenu {
     }
 
     fn has_children(&self, index: usize) -> bool {
-        self.painter.item(index).is_some_and(|it| !it.children.is_empty())
+        self.painter
+            .item(index)
+            .is_some_and(|it| !it.children.is_empty())
     }
 
     /// 第一層第 `index` 列被選了：有下一層就展開，沒有就交給呼叫端。
     fn choose_main(&mut self, index: usize) -> Result<Option<Outcome>> {
-        let Some(item) = self.painter.item(index) else { return Ok(None) };
+        let Some(item) = self.painter.item(index) else {
+            return Ok(None);
+        };
         if item.children.is_empty() {
             return Ok(Some(Outcome::Pick(item.id)));
         }
@@ -505,7 +756,9 @@ impl PopupMenu {
 
     fn choose_sub(&self, index: usize) -> Option<Outcome> {
         let p = self.sub_painters.get(&self.sub_index()?)?;
-        p.item(index).filter(|it| it.children.is_empty()).map(|it| Outcome::Pick(it.id))
+        p.item(index)
+            .filter(|it| it.children.is_empty())
+            .map(|it| Outcome::Pick(it.id))
     }
 
     /// `hwnd` 是收到這個輸入的視窗（第一層或第二層）。
@@ -560,13 +813,19 @@ impl PopupMenu {
 
     fn sub_input(&mut self, input: MenuInput) -> Result<Option<Outcome>> {
         self.close_sub_at = None;
-        let Some(index) = self.sub_index() else { return Ok(None) };
+        let Some(index) = self.sub_index() else {
+            return Ok(None);
+        };
         if self.main.hover != Some(index) {
             self.main.hover = Some(index);
             self.redraw_main()?;
         }
-        let Some((_, level)) = self.sub.as_mut() else { return Ok(None) };
-        let Some(p) = self.sub_painters.get(&index) else { return Ok(None) };
+        let Some((_, level)) = self.sub.as_mut() else {
+            return Ok(None);
+        };
+        let Some(p) = self.sub_painters.get(&index) else {
+            return Ok(None);
+        };
         let (hover, pressed) = (level.hover, level.pressed);
         match input {
             MenuInput::Move(x, y) => level.hover = p.hit(x, y),
@@ -594,7 +853,10 @@ impl PopupMenu {
         {
             if is(VK_DOWN) || is(VK_UP) {
                 let from = self.sub.as_ref().and_then(|(_, l)| l.hover);
-                let next = self.sub_painters.get(&index).and_then(|p| p.step(from, is(VK_DOWN)));
+                let next = self
+                    .sub_painters
+                    .get(&index)
+                    .and_then(|p| p.step(from, is(VK_DOWN)));
                 if let Some((_, level)) = self.sub.as_mut() {
                     level.hover = next;
                 }
@@ -617,7 +879,9 @@ impl PopupMenu {
             self.main.hover = self.painter.step(self.main.hover, is(VK_DOWN));
             self.redraw_main()?;
         } else if is(VK_RETURN) || is(VK_SPACE) || is(VK_RIGHT) {
-            let Some(i) = self.main.hover else { return Ok(None) };
+            let Some(i) = self.main.hover else {
+                return Ok(None);
+            };
             if self.has_children(i) {
                 self.open_sub(i)?;
                 self.keys_in_sub = true;

@@ -51,14 +51,24 @@ pub struct Piece {
 
 /// 找出每一隻、裁下來、清掉特效符號，依閱讀順序回傳。
 pub fn split(pixels: &[u8], width: usize, height: usize) -> Vec<Piece> {
-    let alpha: Vec<u8> = pixels.as_chunks::<BYTES_PER_PIXEL>().0.iter().map(|p| p[ALPHA]).collect();
+    let alpha: Vec<u8> = pixels
+        .as_chunks::<BYTES_PER_PIXEL>()
+        .0
+        .iter()
+        .map(|p| p[ALPHA])
+        .collect();
     find_figures(&alpha, width, height)
         .into_iter()
         .map(|rect| {
             let (mut crop, cw, ch) = crop(pixels, width, height, rect);
             let marks_removed = strip_marks(&mut crop, cw, ch);
             let (pixels, width, height) = retrim(&crop, cw, ch);
-            Piece { pixels, width, height, marks_removed }
+            Piece {
+                pixels,
+                width,
+                height,
+                marks_removed,
+            }
         })
         .collect()
 }
@@ -95,7 +105,12 @@ pub fn find_figures(alpha: &[u8], width: usize, height: usize) -> Vec<Rect> {
             continue;
         }
         let id = boxes.len();
-        let mut b = Rect { left: usize::MAX, top: usize::MAX, right: 0, bottom: 0 };
+        let mut b = Rect {
+            left: usize::MAX,
+            top: usize::MAX,
+            right: 0,
+            bottom: 0,
+        };
         let mut stack = vec![start];
         label[start] = id;
         while let Some(i) = stack.pop() {
@@ -118,7 +133,12 @@ pub fn find_figures(alpha: &[u8], width: usize, height: usize) -> Vec<Rect> {
             }
         }
         if b.left != usize::MAX {
-            boxes.push(Rect { left: b.left * CELL_PX, top: b.top * CELL_PX, right: (b.right * CELL_PX).min(width), bottom: (b.bottom * CELL_PX).min(height) });
+            boxes.push(Rect {
+                left: b.left * CELL_PX,
+                top: b.top * CELL_PX,
+                right: (b.right * CELL_PX).min(width),
+                bottom: (b.bottom * CELL_PX).min(height),
+            });
         }
     }
     let largest = boxes.iter().map(Rect::area).max().unwrap_or(0) as f32;
@@ -133,7 +153,9 @@ fn order_reading(mut boxes: Vec<Rect>) -> Vec<Rect> {
     let mut rows: Vec<Vec<Rect>> = Vec::new();
     for b in boxes {
         match rows.last_mut() {
-            Some(row) if center_y(&b) < center_y(&row[0]) + (row[0].bottom - row[0].top) / 2 => row.push(b),
+            Some(row) if center_y(&b) < center_y(&row[0]) + (row[0].bottom - row[0].top) / 2 => {
+                row.push(b)
+            }
             _ => rows.push(vec![b]),
         }
     }
@@ -154,7 +176,8 @@ fn crop(pixels: &[u8], w: usize, h: usize, rect: Rect) -> (Vec<u8>, usize, usize
     let mut out = vec![0u8; cw * ch * BYTES_PER_PIXEL];
     for y in 0..ch {
         let src = ((top + y) * w + left) * BYTES_PER_PIXEL;
-        out[y * cw * BYTES_PER_PIXEL..(y + 1) * cw * BYTES_PER_PIXEL].copy_from_slice(&pixels[src..src + cw * BYTES_PER_PIXEL]);
+        out[y * cw * BYTES_PER_PIXEL..(y + 1) * cw * BYTES_PER_PIXEL]
+            .copy_from_slice(&pixels[src..src + cw * BYTES_PER_PIXEL]);
     }
     (out, cw, ch)
 }
@@ -187,7 +210,10 @@ pub fn strip_marks(px: &mut [u8], w: usize, h: usize) -> usize {
         sizes.push(count);
     }
     let largest = sizes.iter().copied().max().unwrap_or(0) as f32;
-    let is_mark: Vec<bool> = sizes.iter().map(|&s| (s as f32) < largest * MARK_RATIO).collect();
+    let is_mark: Vec<bool> = sizes
+        .iter()
+        .map(|&s| (s as f32) < largest * MARK_RATIO)
+        .collect();
     for (i, l) in label.iter().enumerate() {
         // 沒標到的（極淡的霧）也一起清掉，免得符號留下一圈淡淡的影子。
         if *l == usize::MAX || is_mark[*l] {
@@ -210,12 +236,18 @@ pub fn retrim(px: &[u8], w: usize, h: usize) -> (Vec<u8>, usize, usize) {
     if l >= r {
         return (px.to_vec(), w, h);
     }
-    let (l, t, r, b) = (l.saturating_sub(CROP_PAD), t.saturating_sub(CROP_PAD), (r + CROP_PAD).min(w), (b + CROP_PAD).min(h));
+    let (l, t, r, b) = (
+        l.saturating_sub(CROP_PAD),
+        t.saturating_sub(CROP_PAD),
+        (r + CROP_PAD).min(w),
+        (b + CROP_PAD).min(h),
+    );
     let (nw, nh) = (r - l, b - t);
     let mut out = vec![0u8; nw * nh * BYTES_PER_PIXEL];
     for y in 0..nh {
         let src = ((t + y) * w + l) * BYTES_PER_PIXEL;
-        out[y * nw * BYTES_PER_PIXEL..(y + 1) * nw * BYTES_PER_PIXEL].copy_from_slice(&px[src..src + nw * BYTES_PER_PIXEL]);
+        out[y * nw * BYTES_PER_PIXEL..(y + 1) * nw * BYTES_PER_PIXEL]
+            .copy_from_slice(&px[src..src + nw * BYTES_PER_PIXEL]);
     }
     (out, nw, nh)
 }
@@ -248,8 +280,14 @@ mod tests {
         assert!(found[0].left < 200 && found[0].top < 200, "top-left first");
         assert!(found[0].top <= 25, "leaf merged into the top-left figure");
         assert!(found[1].left > 200 && found[1].top < 200, "then top-right");
-        assert!(found[2].left < 200 && found[2].top > 200, "then bottom-left");
-        assert!(found[3].left > 200 && found[3].top > 200, "then bottom-right");
+        assert!(
+            found[2].left < 200 && found[2].top > 200,
+            "then bottom-left"
+        );
+        assert!(
+            found[3].left > 200 && found[3].top > 200,
+            "then bottom-right"
+        );
     }
 
     #[test]
@@ -271,6 +309,9 @@ mod tests {
         assert_eq!(px[(12 * w + 91) * 4 + 3], 0, "mark cleared");
         assert_eq!(px[(25 * w + 45) * 4 + 3], 255, "orange kept");
         let (_, nw, _) = retrim(&px, w, h);
-        assert!(nw < w, "frame shrinks back to the body after the mark is gone");
+        assert!(
+            nw < w,
+            "frame shrinks back to the body after the mark is gone"
+        );
     }
 }

@@ -97,7 +97,11 @@ pub struct Features {
 
 impl Default for Features {
     fn default() -> Self {
-        Self { reminders: true, window_restore: false, focus: true }
+        Self {
+            reminders: true,
+            window_restore: false,
+            focus: true,
+        }
     }
 }
 
@@ -139,7 +143,12 @@ pub struct Area {
 impl Area {
     /// 從兩個角（拖曳的起點與終點，順序不拘）組成一個框。
     pub fn from_corners((x0, y0): (i32, i32), (x1, y1): (i32, i32)) -> Self {
-        Self { left: x0.min(x1), top: y0.min(y1), right: x0.max(x1), bottom: y0.max(y1) }
+        Self {
+            left: x0.min(x1),
+            top: y0.min(y1),
+            right: x0.max(x1),
+            bottom: y0.max(y1),
+        }
     }
 
     pub fn width(&self) -> i32 {
@@ -215,7 +224,10 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        write_atomic(path, &serde_json::to_vec_pretty(self).map_err(io::Error::other)?)
+        write_atomic(
+            path,
+            &serde_json::to_vec_pretty(self).map_err(io::Error::other)?,
+        )
     }
 
     /// 這隻桌寵叫什麼：使用者取的名字，沒取就是桌寵包的名字（`species`，例如「水豚」）。
@@ -225,7 +237,10 @@ impl Config {
 
     /// 使用者幫這隻桌寵取的名字；沒取過是 `None`。
     pub fn given_name(&self, id: &str) -> Option<&str> {
-        self.pet_names.get(id).map(|n| n.trim()).filter(|n| !n.is_empty())
+        self.pet_names
+            .get(id)
+            .map(|n| n.trim())
+            .filter(|n| !n.is_empty())
     }
 
     /// 桌寵怎麼叫使用者；沒設是 `None`。
@@ -262,18 +277,37 @@ mod tests {
         let c: Config = serde_json::from_str(r#"{ "pet": "cat" }"#).unwrap();
         assert_eq!(c.pet, "cat");
         assert_eq!(c.size_dip, DEFAULT_SIZE_DIP);
-        assert_eq!(c.features, Features::default(), "features missing from an old file take defaults");
+        assert_eq!(
+            c.features,
+            Features::default(),
+            "features missing from an old file take defaults"
+        );
         assert!(!c.features.window_restore, "window restore starts off");
-        let c: Config = serde_json::from_str(r#"{ "features": { "windowRestore": true } }"#).unwrap();
-        assert_eq!(c.features, Features { reminders: true, window_restore: true, focus: true });
+        let c: Config =
+            serde_json::from_str(r#"{ "features": { "windowRestore": true } }"#).unwrap();
+        assert_eq!(
+            c.features,
+            Features {
+                reminders: true,
+                window_restore: true,
+                focus: true
+            }
+        );
         let c: Config = serde_json::from_str(r#"{ "roam": "nearby" }"#).unwrap();
-        assert_eq!(c.roam, Roam::Screen, "the removed 'nearby' choice reads as the whole screen");
+        assert_eq!(
+            c.roam,
+            Roam::Screen,
+            "the removed 'nearby' choice reads as the whole screen"
+        );
     }
 
     #[test]
     fn save_then_load_round_trips() {
         let path = std::env::temp_dir().join(format!("petkit-config-{}.json", std::process::id()));
-        let c = Config { size_dip: 176, ..Config::default() };
+        let c = Config {
+            size_dip: 176,
+            ..Config::default()
+        };
         c.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), c);
         let _ = fs::remove_file(path);
