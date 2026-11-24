@@ -30,8 +30,8 @@ const SHADOW_LAYERS: usize = 16;
 /// 出現時從這個大小彈到原尺寸。
 const APPEAR_FROM_SCALE: f32 = 0.92;
 const LOCALE: &str = "zh-tw";
-/// 錯過的提醒最多列幾則，其餘收成「還有 N 則」。
-pub const MISSED_MAX_ROWS: usize = 4;
+/// 清單型的卡（錯過的提醒、提示清單）最多列幾則，其餘收成「還有 N 則」。
+pub const LIST_MAX_ROWS: usize = 4;
 /// 講話泡泡：文字最寬多少、最多幾行（超過用刪節號）。
 const SPEECH_MAX_TEXT_DIP: f32 = 220.0;
 const SPEECH_MAX_LINES: f32 = 3.0;
@@ -73,6 +73,11 @@ pub enum Card {
         rows: Vec<(String, String)>,
         more: usize,
     },
+    /// 提示清單：好幾則提示框合成一個，版面同錯過的提醒但沒有按鈕，跟提示框一樣自己消失。
+    NoticeList {
+        rows: Vec<(String, String)>,
+        more: usize,
+    },
     Info {
         title: String,
         detail: Option<String>,
@@ -89,7 +94,7 @@ impl Card {
     fn tap_to_dismiss(&self) -> bool {
         matches!(
             self,
-            Card::Info { .. } | Card::Speech { .. } | Card::Notice { .. }
+            Card::Info { .. } | Card::Speech { .. } | Card::Notice { .. } | Card::NoticeList { .. }
         )
     }
 
@@ -349,6 +354,37 @@ impl CardPainter {
                 }
             };
 
+        // 清單型的卡：一列一則，左邊名稱、右邊時間，超過的收成「還有 N 則」；回傳排到哪裡。
+        let list_rows = |rows: &[(String, String)],
+                         more: usize,
+                         mut y: f32,
+                         texts: &mut Vec<(IDWriteTextLayout, Vector2, Ink)>|
+         -> Result<f32> {
+            for (name, when) in rows {
+                let (w_layout, w_w, w_h) = self.text(when, &caption, inner_w / 2.0, Some(1.0))?;
+                let (n_layout, _, n_h) =
+                    self.text(name, &body, inner_w - w_w - theme::SPACE_3 * s, Some(1.0))?;
+                let row_h = n_h.max(w_h);
+                texts.push((n_layout, Vector2 { X: left, Y: y }, Ink::Text));
+                texts.push((
+                    w_layout,
+                    Vector2 {
+                        X: left + inner_w - w_w,
+                        Y: y + (row_h - w_h) / 2.0,
+                    },
+                    Ink::Muted,
+                ));
+                y += row_h + theme::SPACE_1 * s;
+            }
+            if more > 0 {
+                let (t, _, h) =
+                    self.text(&format!("還有 {more} 則"), &caption, inner_w, Some(1.0))?;
+                texts.push((t, Vector2 { X: left, Y: y }, Ink::Muted));
+                y += h;
+            }
+            Ok(y)
+        };
+
         let tile = match card {
             Card::Confirm {
                 title,
@@ -397,29 +433,7 @@ impl CardPainter {
                     Ink::Text,
                 ));
                 y = tile_rect.bottom + theme::SPACE_3 * s;
-                for (name, when) in rows {
-                    let (w_layout, w_w, w_h) =
-                        self.text(when, &caption, inner_w / 2.0, Some(1.0))?;
-                    let (n_layout, _, n_h) =
-                        self.text(name, &body, inner_w - w_w - theme::SPACE_3 * s, Some(1.0))?;
-                    let row_h = n_h.max(w_h);
-                    texts.push((n_layout, Vector2 { X: left, Y: y }, Ink::Text));
-                    texts.push((
-                        w_layout,
-                        Vector2 {
-                            X: left + inner_w - w_w,
-                            Y: y + (row_h - w_h) / 2.0,
-                        },
-                        Ink::Muted,
-                    ));
-                    y += row_h + theme::SPACE_1 * s;
-                }
-                if *more > 0 {
-                    let (t, _, h) =
-                        self.text(&format!("還有 {more} 則"), &caption, inner_w, Some(1.0))?;
-                    texts.push((t, Vector2 { X: left, Y: y }, Ink::Muted));
-                    y += h;
-                }
+                y = list_rows(rows, *more, y, &mut texts)?;
                 y += theme::SPACE_3 * s;
                 button_row(
                     y,
@@ -428,6 +442,26 @@ impl CardPainter {
                 );
                 y += BUTTON_HEIGHT_DIP * s;
                 (Icon::History, Tint::Accent)
+            }
+            Card::NoticeList { rows, more } => {
+                let count = rows.len() + more;
+                let (t, _, h) = self.text(
+                    &format!("有 {count} 件事要跟你說喔～"),
+                    &subtitle,
+                    text_w,
+                    Some(1.0),
+                )?;
+                texts.push((
+                    t,
+                    Vector2 {
+                        X: text_left,
+                        Y: y + (tile_size - h) / 2.0,
+                    },
+                    Ink::Text,
+                ));
+                y = tile_rect.bottom + theme::SPACE_3 * s;
+                y = list_rows(rows, *more, y, &mut texts)?;
+                (Icon::MessageDots, Tint::Accent)
             }
             Card::Update { version } => {
                 let (t, _, h) = self.text(

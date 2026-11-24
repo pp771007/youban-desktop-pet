@@ -19,7 +19,7 @@ use petkit::holidays::{self, Calendar};
 use petkit::reminders::{Reminder, ReminderFile, Style};
 use serde::{Deserialize, Serialize};
 
-use crate::bubble::{Card, CardAction, MISSED_MAX_ROWS, card_time};
+use crate::bubble::{Card, CardAction, LIST_MAX_ROWS, card_time};
 use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent};
@@ -325,8 +325,8 @@ impl ReminderModule {
             rows.extend(old);
             more += old_more;
         }
-        more += rows.len().saturating_sub(MISSED_MAX_ROWS);
-        rows.truncate(MISSED_MAX_ROWS);
+        more += rows.len().saturating_sub(LIST_MAX_ROWS);
+        rows.truncate(LIST_MAX_ROWS);
         ctx.card(MISSED_KEY, missed_card(&rows, more, ctx.now));
         self.state
             .pending

@@ -1,7 +1,8 @@
 //! 傳話模組：AI 或其他程式用 `Youban.exe --confirm/--notice` 送來的話，跳確認框或提示框（用詞見 `CONTEXT.md`）。
 //!
 //! 好幾個來源可能同時送、也可能一直送，所以傳話在核心的卡片佇列裡**最多只佔兩格**：
-//! 一格確認框、一格提示框，其他的在這裡排隊，前一張收掉才送下一張。
+//! 一格確認框（其他的在這裡排隊，按掉一張才送下一張）、一格提示框（還沒收掉之前來的都併進去，
+//! 兩則以上就變成提示清單，照來源排在一起）。
 //! 核心的佇列滿了會丟掉最前面的卡，不這樣限制的話，一直送的程式會把使用者自己排的提醒擠掉。
 //!
 //! 確認框（排隊中、跳著的、按了稍後的）存在 `relay-state.json`，重開柚伴還會再跳；提示框不存，重開就算了。
@@ -14,7 +15,7 @@ use petkit::ipc::{CMD_RELAY, Relay};
 use petkit::reminders::Style;
 use serde::{Deserialize, Serialize};
 
-use crate::bubble::{Card, CardAction, card_time};
+use crate::bubble::{Card, CardAction, LIST_MAX_ROWS, card_time};
 use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent, Request};
@@ -54,12 +55,32 @@ impl Message {
             icon: ICON,
         }
     }
+}
 
-    fn notice_card(&self, now: NaiveDateTime) -> Card {
-        Card::Notice {
-            title: self.title.clone(),
-            time: self.time_line(now),
+/// 提示框那一格：一則是提示框，兩則以上是提示清單（同一個來源的排在一起，來源照第一則進來的先後）。
+fn notice_slot_card(slot: &[Message], now: NaiveDateTime) -> Option<Card> {
+    match slot {
+        [] => None,
+        [m] => Some(Card::Notice {
+            title: m.title.clone(),
+            time: m.time_line(now),
             icon: ICON,
+        }),
+        _ => {
+            let mut sources: Vec<&Option<String>> = Vec::new();
+            for m in slot {
+                if !sources.contains(&&m.from) {
+                    sources.push(&m.from);
+                }
+            }
+            let mut rows: Vec<(String, String)> = sources
+                .into_iter()
+                .flat_map(|from| slot.iter().filter(move |m| &m.from == from))
+                .map(|m| (m.title.clone(), m.time_line(now)))
+                .collect();
+            let more = rows.len().saturating_sub(LIST_MAX_ROWS);
+            rows.truncate(LIST_MAX_ROWS);
+            Some(Card::NoticeList { rows, more })
         }
     }
 }
@@ -78,8 +99,8 @@ pub struct RelayModule {
     waiting: Vec<Message>,
     shown: Option<Message>,
     snoozed: Vec<(Message, NaiveDateTime)>,
-    notices: Vec<Message>,
-    notice_shown: Option<Message>,
+    /// 提示框那一格裡的全部（核心佇列裡有這一格 ⇔ 不是空的）。
+    notice_slot: Vec<Message>,
     next_seq: u64,
 }
 
@@ -94,8 +115,7 @@ impl RelayModule {
             waiting: state.waiting,
             shown: None,
             snoozed: state.snoozed,
-            notices: Vec::new(),
-            notice_shown: None,
+            notice_slot: Vec::new(),
             next_seq: state.next_seq,
         }
     }
@@ -120,16 +140,13 @@ impl RelayModule {
         };
         self.waiting.retain(|m| m.key != msg.key);
         self.snoozed.retain(|(m, _)| m.key != msg.key);
-        self.notices.retain(|m| m.key != msg.key);
         let shown_here = self.shown.as_ref().is_some_and(|m| m.key == msg.key);
-        let notice_here = self.notice_shown.as_ref().is_some_and(|m| m.key == msg.key);
+        let in_slot = self.notice_slot.iter().position(|m| m.key == msg.key);
         match relay.style {
             Style::Confirm => {
-                if notice_here {
-                    self.notice_shown = None;
-                    ctx.out.push(Request::Withdraw {
-                        key: NOTICE_KEY.into(),
-                    });
+                if let Some(i) = in_slot {
+                    self.notice_slot.remove(i);
+                    self.refresh_notice_slot(ctx);
                 }
                 if shown_here {
                     ctx.card(msg.key.clone(), msg.confirm_card(ctx.now));
@@ -145,29 +162,33 @@ impl RelayModule {
                         key: msg.key.clone(),
                     });
                 }
-                if notice_here {
-                    ctx.card(NOTICE_KEY, msg.notice_card(ctx.now));
-                    self.notice_shown = Some(msg);
-                } else {
-                    self.notices.push(msg);
+                match in_slot {
+                    Some(i) => self.notice_slot[i] = msg,
+                    None => self.notice_slot.push(msg),
                 }
+                self.refresh_notice_slot(ctx);
             }
         }
         self.pump(ctx);
         self.save();
     }
 
-    /// 空出來的格子補上排最前面的那則。
+    /// 確認框那一格空出來了就補上排最前面的那則。
     fn pump(&mut self, ctx: &mut Ctx) {
         if self.shown.is_none() && !self.waiting.is_empty() {
             let msg = self.waiting.remove(0);
             ctx.card(msg.key.clone(), msg.confirm_card(ctx.now));
             self.shown = Some(msg);
         }
-        if self.notice_shown.is_none() && !self.notices.is_empty() {
-            let msg = self.notices.remove(0);
-            ctx.card(NOTICE_KEY, msg.notice_card(ctx.now));
-            self.notice_shown = Some(msg);
+    }
+
+    /// 提示框那一格的內容變了：重送（核心原地換掉，等於重新跳一次），空了就收掉。
+    fn refresh_notice_slot(&self, ctx: &mut Ctx) {
+        match notice_slot_card(&self.notice_slot, ctx.now) {
+            Some(card) => ctx.card(NOTICE_KEY, card),
+            None => ctx.out.push(Request::Withdraw {
+                key: NOTICE_KEY.into(),
+            }),
         }
     }
 
@@ -227,7 +248,7 @@ impl Module for RelayModule {
             }
             ModuleEvent::Card { key, action } => {
                 if *key == NOTICE_KEY {
-                    self.notice_shown = None;
+                    self.notice_slot.clear();
                 } else if self.shown.as_ref().is_some_and(|m| m.key == *key) {
                     match action {
                         CardAction::OpenSnooze => return,
@@ -401,8 +422,15 @@ mod tests {
                 None,
             ));
         }
-        assert_eq!(titles(&shown), ["要看", "好了"]);
-        // 收掉一張才補下一張。
+        let mut keys: Vec<String> = cards(&shown).into_iter().map(|(k, _)| k).collect();
+        keys.dedup();
+        assert_eq!(keys, ["#1", NOTICE_KEY]);
+        // 提示框那一格一直原地更新成提示清單：列 4 則，其餘「還有 N 則」。
+        let Some((_, Card::NoticeList { rows, more })) = cards(&shown).pop() else {
+            panic!("expected a notice list");
+        };
+        assert_eq!((rows.len(), more), (LIST_MAX_ROWS, 50 - LIST_MAX_ROWS));
+        // 確認框按掉一張才補下一張。
         let next = press(&mut m, dt(24, 9, 1), "#1", CardAction::Done);
         assert_eq!(
             cards(&next)[0].1,
@@ -413,8 +441,52 @@ mod tests {
                 icon: ICON,
             }
         );
+        // 提示清單收掉就全部看過了，不會再跳。
         let next = press(&mut m, dt(24, 9, 1), NOTICE_KEY, CardAction::Dismiss);
-        assert_eq!(titles(&next), ["好了"]);
+        assert!(cards(&next).is_empty());
+    }
+
+    #[test]
+    fn notices_from_the_same_sender_are_listed_together() {
+        let mut m = RelayModule::new(state_path());
+        send(
+            &mut m,
+            dt(24, 9, 0),
+            Style::Notice,
+            "建置完成",
+            Some("Claude"),
+            None,
+        );
+        send(
+            &mut m,
+            dt(24, 9, 1),
+            Style::Notice,
+            "部署好了",
+            Some("Codex"),
+            None,
+        );
+        let out = send(
+            &mut m,
+            dt(24, 9, 2),
+            Style::Notice,
+            "測試通過",
+            Some("Claude"),
+            None,
+        );
+        assert_eq!(
+            cards(&out),
+            vec![(
+                NOTICE_KEY.into(),
+                Card::NoticeList {
+                    rows: vec![
+                        ("建置完成".into(), "Claude · 09:00".into()),
+                        ("測試通過".into(), "Claude · 09:02".into()),
+                        ("部署好了".into(), "Codex · 09:01".into()),
+                    ],
+                    more: 0,
+                }
+            )]
+        );
     }
 
     #[test]

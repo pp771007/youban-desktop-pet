@@ -2576,7 +2576,7 @@ impl App {
         }
         let linger = self.cards.front().and_then(|q| match q.card {
             Card::Info { .. } => Some(INFO_SECS),
-            Card::Notice { .. } => Some(NOTICE_SECS),
+            Card::Notice { .. } | Card::NoticeList { .. } => Some(NOTICE_SECS),
             _ => None,
         });
         if let Some(secs) = linger
@@ -2595,7 +2595,10 @@ impl App {
                         && self.config.reminder_sound
                         && matches!(
                             q.card,
-                            Card::Confirm { .. } | Card::Notice { .. } | Card::Missed { .. }
+                            Card::Confirm { .. }
+                                | Card::Notice { .. }
+                                | Card::NoticeList { .. }
+                                | Card::Missed { .. }
                         )
                     {
                         play_reminder_sound();

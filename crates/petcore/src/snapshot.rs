@@ -244,6 +244,18 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         (Card::Confirm { title: "PR 有 2 則新留言，要你看一下".into(), time: "Claude・柚伴 · 14:02".into(), snooze_open: false, icon: Icon::MessageDots }, None),
         (Card::Notice { title: "測試全部通過了".into(), time: "Codex・網站 · 14:05".into(), icon: Icon::MessageDots }, None),
         (
+            Card::NoticeList {
+                rows: vec![
+                    ("建置完成".into(), "Claude・柚伴 · 14:02".into()),
+                    ("測試全部通過了".into(), "Claude・柚伴 · 14:05".into()),
+                    ("部署到測試站了，可以去點點看".into(), "Codex・網站 · 14:03".into()),
+                    ("磁碟剩不到 10%".into(), "備份腳本 · 14:06".into()),
+                ],
+                more: 3,
+            },
+            None,
+        ),
+        (
             Card::Missed {
                 rows: vec![("喝水".into(), "14:00（3 次）".into()), ("站起來走走".into(), "15:30".into()), ("週報".into(), "11/20 17:00".into())],
                 more: 2,
