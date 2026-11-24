@@ -97,9 +97,13 @@ fn platforms_of(shown: &[Shown], work: RECT, min_width: f32, pet_height: f32) ->
             for o in above.iter().filter(|o| o.top <= r.top && o.bottom >= r.top) {
                 segments = subtract(segments, o.left as f32, o.right as f32);
             }
+            // 側邊從頂端往下露到哪：前面的視窗蓋住這條邊的最高處以下都看不到，桌寵不該沿著那截爬。
+            let reach = |x: f32| {
+                above.iter().filter(|o| (o.left as f32) < x && x < o.right as f32 && o.top < r.bottom && o.bottom > r.top).map(|o| o.top as f32).fold(r.bottom as f32, f32::min)
+            };
             out.extend(segments.into_iter().filter(|(l, rr)| rr - l >= min_width).map(|(left, right)| {
                 // 段的端點就是視窗真正的邊（不是被別的視窗、螢幕邊切出來的）才爬得上來。
-                let sides = (left == r.left as f32, right == r.right as f32);
+                let sides = ((left == r.left as f32).then(|| reach(left)), (right == r.right as f32).then(|| reach(right)));
                 Platform { left, right, y: r.top as f32, window: w.id, window_left: r.left as f32, sides, bottom: r.bottom as f32 }
             }));
         }
@@ -155,11 +159,21 @@ mod tests {
         ];
         let p = platforms_of(&shown, work, 100.0, 256.0);
         assert_eq!(p.len(), 1, "{p:?}");
-        assert_eq!((p[0].left, p[0].right, p[0].y, p[0].sides), (2793.0, 3789.0, 1061.0, (true, true)));
+        assert_eq!((p[0].left, p[0].right, p[0].y, p[0].sides), (2793.0, 3789.0, 1061.0, (Some(1951.0), Some(1951.0))));
         // 真的蓋在上面的視窗照樣擋住那一段。
         let shown = [Shown { id: 3, rect: rect(3000, 900, 3400, 1500), standable: true, see_through: false }, Shown { id: 2, rect: rect(2793, 1061, 3789, 1951), standable: true, see_through: false }];
         let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| (p.left, p.right)).collect();
         assert_eq!(p, vec![(2793.0, 3000.0), (3400.0, 3789.0)]);
+    }
+
+    #[test]
+    fn a_side_covered_by_a_window_in_front_is_only_climbable_above_it() {
+        let rect = |left, top, right, bottom| RECT { left, top, right, bottom };
+        let work = rect(0, 0, 3840, 2112);
+        // 前面的視窗頂端比後面的低一點，蓋住後面視窗左邊那條邊的下半截；右邊那條沒被蓋到。
+        let shown = [Shown { id: 1, rect: rect(500, 1100, 1300, 1900), standable: true, see_through: false }, Shown { id: 2, rect: rect(1000, 1000, 2000, 1900), standable: true, see_through: false }];
+        let p: Vec<_> = platforms_of(&shown, work, 100.0, 256.0).into_iter().filter(|p| p.window == 2).map(|p| p.sides).collect();
+        assert_eq!(p, vec![(Some(1100.0), Some(1900.0))]);
     }
 
     #[test]

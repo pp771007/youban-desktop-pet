@@ -64,8 +64,8 @@ fn leap_windows(stage_w: f32, ground_y: f32, h: f32, half: f32, gap_widths: f32,
     let left_right = stage_w * LEAP_LEFT_WINDOW_RATIO;
     let right_left = left_right + gap_widths * 2.0 * half;
     vec![
-        Platform { left: 0.0, right: left_right, y: top, window: 1, window_left: 0.0, sides: (true, true), bottom: ground_y },
-        Platform { left: right_left, right: stage_w, y: top - rise_heights * h, window: 2, window_left: right_left, sides: (true, true), bottom: ground_y },
+        Platform { left: 0.0, right: left_right, y: top, window: 1, window_left: 0.0, sides: (Some(ground_y), Some(ground_y)), bottom: ground_y },
+        Platform { left: right_left, right: stage_w, y: top - rise_heights * h, window: 2, window_left: right_left, sides: (Some(ground_y), Some(ground_y)), bottom: ground_y },
     ]
 }
 

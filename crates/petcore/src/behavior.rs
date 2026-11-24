@@ -206,9 +206,10 @@ pub struct Platform {
     pub window: isize,
     /// 那個視窗的左邊緣：視窗被拖動時用它算移動了多少（段的左右會因為遮擋改變，視窗左邊緣不會）。
     pub window_left: f32,
-    /// 左、右端是不是視窗真正的側邊：是的話桌寵可以沿著它爬上來。
-    pub sides: (bool, bool),
-    /// 視窗底邊：側邊從頂端一路到這裡，桌寵腳邊碰得到才爬得上去。
+    /// 左、右端是視窗真正的側邊時，那條邊從頂端往下露出來到哪個高度（被前面的視窗蓋住的那截不算）；
+    /// 桌寵腳邊碰得到這一截才沿著它爬上來。`None` = 不是側邊（被別的視窗、螢幕邊切出來的端點）。
+    pub sides: (Option<f32>, Option<f32>),
+    /// 視窗底邊。
     pub bottom: f32,
 }
 
@@ -241,7 +242,7 @@ pub fn block_platforms(blocks: &[Rect], ceiling: f32, pet_height: f32) -> Vec<Pl
         .enumerate()
         .filter(|(_, b)| b.top - pet_height >= ceiling)
         // 禁止範圍的邊另外處理（走進去就爬過去、會亮紅光），不算視窗的邊。
-        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left, sides: (false, false), bottom: b.bottom })
+        .map(|(i, b)| Platform { left: b.left, right: b.right, y: b.top, window: BLOCK_WINDOW_BASE - i as isize, window_left: b.left, sides: (None, None), bottom: b.bottom })
         .collect()
 }
 
@@ -1444,12 +1445,16 @@ impl Pet {
         let standing_on = self.riding.map(|(w, _)| w);
         let edge = env.platforms.iter().find_map(|p| {
             // 頂端要比腳下高出一個身高（太矮的跨過去就好），上面也要有地方站；
-            // 側邊要往下伸到腳邊附近（差一個身高以內，跳一下抓得到），不然是對著空氣爬。
-            if Some(p.window) == standing_on || p.y > self.y - h || p.y - h < env.ceiling || p.bottom < self.y - h {
+            // 側邊露出來的那截要往下伸到腳邊附近（差一個身高以內，跳一下抓得到），不然是對著空氣或別的視窗爬。
+            if Some(p.window) == standing_on || p.y > self.y - h || p.y - h < env.ceiling {
                 return None;
             }
-            let at =if dir > 0.0 && p.sides.0 { p.left } else if dir < 0.0 && p.sides.1 { p.right } else { return None };
-            crossed(at).then_some((at, p.y, p.right - p.left))
+            let (at, reach) = match (dir > 0.0, p.sides) {
+                (true, (Some(reach), _)) => (p.left, reach),
+                (false, (_, Some(reach))) => (p.right, reach),
+                _ => return None,
+            };
+            (reach >= self.y - h && crossed(at)).then_some((at, p.y, p.right - p.left))
         });
         let Some((at, top, width)) = edge else { return false };
         if self.block_at(at, self.y, env).is_some() || self.rand01() >= chance {
@@ -1508,15 +1513,15 @@ impl Pet {
             let x = (near + dir * hw * LEAP_LAND_INSET_HALF_WIDTHS).clamp(target.left, target.right).clamp(env.min_x, env.max_x);
             Leap { x, y: target.y, apex_y: self.y.min(target.y) - LEAP_APEX_HEIGHTS * h, grab: None, miss: false }
         } else {
-            // 對面高很多：跳過去抓住側邊。側邊要真的是視窗的邊、在前面（不是在頭頂上）、往下伸到搆得到的地方，頂上也要站得下。
-            let side_x = if dir > 0.0 { target.left } else { target.right };
-            let is_side = if dir > 0.0 { target.sides.0 } else { target.sides.1 };
-            if !is_side || (side_x - edge) * dir < 0.0 || target.bottom < self.y - h || target.y - h < env.ceiling {
+            // 對面高很多：跳過去抓住側邊。側邊要真的是視窗的邊、在前面（不是在頭頂上）、露出來的那截往下伸到搆得到的地方，頂上也要站得下。
+            let (side_x, reach) = if dir > 0.0 { (target.left, target.sides.0) } else { (target.right, target.sides.1) };
+            let Some(reach) = reach.filter(|r| *r >= self.y - h) else { return false };
+            if (side_x - edge) * dir < 0.0 || target.y - h < env.ceiling {
                 return false;
             }
-            let grab_y = (self.y - LEAP_UP_HEIGHTS * h).clamp(target.y, target.bottom);
+            let grab_y = (self.y - LEAP_UP_HEIGHTS * h).clamp(target.y, reach);
             let across = (target.right - target.left - width).max(0.0) * self.rand_range(WINDOW_TOP_WALK_FRACTION);
-            Leap { x: side_x, y: grab_y, apex_y: grab_y, grab: Some(Grab { x: side_x, side: dir, top: target.y, bottom: target.bottom, across }), miss: false }
+            Leap { x: side_x, y: grab_y, apex_y: grab_y, grab: Some(Grab { x: side_x, side: dir, top: target.y, bottom: reach, across }), miss: false }
         };
         self.x = prev_x;
         self.facing_left = dir < 0.0;
@@ -2105,7 +2110,7 @@ mod tests {
     #[test]
     fn lands_on_a_window_top_and_walks_off_its_edge() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false), bottom: 1000.0 }];
+        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 1000.0, now, 6);
         pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, now, &env);
@@ -2130,7 +2135,7 @@ mod tests {
     /// 回傳：牠最後站在哪個視窗（`None` = 地上）、途中有沒有抓著側邊爬、有沒有停下來探頭。
     fn walk_to_right_edge(right: Platform, seed: u64) -> (Option<isize>, bool, bool) {
         let mut env = env();
-        env.platforms = vec![Platform { left: 200.0, right: 800.0, y: 700.0, window: 1, window_left: 200.0, sides: (true, true), bottom: 1000.0 }, right];
+        env.platforms = vec![Platform { left: 200.0, right: 800.0, y: 700.0, window: 1, window_left: 200.0, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 }, right];
         let mut now = 0.0;
         let mut pet = Pet::new(700.0, 700.0, now, seed);
         pet.stand(&env, now);
@@ -2151,7 +2156,7 @@ mod tests {
 
     /// 右邊的視窗：左邊緣在 `left`、頂端在 `y`。
     fn right_window(left: f32, y: f32) -> Platform {
-        Platform { left, right: left + 600.0, y, window: 2, window_left: left, sides: (true, true), bottom: 1000.0 }
+        Platform { left, right: left + 600.0, y, window: 2, window_left: left, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 }
     }
 
     #[test]
@@ -2197,8 +2202,8 @@ mod tests {
     fn thrown_from_one_window_onto_another_stays_there() {
         let mut env = env();
         env.platforms = vec![
-            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false), bottom: 1000.0 },
-            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0, sides: (false, false), bottom: 1000.0 },
+            Platform { left: 400.0, right: 900.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 },
+            Platform { left: 400.0, right: 900.0, y: 400.0, window: 2, window_left: 400.0, sides: (None, None), bottom: 1000.0 },
         ];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
@@ -2215,7 +2220,7 @@ mod tests {
     #[test]
     fn window_moving_away_drops_the_pet() {
         let mut env = env();
-        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (false, false), bottom: 1000.0 }];
+        env.platforms = vec![Platform { left: 400.0, right: 600.0, y: 700.0, window: 1, window_left: 400.0, sides: (None, None), bottom: 1000.0 }];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
         run(&mut pet, &mut now, 0.1, &env);
@@ -2243,7 +2248,7 @@ mod tests {
     fn climbs_up_the_side_of_a_window_and_stands_on_top() {
         let mut env = env();
         env.activity = Activity::Lively;
-        env.platforms = vec![Platform { left: 700.0, right: 1100.0, y: 600.0, window: 1, window_left: 700.0, sides: (true, true), bottom: 950.0 }];
+        env.platforms = vec![Platform { left: 700.0, right: 1100.0, y: 600.0, window: 1, window_left: 700.0, sides: (Some(950.0), Some(950.0)), bottom: 950.0 }];
         let mut now = 0.0;
         let mut pet = Pet::new(300.0, 1000.0, now, 17);
         let (mut climbed, mut on_top) = (false, false);
@@ -2266,8 +2271,8 @@ mod tests {
         let mut env = env();
         env.activity = Activity::Lively;
         env.platforms = vec![
-            Platform { left: 300.0, right: 1500.0, y: 750.0, window: 1, window_left: 300.0, sides: (true, true), bottom: 1000.0 },
-            Platform { left: 900.0, right: 1300.0, y: 450.0, window: 2, window_left: 900.0, sides: (true, true), bottom: 800.0 },
+            Platform { left: 300.0, right: 1500.0, y: 750.0, window: 1, window_left: 300.0, sides: (Some(1000.0), Some(1000.0)), bottom: 1000.0 },
+            Platform { left: 900.0, right: 1300.0, y: 450.0, window: 2, window_left: 900.0, sides: (Some(800.0), Some(800.0)), bottom: 800.0 },
         ];
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 750.0, now, 17);
@@ -2282,8 +2287,8 @@ mod tests {
         }
         assert!(reached, "climbed from the lower window onto the higher one");
 
-        // 高的那個浮在半空（底邊離腳下超過一個身高）：搆不到它的側邊，不爬。
-        env.platforms[1].bottom = 550.0;
+        // 高的那個側邊只露到半空（離腳下超過一個身高，浮在半空或下半截被前面的視窗蓋住）：搆不到，不爬。
+        env.platforms[1].sides = (Some(550.0), Some(550.0));
         let mut pet = Pet::new(500.0, 750.0, now, 17);
         for _ in 0..(900.0 / DT) as usize {
             now += DT as f64;
@@ -2336,8 +2341,8 @@ mod tests {
         let mut env = env();
         env.activity = Activity::Lively;
         env.platforms = vec![
-            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0, sides: (false, false), bottom: 1000.0 },
-            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0, sides: (false, false), bottom: 1000.0 },
+            Platform { left: 500.0, right: 900.0, y: 600.0, window: 1, window_left: 500.0, sides: (None, None), bottom: 1000.0 },
+            Platform { left: 1300.0, right: 1600.0, y: 600.0, window: 2, window_left: 1300.0, sides: (None, None), bottom: 1000.0 },
         ];
         let area = Rect { left: 400.0, top: 300.0, right: 1000.0, bottom: 800.0 };
         env.confine_to(area);
@@ -2457,7 +2462,7 @@ mod tests {
     fn rides_along_when_its_window_is_dragged() {
         let mut env = env();
         env.activity = Activity::Calm;
-        let window = |dx: f32, dy: f32| vec![Platform { left: 400.0 + dx, right: 900.0 + dx, y: 700.0 + dy, window: 7, window_left: 400.0 + dx, sides: (false, false), bottom: 1000.0 }];
+        let window = |dx: f32, dy: f32| vec![Platform { left: 400.0 + dx, right: 900.0 + dx, y: 700.0 + dy, window: 7, window_left: 400.0 + dx, sides: (None, None), bottom: 1000.0 }];
         env.platforms = window(0.0, 0.0);
         let mut now = 0.0;
         let mut pet = Pet::new(500.0, 700.0, now, 6);
