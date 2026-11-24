@@ -159,7 +159,7 @@ const NAMED_SAY_SECS: f32 = 5.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
 const MODULE_SAY_SECS: f32 = 4.0;
 /// 提示框留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
-const NOTICE_SECS: f64 = 15.0;
+pub const NOTICE_SECS: f64 = 15.0;
 
 /// `windows` crate 把它放在 Controls 功能底下（為了一個常數不值得開那整包）。
 const WM_MOUSELEAVE: u32 = 0x02A3;

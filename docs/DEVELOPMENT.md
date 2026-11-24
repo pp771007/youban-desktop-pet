@@ -30,7 +30,7 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 | 指令 | 用途 |
 |---|---|
 | `--send '{"cmd":"testReminder"}'` | 送指令給執行中的桌寵（指令名稱見 `petkit::ipc`） |
-| `--confirm\|--notice <話> [--from …] [--id …]` | 傳話（給 AI 和其他程式用；參數與結束碼的說明在 README 的「讓 AI 透過牠跟你說話」） |
+| `--confirm\|--notice <話> […]` | 傳話（給 AI 和其他程式用）；參數、結束碼、給 AI 的用法都在 `--relay-help`（`main.rs` 的 `relay_help`，印出來的字要維持純 ASCII，原因寫在那裡） |
 | `--autostart on\|off\|status` | 開機自動啟動（寫進目前使用者的「執行」登錄，不用系統管理員權限；設定 →「一般」的開關也是這個） |
 | `--snapshot <out.png> [dpi]` | 不開視窗，輸出各狀態的桌寵截圖 |
 | `--snapshot-cards <out.png> [dpi]` | 不開視窗，輸出確認框、提示框等各種框（淺色＋深色）、講話泡泡、點心與球 |

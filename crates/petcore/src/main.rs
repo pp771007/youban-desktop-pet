@@ -59,12 +59,63 @@ const NOTICE_FLAG: &str = "--notice";
 const RELAY_FROM_OPT: &str = "--from";
 const RELAY_ID_OPT: &str = "--id";
 const RELAY_DETAIL_OPT: &str = "--detail";
-const RELAY_USAGE: &str = "用法：Youban.exe --confirm|--notice <要說的話> [--from <誰傳的>] [--id <同一件事的代號>] [--detail <補充說明>]";
+/// 給 AI 看的完整用法（README 只叫人來跑這個，參數與結束碼只寫在這裡）。
+const RELAY_HELP_FLAG: &str = "--relay-help";
 /// 傳話的結束碼：送程式的那一方靠它知道使用者有沒有收到。
 const RELAY_EXIT_SENT: i32 = 0;
 const RELAY_EXIT_NOT_RUNNING: i32 = 1;
 const RELAY_EXIT_USAGE: i32 = 2;
 const RELAY_EXIT_DISABLED: i32 = 3;
+
+/// 傳話的指令印出來的字一律英文（純 ASCII）：正式版沒有主控台，輸出只會進呼叫端的管線，
+/// 而繁中 Windows 的 PowerShell 5.1 預設用 cp950 解讀管線，UTF-8 的中文會變亂碼。
+fn relay_help() -> String {
+    format!(
+        r#"Youban desktop pet: relay a message to the user through the pet.
+
+USAGE
+  Youban.exe --confirm <message> [--from <name>] [--id <key>] [--detail <text>]
+  Youban.exe --notice  <message> [--from <name>] [--id <key>] [--detail <text>]
+
+WHICH ONE
+  --confirm  A box with Done / Later buttons. Stays until the user presses Done,
+             and comes back if Youban restarts. Use it when the user has to act
+             or decide: review a PR, answer a question, a job failed.
+  --notice   Disappears by itself after {notice_secs} seconds. Use it for FYI: build
+             passed, task finished. Notices arriving together merge into one list.
+  When unsure, use --notice. Do not send one for every small step.
+
+OPTIONS
+  --from <name>    Who is talking, shown on the box. Use the same name every time;
+                   the relay log groups messages by it.
+  --id <key>       A message with the same --from and --id replaces the earlier one
+                   instead of piling up. Use it for progress of one task (--id build).
+  --detail <text>  Longer explanation. Not shown on the box, only in the relay log
+                   (right-click the pet > relay log).
+
+WRITING THE MESSAGE
+  The box shows at most two short lines, about 20 Chinese characters. Keep
+  <message> short and put the rest in --detail. Write in the user's language.
+
+EXIT CODES
+  {sent}  delivered
+  {not_running}  Youban is not running
+  {usage}  bad arguments
+  {disabled}  relay is turned off in Youban's settings
+  On {not_running} or {disabled} the user did not see it; tell them another way.
+
+POWERSHELL
+  PowerShell does not wait for Youban.exe (and $LASTEXITCODE stays empty)
+  unless the output is piped:
+    Youban.exe --notice "Build passed" --from Claude | Out-String; $LASTEXITCODE
+"#,
+        notice_secs = app::NOTICE_SECS,
+        sent = RELAY_EXIT_SENT,
+        not_running = RELAY_EXIT_NOT_RUNNING,
+        usage = RELAY_EXIT_USAGE,
+        disabled = RELAY_EXIT_DISABLED,
+    )
+}
 const SOAK_FLAG: &str = "--soak";
 const AUTOSTART_FLAG: &str = "--autostart";
 const SNAPSHOT_DEFAULT_DPI: u32 = 96;
@@ -137,6 +188,10 @@ fn main() {
         }
         Some(SEND_FLAG) => std::process::exit(if send(arg(2).unwrap_or("{}")) { 0 } else { 1 }),
         Some(flag @ (CONFIRM_FLAG | NOTICE_FLAG)) => std::process::exit(relay(flag, &args[2..])),
+        // 讀的那端先關掉（`| head`）不算錯，print! 會因此 panic。
+        Some(RELAY_HELP_FLAG) => {
+            let _ = std::io::Write::write_all(&mut std::io::stdout(), relay_help().as_bytes());
+        }
         Some(QUIT_FLAG) => std::process::exit(
             if send(&serde_json::json!({ "cmd": petkit::ipc::CMD_QUIT }).to_string()) {
                 0
@@ -192,7 +247,9 @@ fn run_app(soak_secs: Option<u64>, after_update: bool) {
 /// `--confirm` / `--notice` 的參數組成一則傳話送給桌寵，回傳結束碼。
 fn relay(flag: &str, rest: &[String]) -> i32 {
     let usage = || {
-        eprintln!("{RELAY_USAGE}");
+        eprintln!(
+            "usage: Youban.exe --confirm|--notice <message> [--from <name>] [--id <key>] [--detail <text>]\nfull guide: Youban.exe {RELAY_HELP_FLAG}"
+        );
         RELAY_EXIT_USAGE
     };
     let (mut title, mut from, mut id, mut detail) = (None, None, None, None);
@@ -218,7 +275,7 @@ fn relay(flag: &str, rest: &[String]) -> i32 {
     };
     let config = petkit::config::Config::load(&petkit::paths::config_file()).unwrap_or_default();
     if !config.features.relay {
-        eprintln!("傳話在柚伴的設定裡關掉了");
+        eprintln!("relay is turned off in Youban's settings; the user did not see this");
         return RELAY_EXIT_DISABLED;
     }
     let style = if flag == CONFIRM_FLAG {
