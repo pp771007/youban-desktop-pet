@@ -37,7 +37,7 @@ const ROAM_CHOICES = [['screen', '整個螢幕'], ['inside', '只在範圍內'],
 const TALK_CHOICES = [['often', '常講'], ['sometimes', '偶爾'], ['never', '不講']];
 /** 深淺色（`petkit::config::ColorScheme`）。 */
 const COLOR_SCHEMES = [['system', '跟著系統'], ['light', '淺色'], ['dark', '深色']];
-const DAY_KINDS = [['holiday', '視同放假'], ['workday', '視同上班']];
+const DAY_KINDS = [['holiday', '放假'], ['workday', '上班']];
 /** 動作速度：以規範預設為基準的倍率。 */
 const SPEEDS = [['slow', '慢', 0.6], ['normal', '普通', 1], ['fast', '快', 1.5]];
 const DEFAULT_VARIANT = 'default';
@@ -304,7 +304,7 @@ function renderReminders(page) {
       settingRow('連續用電腦太久提醒起來動一動', configSwitch('restReminder', '休息提醒')),
       state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
       state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
-  page.append(renderOfficialDays(), renderSpecialDays());
+  page.append(renderOfficialDays(), renderExtraDays());
 }
 
 // ---------- 國定假日與補班 ----------
@@ -375,8 +375,8 @@ function reminderRow(r) {
     toggle);
 }
 
-function renderSpecialDays() {
-  // 國定假日、補班那幾天在上面那塊開關，這裡只列使用者自己加的。
+function renderExtraDays() {
+  // 國定假日、補班那幾天在上面那塊開關，這裡只列使用者自己加的額外上班／放假日。
   const entries = Object.entries(state.file.dayOverrides).filter(([date]) => !isOfficialDate(date)).sort(([a], [b]) => a.localeCompare(b));
   const draft = { date: isoDate(new Date()), kind: 'holiday' };
   const kindPicker = h('div');
@@ -384,7 +384,7 @@ function renderSpecialDays() {
   drawKind();
   const dateInput = h('input', { class: 'input', type: 'date', value: draft.date, 'aria-label': '日期', onchange: (e) => { draft.date = e.target.value; } });
   return h('section', { class: 'section' },
-    h('h2', {}, '特別日子'),
+    h('h2', {}, '額外上班／放假日'),
     h('div', { class: 'card list' },
       entries.map(([date, kind]) => h('div', { class: 'list-row' },
         h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, shortDate(date))),

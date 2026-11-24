@@ -219,12 +219,13 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('.drawer:not(.open)');
     check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'confirming the dialog deletes');
 
-    // 特別日子
+    // 額外上班／放假日
     await page.locator('input[type=date][aria-label="日期"]').fill('2027-07-29');
     await page.getByRole('button', { name: '加入' }).click();
-    check(await page.evaluate(() => window.__mock.file.dayOverrides['2027-07-29']) === 'holiday', 'special day saved as holiday');
+    check(await page.evaluate(() => window.__mock.file.dayOverrides['2027-07-29']) === 'holiday', 'extra day saved as a day off');
+    check((await page.locator('.section', { hasText: '額外上班／放假日' }).innerText()).includes('放假'), 'extra day listed as 放假');
 
-    // 國定假日與補班：一天一個開關，關掉 = 照平常；全部關閉／全部開啟；關掉的不會跑到下面「特別日子」
+    // 國定假日與補班：一天一個開關，關掉 = 照平常；全部關閉／全部開啟；關掉的不會跑到下面「額外上班／放假日」
     const overrides = () => page.evaluate(() => window.__mock.file.dayOverrides);
     const daySwitch = (name) => page.getByRole('checkbox', { name });
     check(await page.locator('.list-year').allInnerTexts().then((t) => t.join()) === '2026 年,2027 年', 'official days are grouped by year');
@@ -233,7 +234,7 @@ for (const scheme of ['light', 'dark']) {
     const o = await overrides();
     check(o['2026-12-25'] === 'workday' && o['2027-02-20'] === 'holiday', 'turning a holiday off makes it a workday, a make-up day a day off');
     check(await page.locator('.day-row.off .tag-off').allInnerTexts().then((t) => t.join()) === '照常上班,照常放假', 'a day turned off says what happens instead');
-    check(!(await page.locator('.section', { hasText: '特別日子' }).last().innerText()).includes('12/25'), 'days turned off stay out of the special days list');
+    check(!(await page.locator('.section', { hasText: '額外上班／放假日' }).innerText()).includes('12/25'), 'days turned off stay out of the extra days list');
     if (shotDir) await page.locator('.section', { hasText: '國定假日與補班' }).screenshot({ path: path.join(shotDir, 'official-days-some-off-light.png') });
     await page.getByRole('button', { name: '全部關閉' }).click();
     check(Object.keys(await overrides()).length === 5 && await page.getByRole('button', { name: '全部關閉' }).isDisabled(), 'turn all off');
