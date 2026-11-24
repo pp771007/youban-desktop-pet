@@ -184,6 +184,9 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('.drawer:not(.open)');
     const stretch = await page.evaluate(() => window.__mock.file.reminders.find((r) => r.title === '起來伸展一下'));
     check(stretch && stretch.repeat.kind === 'interval' && stretch.repeat.everyMinutes === 90 && stretch.time === '09:00' && stretch.repeat.until === '18:00' && stretch.style === 'auto', 'template fills an interval reminder that goes away by itself');
+    // 列表上：自己消失的用訊息泡泡圖示、要按完成的用鈴鐺
+    const rowIcon = (title) => page.locator('.list-row', { hasText: title }).locator('.row-dot .icon').getAttribute('style');
+    check((await rowIcon('起來伸展一下')).includes('message-dots') && (await rowIcon('站起來走走')).includes('bell'), 'list shows a message bubble for go-away reminders and a bell for the rest');
     await page.waitForFunction(() => !document.getElementById('drawer').getBoundingClientRect().width || document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
 
     // 刪除先跳確認框：取消什麼都不做，確定才刪

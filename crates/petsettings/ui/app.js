@@ -12,6 +12,7 @@ const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後�
 const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
 /** 時間到怎麼提醒（`petkit::reminders::Style`）。 */
 const STYLE_CHOICES = [['card', '要按完成'], ['auto', '自己消失']];
+const styleLabel = (style) => (STYLE_CHOICES.find(([v]) => v === style) ?? STYLE_CHOICES[0])[1];
 /** 專注（番茄鐘）的時間選項（分鐘）與倒數顯示方式（`petkit::config::Countdown`）。 */
 const FOCUS_CHOICES = [[15, '15 分'], [25, '25 分'], [30, '30 分'], [45, '45 分'], [50, '50 分']];
 const SHORT_BREAK_CHOICES = [[3, '3 分'], [5, '5 分'], [10, '10 分']];
@@ -305,13 +306,12 @@ function reminderRow(r) {
     h('input', { type: 'checkbox', checked: r.enabled, 'aria-label': `${r.title} 啟用`, onchange: async (e) => { r.enabled = e.target.checked; await saveReminders(); render(); } }),
     h('span'));
   return h('div', { class: `list-row clickable${r.enabled ? '' : ' off'}`, onclick: () => openEditor(r) },
-    h('span', { class: `row-dot${r.enabled ? '' : ' muted'}` }, icon('bell')),
+    h('span', { class: `row-dot${r.enabled ? '' : ' muted'}`, title: styleLabel(r.style) }, icon(r.style === 'auto' ? 'message-dots' : 'bell')),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-when' }, r.enabled ? (next ? friendlyWhen(next) : '不會再響') : '已暫停'),
       h('div', { class: 'row-title' }, r.title),
       h('div', { class: 'row-meta' },
         h('span', { class: 'tag' }, icon('clock'), repeatSummary(r)),
-        r.style === 'auto' ? h('span', { class: 'tag' }, '自己消失') : null,
         usesHolidayPolicy(r) && r.holiday !== 'normal' ? h('span', { class: 'tag tag-accent' }, icon('calendar-off'), `遇假日${holidayLabel(r.holiday)}`) : null)),
     toggle);
 }
