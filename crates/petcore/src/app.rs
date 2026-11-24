@@ -373,7 +373,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let mut modules = ModuleHost::new(Vec::new());
     modules.sync(&enabled_modules(&config), make_module);
 
-    let palette = theme::with_accent(theme::current(), pack.accent.as_deref());
+    let palette = theme::with_accent(theme::current(config.color_scheme), pack.accent.as_deref());
     let started = Instant::now();
     let seed = u64::from(unsafe { GetTickCount() }) ^ std::process::id() as u64;
     let mut app = App {
@@ -916,7 +916,7 @@ impl App {
                     self.broadcast(&ModuleEvent::HolidaysUpdated);
                 }
                 Event::UpdateReady => self.update_ready = true,
-                Event::SettingChanged => self.palette = theme::with_accent(theme::current(), self.pack.accent.as_deref()),
+                Event::SettingChanged => self.refresh_palette(),
                 Event::Command(text) => self.command(&text)?,
                 Event::Area(input) => self.area_input(input)?,
                 Event::ToyDown => self.toy_press = Some(cursor()),
@@ -1805,6 +1805,11 @@ impl App {
         Ok(())
     }
 
+    /// 卡片、泡泡、選單的配色：設定選的深淺色＋這隻桌寵的強調色。
+    fn refresh_palette(&mut self) {
+        self.palette = theme::with_accent(theme::current(self.config.color_scheme), self.pack.accent.as_deref());
+    }
+
     fn config_changed(&mut self, new: Config, now: f64) {
         let old = std::mem::replace(&mut self.config, new);
         // 剛幫現在這隻取了（新）名字：開心一下、報上名字。清掉名字不用講。
@@ -1823,6 +1828,9 @@ impl App {
                 self.cards.retain(|q| q.owner != id);
             }
             log!("modules now {:?}", self.modules.ids());
+        }
+        if old.color_scheme != self.config.color_scheme {
+            self.refresh_palette();
         }
         if old.pet != self.config.pet {
             self.begin_switch(self.config.pet.clone(), false);
@@ -2021,7 +2029,7 @@ impl App {
         self.sprites = sprites;
         self.tray.set_icon(pet_icon(&self.wic, &pack, dpi)?);
         self.pack = pack;
-        self.palette = theme::with_accent(theme::current(), self.pack.accent.as_deref());
+        self.refresh_palette();
         self.anim.state = "";
         self.resize_window()?;
         log!("switched to pet '{}'", self.pack.id);

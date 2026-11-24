@@ -255,7 +255,7 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
     let frame_dt = 1.0 / FPS;
     let anchor = anchor(size);
     let mut glow = GlowPainter::new(&gfx)?;
-    let glow_style = GlowStyle { pet_height: h, scale: px_per_dip, color: theme::current().danger.d2d() };
+    let glow_style = GlowStyle { pet_height: h, scale: px_per_dip, color: theme::current(petkit::config::ColorScheme::System).danger.d2d() };
     for script in scripts() {
         let dir = out_dir.join(script.name);
         fs::create_dir_all(&dir).map_err(|e| Error::new(E_FAIL, e.to_string()))?;

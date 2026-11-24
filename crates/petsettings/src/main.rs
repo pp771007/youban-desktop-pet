@@ -11,7 +11,7 @@ use std::process::Command;
 use base64::Engine;
 use chrono::NaiveDate;
 use petkit::companion::CompanionFile;
-use petkit::config::{Config, load_json};
+use petkit::config::{ColorScheme, Config, load_json};
 use petkit::focus_status::FocusStatus;
 use petkit::holidays::{self, DayKind};
 use petkit::paths;
@@ -117,7 +117,8 @@ fn load_config() -> CmdResult<Config> {
 }
 
 #[tauri::command]
-fn save_config(config: Config) -> CmdResult<()> {
+fn save_config(window: tauri::WebviewWindow, config: Config) -> CmdResult<()> {
+    apply_color_scheme(&window, config.color_scheme);
     config.save(&paths::config_file()).map_err(err)
 }
 
@@ -520,17 +521,28 @@ fn main() {
         ])
         .register_uri_scheme_protocol(PET_SCHEME, |_, request| serve_pet_file(&request))
         .setup(|app| {
-            paint_background(app);
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                apply_color_scheme(&window, Config::load(&paths::config_file()).unwrap_or_default().color_scheme);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running settings");
 }
 
+/// 標題列跟著設定的深淺色（畫面裡面由 `ui/app.js` 看 `colorScheme` 切），再塗底色。
+fn apply_color_scheme(window: &tauri::WebviewWindow, scheme: ColorScheme) {
+    let _ = window.set_theme(match scheme {
+        ColorScheme::System => None,
+        ColorScheme::Light => Some(tauri::Theme::Light),
+        ColorScheme::Dark => Some(tauri::Theme::Dark),
+    });
+    paint_background(window);
+}
+
 /// 視窗底色先塗成畫面的底色：瀏覽器核心還沒畫出東西前，不會先閃一片白（深色模式下特別刺眼）。
-fn paint_background(app: &tauri::App) {
-    use tauri::Manager;
-    let Some(window) = app.get_webview_window("main") else { return };
+fn paint_background(window: &tauri::WebviewWindow) {
     let dark = window.theme().is_ok_and(|t| t == tauri::Theme::Dark);
     let tokens = tokens();
     let hex = tokens["color"][if dark { "dark" } else { "light" }]["surface"].as_str().unwrap_or_default().trim_start_matches('#').to_owned();

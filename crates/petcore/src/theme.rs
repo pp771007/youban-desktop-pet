@@ -2,6 +2,7 @@
 
 #![allow(dead_code)] // token 是整套產生的，沒用到的也留著，跟設定程式那邊保持同一份。
 
+use petkit::config::ColorScheme;
 use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::core::w;
@@ -26,8 +27,13 @@ impl Rgba {
 
 include!(concat!(env!("OUT_DIR"), "/tokens.rs"));
 
-/// 跟著 Windows「應用程式模式」切深淺色。
-pub fn current() -> &'static Palette {
+/// 設定選的深淺色；跟著系統時看 Windows「應用程式模式」。
+pub fn current(scheme: ColorScheme) -> &'static Palette {
+    match scheme {
+        ColorScheme::Light => return &LIGHT,
+        ColorScheme::Dark => return &DARK,
+        ColorScheme::System => {}
+    }
     let mut value: u32 = 1;
     let mut size = size_of::<u32>() as u32;
     let ok = unsafe {

@@ -354,6 +354,15 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.config.autoUpdate) === false && await page.getByText('目前版本 0.1.0').isVisible(), 'auto update switch writes config and shows version');
     check((await page.locator('.sidebar-foot').innerText()).includes('0.1.0'), 'sidebar shows the version');
 
+    // 外觀：系統是淺色時選「深色」整個畫面變深、寫進設定；選回「跟著系統」又變淺
+    const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+    const pageBg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    await page.getByRole('button', { name: '深色' }).click();
+    check(await page.evaluate(() => window.__mock.config.colorScheme) === 'dark' && await pageBg() === rgb(tokens.color.dark.surface), 'picking dark writes config and turns the page dark on a light system');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-general-forced-dark.png') });
+    await page.getByRole('button', { name: '跟著系統' }).click();
+    check(await page.evaluate(() => window.__mock.config.colorScheme) === 'system' && await pageBg() === rgb(tokens.color.light.surface), 'following the system turns it light again');
+
     // 檢查更新：查到新版、下載好 → 按鈕變成「現在更新」，按下去叫核心換新版
     await page.getByRole('button', { name: '檢查更新' }).click();
     await page.getByRole('button', { name: '現在更新' }).waitFor();

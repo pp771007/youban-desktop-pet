@@ -51,6 +51,8 @@ pub struct Config {
     pub remind_in_fullscreen: bool,
     /// 每天看一次有沒有新版，有就自動下載、找空檔換上。
     pub auto_update: bool,
+    /// 設定程式、提醒卡、講話泡泡、右鍵選單用淺色還是深色。
+    pub color_scheme: ColorScheme,
     /// 視窗歸位自動記下新開的視窗時，桌寵說一聲。
     pub announce_new_windows: bool,
     /// 休息提醒：連續用電腦 `rest_every_minutes` 分鐘跳一張卡（中間離開五分鐘算休息過，重新算）。
@@ -149,6 +151,17 @@ impl Area {
     }
 }
 
+/// 深淺色。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColorScheme {
+    /// 跟著 Windows 的「應用程式模式」。
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 /// 講話頻率。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,6 +190,7 @@ impl Default for Config {
             reminder_sound: true,
             remind_in_fullscreen: false,
             auto_update: true,
+            color_scheme: ColorScheme::default(),
             announce_new_windows: true,
             rest_reminder: true,
             rest_every_minutes: DEFAULT_REST_EVERY_MINUTES,

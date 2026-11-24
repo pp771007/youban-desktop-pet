@@ -35,6 +35,8 @@ const SIZE_LABELS = ['小', '中', '大'];
 const ACTIVITY_CHOICES = [['lively', '活潑'], ['normal', '普通'], ['calm', '安靜']];
 const ROAM_CHOICES = [['screen', '整個螢幕'], ['inside', '只在範圍內'], ['avoid', '避開這些地方']];
 const TALK_CHOICES = [['often', '常講'], ['sometimes', '偶爾'], ['never', '不講']];
+/** 深淺色（`petkit::config::ColorScheme`）。 */
+const COLOR_SCHEMES = [['system', '跟著系統'], ['light', '淺色'], ['dark', '深色']];
 const DAY_KINDS = [['holiday', '視同放假'], ['workday', '視同上班']];
 /** 動作速度：以規範預設為基準的倍率。 */
 const SPEEDS = [['slow', '慢', 0.6], ['normal', '普通', 1], ['fast', '快', 1.5]];
@@ -187,8 +189,11 @@ function applyTokens(tokens) {
     }
   };
   for (const [section, value] of Object.entries(tokens)) if (section !== 'color') walk(value, `--${section}`);
-  const css = `:root{${palette(tokens.color.light)}${flat.join('')}}`
-    + `@media (prefers-color-scheme: dark){:root{${palette(tokens.color.dark)}}}`;
+  // 深淺色看 <html data-theme>（設定的 colorScheme）：system 跟著系統，light／dark 固定。
+  const dark = `color-scheme:dark;${palette(tokens.color.dark)}`;
+  const css = `:root{color-scheme:light;${palette(tokens.color.light)}${flat.join('')}}`
+    + `@media (prefers-color-scheme: dark){:root:not([data-theme="light"]):not([data-theme="dark"]){${dark}}}`
+    + `:root[data-theme="dark"]{${dark}}`;
   document.head.append(h('style', {}, css));
 }
 
@@ -1044,7 +1049,8 @@ function renderGeneral(page) {
         state.autostartError ? h('div', { class: 'setting-error' }, state.autostartError) : null),
       autostart),
     settingRow('自動更新', configSwitch('autoUpdate', '自動更新')),
-    updateRow()));
+    updateRow(),
+    settingRow('外觀', segmented(COLOR_SCHEMES, state.config.colorScheme, async (v) => { state.config.colorScheme = v; await saveConfig(); render(); }))));
 }
 
 function updateRow() {
@@ -1088,6 +1094,7 @@ const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWin
 const NAV_PARENT = { 'pet-edit': 'pets' };
 
 function render() {
+  document.documentElement.dataset.theme = state.config.colorScheme;
   const nav = NAV_PARENT[state.page] || state.page;
   for (const b of document.querySelectorAll('.nav-item')) {
     if (b.dataset.page === nav) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
