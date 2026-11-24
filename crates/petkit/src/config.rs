@@ -203,14 +203,14 @@ impl Default for Config {
             announce_new_windows: true,
             rest_reminder: true,
             rest_every_minutes: DEFAULT_REST_EVERY_MINUTES,
-            rest_style: Style::Auto,
+            rest_style: Style::Notice,
             // 標準番茄鐘：25 分鐘專注、5 分鐘短休息，每 4 輪一次 15 分鐘長休息。
             focus_minutes: 25,
             short_break_minutes: 5,
             long_break_minutes: 15,
             focus_rounds_before_long: 4,
             focus_auto_continue: true,
-            focus_style: Style::Auto,
+            focus_style: Style::Notice,
             focus_countdown: Countdown::default(),
             features: Features::default(),
         }

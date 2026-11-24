@@ -236,11 +236,11 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     let mut painter = CardPainter::new(&gfx)?;
     let s = dpi as f32 / BASE_DPI;
     let samples = [
-        (Card::Reminder { title: "喝水時間".into(), time: "14:00".into(), snooze_open: false, icon: Icon::BellRing }, Some(0)),
-        (Card::Nudge { title: "看看遠方，讓眼睛休息".into(), time: "14:30".into(), icon: Icon::BellRing }, None),
-        (Card::Nudge { title: "已經連續用電腦 50 分鐘了，起來走走吧".into(), time: "15:20".into(), icon: Icon::Cup }, None),
-        (Card::Reminder { title: "再 3 天就是媽媽生日囉～".into(), time: "5/21（四） · 農曆四月初五 · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake }, None),
-        (Card::Reminder { title: "繳信用卡費：這個月記得用網銀轉帳，順便確認自動扣款有沒有設定成功".into(), time: "10:30".into(), snooze_open: true, icon: Icon::BellRing }, None),
+        (Card::Confirm { title: "喝水時間".into(), time: "14:00".into(), snooze_open: false, icon: Icon::BellRing }, Some(0)),
+        (Card::Notice { title: "看看遠方，讓眼睛休息".into(), time: "14:30".into(), icon: Icon::BellRing }, None),
+        (Card::Notice { title: "已經連續用電腦 50 分鐘了，起來走走吧".into(), time: "15:20".into(), icon: Icon::Cup }, None),
+        (Card::Confirm { title: "再 3 天就是媽媽生日囉～".into(), time: "5/21（四） · 農曆四月初五 · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake }, None),
+        (Card::Confirm { title: "繳信用卡費：這個月記得用網銀轉帳，順便確認自動扣款有沒有設定成功".into(), time: "10:30".into(), snooze_open: true, icon: Icon::BellRing }, None),
         (
             Card::Missed {
                 rows: vec![("喝水".into(), "14:00（3 次）".into()), ("站起來走走".into(), "15:30".into()), ("週報".into(), "11/20 17:00".into())],

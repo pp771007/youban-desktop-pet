@@ -54,15 +54,17 @@ pub fn card_time(at: NaiveDateTime, today: NaiveDate) -> String {
 /// 要按完成的卡（`needs_done`）由核心存進狀態檔，重開再跳，所以要能存讀。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Card {
-    /// `icon`：左邊那格的圖示（一般提醒是鈴鐺、休息提醒是杯子）。
-    Reminder {
+    /// 確認框：「完成」「稍後」兩顆鈕。`icon`：左邊那格的圖示（一般提醒是鈴鐺、休息提醒是杯子）。
+    /// 使用者的狀態檔裡可能寫的是 `Reminder`：拿掉 `alias` 那張沒按掉的卡重開就不會再跳。
+    #[serde(alias = "Reminder")]
+    Confirm {
         title: String,
         time: String,
         snooze_open: bool,
         icon: Icon,
     },
-    /// 不用按的提醒：跟提醒卡同樣子但沒有按鈕，過一會兒自己消失、點一下也收掉。
-    Nudge {
+    /// 提示框：跟確認框同樣子但沒有按鈕，過一會兒自己消失、點一下也收掉。
+    Notice {
         title: String,
         time: String,
         icon: Icon,
@@ -87,14 +89,14 @@ impl Card {
     fn tap_to_dismiss(&self) -> bool {
         matches!(
             self,
-            Card::Info { .. } | Card::Speech { .. } | Card::Nudge { .. }
+            Card::Info { .. } | Card::Speech { .. } | Card::Notice { .. }
         )
     }
 
-    /// 要使用者按掉才算數的卡（要按完成的提醒、錯過的提醒）：沒按就關掉柚伴的話，重開再跳。
+    /// 要使用者按掉才算數的卡（確認框、錯過的提醒）：沒按就關掉柚伴的話，重開再跳。
     /// 新版本的卡由更新那邊每次啟動重新判斷，不在這裡。
     pub fn needs_done(&self) -> bool {
-        matches!(self, Card::Reminder { .. } | Card::Missed { .. })
+        matches!(self, Card::Confirm { .. } | Card::Missed { .. })
     }
 }
 
@@ -348,7 +350,7 @@ impl CardPainter {
             };
 
         let tile = match card {
-            Card::Reminder {
+            Card::Confirm {
                 title,
                 time,
                 snooze_open,
@@ -375,7 +377,7 @@ impl CardPainter {
                 y += BUTTON_HEIGHT_DIP * s;
                 (*icon, Tint::Accent)
             }
-            Card::Nudge { title, time, icon } => {
+            Card::Notice { title, time, icon } => {
                 let (t, _, h) = self.text(time, &caption, text_w, Some(1.0))?;
                 texts.push((t, Vector2 { X: text_left, Y: y }, Ink::Muted));
                 y += h;

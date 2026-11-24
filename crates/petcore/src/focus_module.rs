@@ -146,13 +146,13 @@ impl FocusModule {
     fn card(ctx: &mut Ctx, title: String) {
         let time = ctx.now.format(TIME_FORMAT).to_string();
         let card = match ctx.config.focus_style {
-            Style::Card => Card::Reminder {
+            Style::Confirm => Card::Confirm {
                 title,
                 time,
                 snooze_open: false,
                 icon: Icon::BellRing,
             },
-            Style::Auto => Card::Nudge {
+            Style::Notice => Card::Notice {
                 title,
                 time,
                 icon: Icon::BellRing,
@@ -303,7 +303,7 @@ mod tests {
         reqs.iter()
             .filter_map(|r| match r {
                 Request::Card {
-                    card: Card::Nudge { title, .. } | Card::Reminder { title, .. },
+                    card: Card::Notice { title, .. } | Card::Confirm { title, .. },
                     ..
                 } => Some(title.clone()),
                 _ => None,
@@ -412,7 +412,7 @@ mod tests {
         let config = Config {
             focus_minutes: 25,
             short_break_minutes: 5,
-            focus_style: Style::Card,
+            focus_style: Style::Confirm,
             ..Config::default()
         };
         let mut f = FocusModule::default();
@@ -427,7 +427,7 @@ mod tests {
             matches!(
                 &out[..],
                 [Request::Card {
-                    card: Card::Reminder { .. },
+                    card: Card::Confirm { .. },
                     ..
                 }]
             ),

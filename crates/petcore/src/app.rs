@@ -156,8 +156,8 @@ const STATE_SAVE_SECS: f64 = 60.0;
 const NAMED_SAY_SECS: f32 = 5.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
 const MODULE_SAY_SECS: f32 = 4.0;
-/// 會自己消失的提醒卡留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
-const NUDGE_SECS: f64 = 15.0;
+/// 提示框留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
+const NOTICE_SECS: f64 = 15.0;
 
 /// `windows` crate 把它放在 Controls 功能底下（為了一個常數不值得開那整包）。
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -291,7 +291,7 @@ fn restore_core_card(
     if key != REST_CARD_KEY {
         return None;
     }
-    if let (Card::Reminder { time, .. }, Some(at)) = (&mut card, rest_at) {
+    if let (Card::Confirm { time, .. }, Some(at)) = (&mut card, rest_at) {
         *time = bubble::card_time(at, now.date());
     }
     Some(card)
@@ -1269,7 +1269,7 @@ impl App {
             return;
         };
         if action == CardAction::OpenSnooze {
-            if let Card::Reminder { snooze_open, .. } = &mut front.card {
+            if let Card::Confirm { snooze_open, .. } = &mut front.card {
                 *snooze_open = true;
                 let card = front.card.clone();
                 self.bubble.show(card, self.now(), false);
@@ -1316,7 +1316,7 @@ impl App {
             ipc::CMD_TEST_REMINDER => self.enqueue(
                 "core",
                 "test".into(),
-                Card::Reminder {
+                Card::Confirm {
                     title: v["title"].as_str().unwrap_or("測試提醒").to_owned(),
                     time: local_now().format("%H:%M").to_string(),
                     snooze_open: false,
@@ -2219,13 +2219,13 @@ impl App {
             self.rest_at = Some(at);
             let time = bubble::card_time(at, at.date());
             let card = match self.config.rest_style {
-                Style::Card => Card::Reminder {
+                Style::Confirm => Card::Confirm {
                     title: text,
                     time,
                     snooze_open: false,
                     icon: REST_CARD_ICON,
                 },
-                Style::Auto => Card::Nudge {
+                Style::Notice => Card::Notice {
                     title: text,
                     time,
                     icon: REST_CARD_ICON,
@@ -2361,7 +2361,7 @@ impl App {
             Action::ShowCard => self.enqueue(
                 "core",
                 "test".into(),
-                Card::Reminder {
+                Card::Confirm {
                     title: "壓力測試提醒".into(),
                     time: "12:00".into(),
                     snooze_open: false,
@@ -2568,7 +2568,7 @@ impl App {
         }
         let linger = self.cards.front().and_then(|q| match q.card {
             Card::Info { .. } => Some(INFO_SECS),
-            Card::Nudge { .. } => Some(NUDGE_SECS),
+            Card::Notice { .. } => Some(NOTICE_SECS),
             _ => None,
         });
         if let Some(secs) = linger
@@ -2586,7 +2586,7 @@ impl App {
                         && self.config.reminder_sound
                         && matches!(
                             q.card,
-                            Card::Reminder { .. } | Card::Nudge { .. } | Card::Missed { .. }
+                            Card::Confirm { .. } | Card::Notice { .. } | Card::Missed { .. }
                         )
                     {
                         play_reminder_sound();
@@ -2618,7 +2618,7 @@ impl App {
         let attention = self
             .cards
             .front()
-            .is_some_and(|q| matches!(q.card, Card::Reminder { .. } | Card::Missed { .. }));
+            .is_some_and(|q| matches!(q.card, Card::Confirm { .. } | Card::Missed { .. }));
         self.pet.set_attention(attention, now);
 
         let work = work_area(monitor_at(self.pet.x, self.pet.y));
@@ -2843,7 +2843,7 @@ impl App {
             .filter(|q| q.card.needs_done())
             .map(|q| {
                 let mut card = q.card.clone();
-                if let Card::Reminder { snooze_open, .. } = &mut card {
+                if let Card::Confirm { snooze_open, .. } = &mut card {
                     *snooze_open = false;
                 }
                 SavedCard {
@@ -2889,11 +2889,11 @@ impl App {
                 continue;
             };
             if let (
-                Card::Reminder {
+                Card::Confirm {
                     snooze_open: was_open,
                     ..
                 },
-                Card::Reminder { snooze_open, .. },
+                Card::Confirm { snooze_open, .. },
             ) = (&old, &mut card)
             {
                 *snooze_open = *was_open;
@@ -2923,6 +2923,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_files_with_old_style_names_still_load() {
+        let state: RuntimeState = serde_json::from_str(
+            r#"{ "cards": [{ "owner": "core", "key": "rest", "card": { "Reminder": { "title": "休息一下", "time": "15:20", "snooze_open": false, "icon": "Cup" } } }] }"#,
+        )
+        .unwrap();
+        assert!(matches!(&state.cards[0].card, Card::Confirm { title, .. } if title == "休息一下"));
+        let styles: Vec<Style> = serde_json::from_str(r#"["card", "auto"]"#).unwrap();
+        assert_eq!(styles, [Style::Confirm, Style::Notice]);
+    }
+
+    #[test]
     fn state_file_keeps_old_fields_and_round_trips_unhandled_cards() {
         // 舊版只存了位置和打招呼的日子：照樣讀得懂。
         let old: RuntimeState =
@@ -2931,7 +2942,7 @@ mod tests {
             (old.position, old.chatter.greeted_on),
             (Some((1, 2)), chrono::NaiveDate::from_ymd_opt(2026, 11, 24))
         );
-        let card = Card::Reminder {
+        let card = Card::Confirm {
             title: "休息一下".into(),
             time: "15:20".into(),
             snooze_open: false,
@@ -2965,7 +2976,7 @@ mod tests {
             None,
             "the sample card does not"
         );
-        let next_day = Card::Reminder {
+        let next_day = Card::Confirm {
             title: "休息一下".into(),
             time: "11/24 15:20".into(),
             snooze_open: false,

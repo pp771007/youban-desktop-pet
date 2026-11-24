@@ -162,7 +162,7 @@ impl Entry<'_> {
     /// 要按完成才收掉（按掉之前記在 `pending`，重開會再跳）。紀念日一定要，免得沒看到。
     fn needs_done(&self) -> bool {
         match self {
-            Entry::Reminder(r) => r.style == Style::Card,
+            Entry::Reminder(r) => r.style == Style::Confirm,
             Entry::Anniversary(_) => true,
         }
     }
@@ -173,13 +173,13 @@ impl Entry<'_> {
             Entry::Reminder(r) => {
                 let (title, time) = (r.title.clone(), card_time(at, now.date()));
                 match r.style {
-                    Style::Card => Card::Reminder {
+                    Style::Confirm => Card::Confirm {
                         title,
                         time,
                         snooze_open: false,
                         icon: Icon::BellRing,
                     },
-                    Style::Auto => Card::Nudge {
+                    Style::Notice => Card::Notice {
                         title,
                         time,
                         icon: Icon::BellRing,
@@ -211,7 +211,7 @@ impl Entry<'_> {
                     }
                     None => (a.title.clone(), a.date.label()),
                 };
-                Card::Reminder {
+                Card::Confirm {
                     title,
                     time,
                     snooze_open: false,
@@ -532,21 +532,21 @@ mod tests {
             repeat: Repeat::Daily,
             holiday: HolidayPolicy::Normal,
             start_date: NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
-            style: Style::Card,
+            style: Style::Confirm,
         }
     }
 
     #[test]
     fn an_auto_reminder_shows_a_card_that_goes_away_by_itself() {
         let mut r = daily("a", 9);
-        r.style = Style::Auto;
+        r.style = Style::Notice;
         let (mut m, _) = setup(vec![r]);
         tick(&mut m, dt(2, 8, 59));
         assert_eq!(
             cards(&tick(&mut m, dt(2, 9, 0))),
             vec![(
                 "a".into(),
-                Card::Nudge {
+                Card::Notice {
                     title: "提醒a".into(),
                     time: "09:00".into(),
                     icon: Icon::BellRing
@@ -583,7 +583,7 @@ mod tests {
             out,
             vec![(
                 "a".into(),
-                Card::Reminder {
+                Card::Confirm {
                     title: "提醒a".into(),
                     time: "09:00".into(),
                     snooze_open: false,
@@ -702,7 +702,7 @@ mod tests {
         tick(&mut m, dt(3, 9, 0));
         let (_, back) = reopen(&dir, &shown, dt(4, 8, 0));
         assert!(
-            matches!(&back[..], [(_, Card::Reminder { time, .. })] if time == "3/3 09:00"),
+            matches!(&back[..], [(_, Card::Confirm { time, .. })] if time == "3/3 09:00"),
             "{back:?}"
         );
     }
@@ -714,7 +714,7 @@ mod tests {
         let shown = cards(&tick(&mut m, dt(2, 9, 0)));
         // 關著的時候在設定裡改成「自己消失」：重開不再跳那張要按完成的卡。
         let mut r = daily("a", 9);
-        r.style = Style::Auto;
+        r.style = Style::Notice;
         ReminderFile {
             reminders: vec![r],
             ..Default::default()
@@ -797,7 +797,7 @@ mod tests {
         let card = |title: &str| {
             vec![(
                 key.clone(),
-                Card::Reminder {
+                Card::Confirm {
                     title: title.into(),
                     time: "3/5（四） · 滿 60 年".into(),
                     snooze_open: false,
@@ -837,7 +837,7 @@ mod tests {
             cards(&tick(&mut m, dt(3, 8, 0))),
             vec![(
                 "c".into(),
-                Card::Reminder {
+                Card::Confirm {
                     title: "提醒c".into(),
                     time: "08:00".into(),
                     snooze_open: false,

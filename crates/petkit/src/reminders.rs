@@ -42,13 +42,16 @@ fn enabled_default() -> bool {
     true
 }
 
-/// 時間到怎麼提醒：跳一張要按「完成」的卡片，或跳一張過一會兒自己消失的卡片（不用按）。
+/// 時間到跳哪一種（用詞見 `CONTEXT.md`）：確認框（要按「完成」）或提示框（過一會兒自己消失）。
+/// 使用者的設定檔、提醒檔裡可能寫的是 `card` / `auto`：拿掉 `alias` 那些檔會讀不出來。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Style {
     #[default]
-    Card,
-    Auto,
+    #[serde(alias = "card")]
+    Confirm,
+    #[serde(alias = "auto")]
+    Notice,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -391,7 +394,7 @@ mod tests {
             repeat,
             holiday,
             start_date: d(2026, 1, 1),
-            style: Style::Card,
+            style: Style::Confirm,
         }
     }
 

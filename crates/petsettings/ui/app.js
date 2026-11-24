@@ -10,8 +10,8 @@ const HOLIDAY_POLICIES = [['normal', '照常'], ['skip', '跳過'], ['nextWorkda
 const MONTHLY_KINDS = [['day', '第幾號'], ['lastDay', '月底'], ['nthWeekday', '第幾個星期幾']];
 const NTH_LABELS = ['第一個', '第二個', '第三個', '第四個', '最後一個'];
 const INTERVAL_CHOICES = [15, 30, 45, 60, 90, 120];
-/** 時間到怎麼提醒（`petkit::reminders::Style`）。 */
-const STYLE_CHOICES = [['card', '要按完成'], ['auto', '自己消失']];
+/** 時間到跳確認框還是提示框（`petkit::reminders::Style`，用詞見 `CONTEXT.md`）。 */
+const STYLE_CHOICES = [['confirm', '要按完成'], ['notice', '自己消失']];
 const styleLabel = (style) => (STYLE_CHOICES.find(([v]) => v === style) ?? STYLE_CHOICES[0])[1];
 /** 專注（番茄鐘）的時間選項（分鐘）與倒數顯示方式（`petkit::config::Countdown`）。 */
 const FOCUS_CHOICES = [[15, '15 分'], [25, '25 分'], [30, '30 分'], [45, '45 分'], [50, '50 分']];
@@ -621,7 +621,7 @@ function reminderRow(r) {
     h('input', { type: 'checkbox', checked: r.enabled, 'aria-label': `${r.title} 啟用`, onchange: async (e) => { r.enabled = e.target.checked; await saveReminders(); render(); } }),
     h('span'));
   return h('div', { class: `list-row clickable${r.enabled ? '' : ' off'}`, onclick: () => openEditor(r) },
-    h('span', { class: `row-dot${r.enabled ? '' : ' muted'}`, title: styleLabel(r.style) }, icon(r.style === 'auto' ? 'message-dots' : 'bell')),
+    h('span', { class: `row-dot${r.enabled ? '' : ' muted'}`, title: styleLabel(r.style) }, icon(r.style === 'notice' ? 'message-dots' : 'bell')),
     h('div', { class: 'row-main' },
       h('div', { class: 'row-when' }, r.enabled ? (next ? friendlyWhen(next) : '不會再響') : '已暫停'),
       h('div', { class: 'row-title' }, r.title),
@@ -670,7 +670,7 @@ function newReminder() {
     repeat: { kind: 'daily' },
     holiday: 'normal',
     startDate: isoDate(now),
-    style: 'card',
+    style: 'confirm',
   };
 }
 
@@ -808,7 +808,7 @@ function drawEditor() {
           r.title = t.title;
           r.time = TEMPLATE_HOURS[0];
           r.repeat = { kind: 'interval', everyMinutes: t.everyMinutes, until: TEMPLATE_HOURS[1], workdaysOnly: true };
-          r.style = 'auto';
+          r.style = 'notice';
           changed();
         } }, t.label)))) : null,
       field('提醒內容', h('input', { id: 'title', class: 'input', placeholder: '例：喝水、繳卡費', value: r.title, maxlength: 60,
@@ -820,7 +820,7 @@ function drawEditor() {
       usesHolidayPolicy(r) ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, '遇到假日'),
         segmented(HOLIDAY_POLICIES, r.holiday, (p) => { r.holiday = p; changed(); })) : null,
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '卡片'),
-        segmented(STYLE_CHOICES, r.style || 'card', (s) => { r.style = s; changed(); })),
+        segmented(STYLE_CHOICES, r.style || 'confirm', (s) => { r.style = s; changed(); })),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '接下來'), h('div', { class: 'preview', id: 'preview' }))),
     h('div', { class: 'drawer-foot' },
       deleteBtn,
