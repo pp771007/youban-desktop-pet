@@ -232,6 +232,8 @@ struct RuntimeState {
     milestone: Option<(chrono::NaiveDate, u32)>,
     /// 還沒按掉的卡（`Card::needs_done`）：重開時交回給丟出它的功能決定要不要再跳（`Module::restore_card`）。
     cards: Vec<SavedCard>,
+    /// 休息提醒卡是幾點跳的（卡上的時間放到隔天要補日期）。
+    rest_at: Option<chrono::NaiveDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -254,9 +256,16 @@ struct StateMarks {
 /// 核心自己丟的卡，卡片的主人寫這個（模組的卡寫模組代號）。
 const CORE_OWNER: &str = "core";
 
-/// 核心自己丟的卡重開後要不要再跳：休息提醒要（跟一般提醒一樣，沒按掉不會因為重開就不見）；「看看樣子」的範例卡不用。
-fn restore_core_card(key: &str, card: Card) -> Option<Card> {
-    (key == REST_CARD_KEY).then_some(card)
+/// 核心自己丟的卡重開（或換日）後要不要再跳：休息提醒要（跟一般提醒一樣，沒按掉不會因為重開就不見），
+/// 時間照 `now` 那天重寫；「看看樣子」的範例卡不用。
+fn restore_core_card(key: &str, mut card: Card, rest_at: Option<chrono::NaiveDateTime>, now: chrono::NaiveDateTime) -> Option<Card> {
+    if key != REST_CARD_KEY {
+        return None;
+    }
+    if let (Card::Reminder { time, .. }, Some(at)) = (&mut card, rest_at) {
+        *time = bubble::card_time(at, now.date());
+    }
+    Some(card)
 }
 
 /// 正在講的話。
@@ -341,6 +350,10 @@ struct App {
     companions: CompanionFile,
     /// 今天剛好是第一天或紀念日，等牠有空（沒在講別的、沒有提醒卡）再講：(哪一天, 第幾天)。
     pending_milestone: Option<(chrono::NaiveDate, u32)>,
+    /// 休息提醒卡是幾點跳的。
+    rest_at: Option<chrono::NaiveDateTime>,
+    /// 佇列裡的卡上次照哪一天畫的：換日就交回給丟出它的功能重畫（「09:00」要變成「11/24 09:00」）。
+    cards_day: chrono::NaiveDate,
     /// 上次看到站著的視窗在移動。
     last_ride_move: f64,
     toy: Option<ToySlot>,
@@ -459,6 +472,8 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         workday: None,
         companions: load_companions(),
         pending_milestone: runtime.milestone.filter(|(day, _)| *day == today),
+        rest_at: runtime.rest_at,
+        cards_day: today,
         last_ride_move: f64::NEG_INFINITY,
         toy: None,
         toy_hwnd,
@@ -1697,6 +1712,11 @@ impl App {
 
     /// 每秒一次：功能模組、設定檔變動、辦公日曆下載。
     fn slow_tick(&mut self, now: f64) {
+        let today = local_now().date();
+        if today != self.cards_day {
+            self.cards_day = today;
+            self.redraw_cards_for_new_day(local_now());
+        }
         let mut out = Vec::new();
         self.modules.tick(local_now(), &self.config, &mut out);
         self.apply(out);
@@ -1720,7 +1740,9 @@ impl App {
             && self.modules.session(local_now()).is_none()
             && let Some(text) = self.chatter.rest_due(now, self.rest_every_secs())
         {
-            let time = local_now().format("%H:%M").to_string();
+            let at = local_now();
+            self.rest_at = Some(at);
+            let time = bubble::card_time(at, at.date());
             let card = match self.config.rest_style {
                 Style::Card => Card::Reminder { title: text, time, snooze_open: false, icon: REST_CARD_ICON },
                 Style::Auto => Card::Nudge { title: text, time, icon: REST_CARD_ICON },
@@ -2166,6 +2188,7 @@ impl App {
             chatter: self.chatter.saved(now, local_now()),
             milestone: self.pending_milestone,
             cards: self.saved_cards(),
+            rest_at: self.rest_at,
         };
         let result = serde_json::to_vec_pretty(&state).map_err(std::io::Error::other).and_then(|b| write_atomic(&paths::state_file(), &b));
         if let Err(e) = result {
@@ -2199,15 +2222,35 @@ impl App {
     fn restore_cards(&mut self, saved: Vec<SavedCard>) {
         let now = local_now();
         for s in saved {
-            let restored = if s.owner == CORE_OWNER {
-                restore_core_card(&s.key, s.card).map(|c| (CORE_OWNER, c))
-            } else {
-                self.modules.restore_card(&s.owner, &s.key, s.card, now)
-            };
-            match restored {
+            match self.restore_card(&s.owner, &s.key, s.card, now) {
                 Some((owner, card)) => self.enqueue(owner, s.key, card),
                 None => log!("not restoring card {}:{}", s.owner, s.key),
             }
+        }
+    }
+
+    /// 換日：佇列裡還沒按掉的卡照今天重畫，原地換掉（不重跳、不響）。說不用再跳的照原樣留著，等使用者按。
+    fn redraw_cards_for_new_day(&mut self, now: chrono::NaiveDateTime) {
+        for i in 0..self.cards.len() {
+            let q = &self.cards[i];
+            if !q.card.needs_done() {
+                continue;
+            }
+            let (owner, key, old) = (q.owner, q.key.clone(), q.card.clone());
+            let Some((_, mut card)) = self.restore_card(owner, &key, old.clone(), now) else { continue };
+            if let (Card::Reminder { snooze_open: was_open, .. }, Card::Reminder { snooze_open, .. }) = (&old, &mut card) {
+                *snooze_open = *was_open;
+            }
+            self.cards[i].card = card;
+        }
+    }
+
+    /// 還沒按掉的卡交回給丟出它的功能（核心自己的卡在這裡處理）。
+    fn restore_card(&mut self, owner: &str, key: &str, card: Card, now: chrono::NaiveDateTime) -> Option<(&'static str, Card)> {
+        if owner == CORE_OWNER {
+            restore_core_card(key, card, self.rest_at, now).map(|c| (CORE_OWNER, c))
+        } else {
+            self.modules.restore_card(owner, key, card, now)
         }
     }
 }
@@ -2225,7 +2268,11 @@ mod tests {
         let state = RuntimeState { cards: vec![SavedCard { owner: CORE_OWNER.into(), key: REST_CARD_KEY.into(), card: card.clone() }], ..old };
         let back: RuntimeState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
         assert_eq!(back.cards, state.cards);
-        assert_eq!(restore_core_card(REST_CARD_KEY, card.clone()), Some(card.clone()), "an unhandled rest reminder comes back");
-        assert_eq!(restore_core_card("test", card), None, "the sample card does not");
+        let day = |d: u32, h: u32, m: u32| chrono::NaiveDate::from_ymd_opt(2026, 11, d).unwrap().and_hms_opt(h, m, 0).unwrap();
+        let rest_at = Some(day(24, 15, 20));
+        assert_eq!(restore_core_card(REST_CARD_KEY, card.clone(), rest_at, day(24, 16, 0)), Some(card.clone()), "an unhandled rest reminder comes back");
+        assert_eq!(restore_core_card("test", card.clone(), rest_at, day(24, 16, 0)), None, "the sample card does not");
+        let next_day = Card::Reminder { title: "休息一下".into(), time: "11/24 15:20".into(), snooze_open: false, icon: REST_CARD_ICON };
+        assert_eq!(restore_core_card(REST_CARD_KEY, card, rest_at, day(25, 8, 0)), Some(next_day), "seen the next day, it carries the date");
     }
 }

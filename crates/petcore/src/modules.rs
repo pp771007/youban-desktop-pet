@@ -72,7 +72,8 @@ pub trait Module {
     fn session(&self, _now: NaiveDateTime) -> Option<Session> {
         None
     }
-    /// 柚伴重開後，核心把上次還沒按掉的卡（要按完成的那種，核心統一存）交回給丟出它的模組：
+    /// 柚伴重開後，核心把上次還沒按掉的卡（要按完成的那種，核心統一存）交回給丟出它的模組；
+    /// 還沒按掉的卡跨過午夜時也會交回來一次（卡上「今天」的說法要換）。
     /// 回傳要重新跳的卡（可以換成最新的內容），`None` = 不用再跳（那筆提醒刪掉了之類）。
     /// 刻意不給預設：每個模組都要想清楚自己的卡重開後該怎樣；模組其他要跨重開的狀態自己存檔。
     fn restore_card(&mut self, key: &str, card: Card, now: NaiveDateTime) -> Option<Card>;

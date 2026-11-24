@@ -1,6 +1,7 @@
 //! 桌寵頭上的卡片（提醒、錯過的提醒、一般通知）：獨立的分層視窗，尾巴指向桌寵。
 //! 尺寸、顏色、圓角、字級、動畫全部來自設計參數（`theme`）。
 
+use chrono::{NaiveDate, NaiveDateTime};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Direct2D::Common::*;
 use windows::Win32::Graphics::Direct2D::*;
@@ -36,6 +37,14 @@ const SPEECH_MAX_TEXT_DIP: f32 = 220.0;
 const SPEECH_MAX_LINES: f32 = 3.0;
 /// 排平均時每次縮窄多少。
 const SPEECH_BALANCE_STEP_DIP: f32 = 6.0;
+const CARD_TIME_FORMAT: &str = "%H:%M";
+const CARD_DATE_TIME_FORMAT: &str = "%-m/%-d %H:%M";
+
+/// 卡片上「幾點響的」：今天的只寫時間，不是今天的連日期一起寫（卡片放到隔天才看到也分得出來）。
+/// 卡片一跨日就重畫一次（核心在換日時把卡交回給丟出它的功能），所以 `today` 要傳顯示當下的日期。
+pub fn card_time(at: NaiveDateTime, today: NaiveDate) -> String {
+    at.format(if at.date() == today { CARD_TIME_FORMAT } else { CARD_DATE_TIME_FORMAT }).to_string()
+}
 
 /// 要按完成的卡（`needs_done`）由核心存進狀態檔，重開再跳，所以要能存讀。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

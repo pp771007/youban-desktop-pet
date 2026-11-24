@@ -19,7 +19,7 @@ use petkit::holidays::{self, Calendar};
 use petkit::reminders::{Reminder, ReminderFile, Style};
 use serde::{Deserialize, Serialize};
 
-use crate::bubble::{Card, CardAction, MISSED_MAX_ROWS};
+use crate::bubble::{Card, CardAction, MISSED_MAX_ROWS, card_time};
 use crate::icons::Icon;
 use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent};
@@ -30,8 +30,6 @@ const JUST_DUE_SECS: i64 = 60;
 /// 多久存一次「看到哪個時間了」。
 const STATE_SAVE_SECS: i64 = 60;
 const MISSED_KEY: &str = "missed";
-const TIME_FORMAT: &str = "%H:%M";
-const DATE_TIME_FORMAT: &str = "%-m/%-d %H:%M";
 /// 紀念日的卡片代號 = 這個前綴 + 紀念日 id（跟提醒的 id 分開，不會撞到）。
 const ANNIVERSARY_KEY_PREFIX: &str = "anniversary:";
 const WEEKDAYS: [&str; 7] = ["一", "二", "三", "四", "五", "六", "日"];
@@ -57,7 +55,33 @@ struct State {
 enum Pending {
     /// 要按完成的提醒，`at` 是響的時間（標題重開時從提醒檔讀，改過名就顯示新的）。
     Reminder { at: NaiveDateTime },
-    Missed { rows: Vec<(String, String)>, more: usize },
+    Missed { rows: Vec<MissedRow>, more: usize },
+}
+
+/// 錯過的提醒裡的一列：存時間不存排好的字，卡片放到隔天也能重畫出日期。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+enum MissedRow {
+    /// `last` 是最後一次該響的時間，`count` 是這段時間錯過幾次。
+    At { title: String, last: NaiveDateTime, count: usize },
+    /// 0.6.0 的存檔只有排好的字（標題、時間），讀到就照原樣顯示。
+    Text(String, String),
+}
+
+impl MissedRow {
+    fn shown(&self, today: chrono::NaiveDate) -> (String, String) {
+        match self {
+            MissedRow::At { title, last, count } => {
+                let when = card_time(*last, today);
+                (title.clone(), if *count > 1 { format!("{when}（{count} 次）") } else { when })
+            }
+            MissedRow::Text(title, when) => (title.clone(), when.clone()),
+        }
+    }
+}
+
+fn missed_card(rows: &[MissedRow], more: usize, now: NaiveDateTime) -> Card {
+    Card::Missed { rows: rows.iter().map(|r| r.shown(now.date())).collect(), more }
 }
 
 pub struct ReminderModule {
@@ -123,7 +147,7 @@ impl Entry<'_> {
     fn card(&self, at: NaiveDateTime, now: NaiveDateTime) -> Card {
         match self {
             Entry::Reminder(r) => {
-                let (title, time) = (r.title.clone(), when(at, now));
+                let (title, time) = (r.title.clone(), card_time(at, now.date()));
                 match r.style {
                     Style::Card => Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing },
                     Style::Auto => Card::Nudge { title, time, icon: Icon::BellRing },
@@ -144,10 +168,6 @@ impl Entry<'_> {
             }
         }
     }
-}
-
-fn when(at: NaiveDateTime, now: NaiveDateTime) -> String {
-    if at.date() == now.date() { at.format(TIME_FORMAT) } else { at.format(DATE_TIME_FORMAT) }.to_string()
 }
 
 /// 紀念日卡片上的話（桌寵的口氣）：還有幾天（滿幾年寫在上面那行日期旁邊，這句才短）。
@@ -226,33 +246,29 @@ impl ReminderModule {
     }
 
     /// 跳「錯過的提醒」；上一張還沒按掉的話併在一起（新的排前面）。
-    fn show_missed(&mut self, ctx: &mut Ctx, rows: Vec<(String, String)>, more: usize) {
-        let (mut rows, mut more) = (rows, more);
+    fn show_missed(&mut self, ctx: &mut Ctx, rows: Vec<MissedRow>) {
+        let (mut rows, mut more) = (rows, 0);
         if let Some(Pending::Missed { rows: old, more: old_more }) = self.state.pending.remove(MISSED_KEY) {
             rows.extend(old);
             more += old_more;
         }
         more += rows.len().saturating_sub(MISSED_MAX_ROWS);
         rows.truncate(MISSED_MAX_ROWS);
-        ctx.card(MISSED_KEY, Card::Missed { rows: rows.clone(), more });
+        ctx.card(MISSED_KEY, missed_card(&rows, more, ctx.now));
         self.state.pending.insert(MISSED_KEY.to_owned(), Pending::Missed { rows, more });
     }
 
-    /// 這段時間錯過的提醒：(每則一列：標題、最後一次的時間, 列不下的有幾則)。
-    fn missed_rows(&self, from: NaiveDateTime, to: NaiveDateTime) -> Option<(Vec<(String, String)>, usize)> {
-        let mut rows = Vec::new();
-        for e in self.entries() {
-            let (count, last) = e.occurrences_between(from, to, &self.calendar);
-            let Some(last) = last else { continue };
-            let when = when(last, to);
-            let when = if count > 1 { format!("{when}（{count} 次）") } else { when };
-            rows.push((last, e.title().to_owned(), when));
-        }
-        if rows.is_empty() {
-            return None;
-        }
+    /// 這段時間錯過的提醒，每則一列，最近錯過的排前面。
+    fn missed_rows(&self, from: NaiveDateTime, to: NaiveDateTime) -> Vec<MissedRow> {
+        let mut rows: Vec<(NaiveDateTime, String, usize)> = self
+            .entries()
+            .filter_map(|e| {
+                let (count, last) = e.occurrences_between(from, to, &self.calendar);
+                Some((last?, e.title().to_owned(), count))
+            })
+            .collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
-        Some((rows.into_iter().map(|(_, t, w)| (t, w)).collect(), 0))
+        rows.into_iter().map(|(last, title, count)| MissedRow::At { title, last, count }).collect()
     }
 
     fn save_state(&mut self, now: NaiveDateTime) {
@@ -302,8 +318,9 @@ impl Module for ReminderModule {
         let cutoff = now - Duration::seconds(JUST_DUE_SECS);
         let pending_before = self.state.pending.clone();
         if let Some(from) = gap_from.filter(|f| *f < cutoff) {
-            if let Some((rows, more)) = self.missed_rows(from, cutoff) {
-                self.show_missed(ctx, rows, more);
+            let rows = self.missed_rows(from, cutoff);
+            if !rows.is_empty() {
+                self.show_missed(ctx, rows);
             }
             self.reschedule(cutoff);
         } else if self.last_tick.is_none() {
@@ -353,12 +370,12 @@ impl Module for ReminderModule {
         }
     }
 
-    /// 重開時核心還回來的卡：照提醒檔現在的樣子重畫（改過名顯示新的、紀念日的天數照今天算）；
-    /// 那筆刪掉了、改成自己消失、或已經按掉的不再跳。錯過的提醒照原樣。
-    fn restore_card(&mut self, key: &str, card: Card, now: NaiveDateTime) -> Option<Card> {
+    /// 重開或換日時核心還回來的卡：照提醒檔現在的樣子重畫（改過名顯示新的、紀念日的天數與不是今天的時間照今天算）；
+    /// 那筆刪掉了、改成自己消失、或已經按掉的不再跳。
+    fn restore_card(&mut self, key: &str, _card: Card, now: NaiveDateTime) -> Option<Card> {
         match self.state.pending.get(key)? {
             Pending::Reminder { at } => self.entry(key).filter(|e| e.needs_done()).map(|e| e.card(*at, now)),
-            Pending::Missed { .. } => Some(card),
+            Pending::Missed { rows, more } => Some(missed_card(rows, *more, now)),
         }
     }
 }
@@ -527,6 +544,30 @@ mod tests {
         assert_eq!(back, missed);
         press(&mut m, MISSED_KEY, CardAction::Dismiss, dt(3, 11, 1));
         assert!(reopen(&dir, &missed, dt(3, 11, 2)).1.is_empty());
+    }
+
+    #[test]
+    fn a_missed_card_left_until_the_next_day_shows_the_date() {
+        let (mut m, _) = setup(vec![daily("a", 9)]);
+        tick(&mut m, dt(2, 8, 0));
+        let missed = cards(&tick(&mut m, dt(3, 11, 0)));
+        let row = |c: Option<Card>| match c {
+            Some(Card::Missed { rows, .. }) => rows[0].1.clone(),
+            other => panic!("expected missed card, got {other:?}"),
+        };
+        assert_eq!(row(Some(missed[0].1.clone())), "09:00（2 次）");
+        assert_eq!(row(m.restore_card(MISSED_KEY, missed[0].1.clone(), dt(4, 8, 0))), "3/3 09:00（2 次）");
+    }
+
+    #[test]
+    fn a_missed_card_saved_by_0_6_0_still_comes_back() {
+        let (_, dir) = setup(vec![daily("a", 9)]);
+        let saved = r#"{ "lastChecked": "2026-03-03T11:00:00", "pending": { "missed": { "kind": "missed", "rows": [["提醒a", "09:00（2 次）"]], "more": 0 } } }"#;
+        fs::write(dir.join("state.json"), saved).unwrap();
+        let card = Card::Missed { rows: vec![("提醒a".into(), "09:00（2 次）".into())], more: 0 };
+        let mut m = restart(&dir);
+        assert_eq!(m.state.last_checked, Some(dt(3, 11, 0)));
+        assert_eq!(m.restore_card(MISSED_KEY, card.clone(), dt(4, 8, 0)), Some(card));
     }
 
     #[test]
