@@ -1,4 +1,5 @@
-//! 專注進行到哪：核心寫、設定程式讀（設定的專注頁要跟右鍵選單一樣顯示「停止專注」）。
+//! 專注進行到哪：核心寫、設定程式讀（設定的專注頁要跟右鍵選單一樣顯示「停止專注」）；
+//! 核心重開時也從這裡接著倒數。
 //! 選單與設定的按鈕文字都從這裡出，兩邊才不會各寫各的。
 
 use std::{fs, io, path::Path};
@@ -15,6 +16,13 @@ pub struct FocusStatus {
     pub focusing: bool,
     /// 這一段在什麼時候結束（本機時間）。
     pub until: NaiveDateTime,
+    /// 第幾輪：核心重開時從這裡接著算，長休息才不會跑掉。
+    #[serde(default = "first_round")]
+    pub round: u32,
+}
+
+fn first_round() -> u32 {
+    1
 }
 
 impl FocusStatus {

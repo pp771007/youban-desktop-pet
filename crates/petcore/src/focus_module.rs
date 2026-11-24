@@ -57,6 +57,16 @@ fn minutes(m: u32) -> Duration {
 }
 
 impl FocusModule {
+    /// 從上次寫下的 `FocusStatus` 接著跑；`None` = 沒在專注。
+    pub fn resume(status: Option<FocusStatus>) -> Self {
+        let phase = match status {
+            None => Phase::Idle,
+            Some(FocusStatus { focusing: true, until, round }) => Phase::Focus { until, round },
+            Some(FocusStatus { focusing: false, until, round }) => Phase::Break { until, round },
+        };
+        Self { phase, before: Phase::Idle }
+    }
+
     fn start(&mut self, ctx: &mut Ctx) {
         self.phase = Phase::Focus { until: ctx.now + minutes(ctx.config.focus_minutes), round: 1 };
         self.before = Phase::Idle;
@@ -72,8 +82,8 @@ impl FocusModule {
     fn status(&self) -> Option<FocusStatus> {
         match self.phase {
             Phase::Idle => None,
-            Phase::Focus { until, .. } => Some(FocusStatus { focusing: true, until }),
-            Phase::Break { until, .. } => Some(FocusStatus { focusing: false, until }),
+            Phase::Focus { until, round } => Some(FocusStatus { focusing: true, until, round }),
+            Phase::Break { until, round } => Some(FocusStatus { focusing: false, until, round }),
         }
     }
 
@@ -153,7 +163,7 @@ impl Module for FocusModule {
 
     fn session(&self, now: NaiveDateTime) -> Option<Session> {
         let s = self.status()?;
-        Some(Session { focusing: s.focusing, secs_left: s.secs_left(now), minutes_left: s.minutes_left(now), until: s.until })
+        Some(Session { focusing: s.focusing, secs_left: s.secs_left(now), minutes_left: s.minutes_left(now), until: s.until, round: s.round })
     }
 }
 
@@ -209,6 +219,20 @@ mod tests {
 
         step(&mut f, &config, now, Some(ModuleEvent::Menu(MENU_STOP)));
         assert!(f.session(now).is_none());
+    }
+
+    #[test]
+    fn picks_up_where_it_left_off_after_a_restart() {
+        let config = Config { focus_minutes: 25, long_break_minutes: 15, focus_rounds_before_long: 4, ..Config::default() };
+        let mut f = FocusModule::default();
+        step(&mut f, &config, at(9, 0), Some(ModuleEvent::Menu(MENU_START)));
+        // 第 4 輪專注到一半關掉柚伴：寫下來的狀態拿來重開。
+        f.phase = Phase::Focus { until: at(9, 25), round: 4 };
+        let mut f = FocusModule::resume(f.status());
+        assert!(f.session(at(9, 10)).is_some_and(|s| s.focusing && s.minutes_left == 15 && s.round == 4));
+        let titles = card_titles(&step(&mut f, &config, at(9, 25), None));
+        assert!(titles.iter().all(|t| LONG_BREAK.iter().any(|l| l.replace("{r}", "15").replace("{n}", "4") == *t)) && titles.len() == 1, "round 4 still ends in a long break: {titles:?}");
+        assert!(FocusModule::resume(None).session(at(9, 10)).is_none());
     }
 
     #[test]

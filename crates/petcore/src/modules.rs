@@ -82,8 +82,9 @@ pub struct Session {
     pub secs_left: i64,
     /// 無條件進位的分鐘（還剩 30 秒算 1 分）。
     pub minutes_left: i64,
-    /// 這一段在什麼時候結束（寫給設定程式看的 `FocusStatus` 用）。
+    /// 這一段在什麼時候結束、第幾輪（寫進 `FocusStatus` 用）。
     pub until: NaiveDateTime,
+    pub round: u32,
 }
 
 /// 右鍵選單上一個模組的那一組。

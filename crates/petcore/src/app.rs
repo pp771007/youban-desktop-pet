@@ -487,7 +487,8 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
             holiday_cache: paths::holiday_cache_dir(),
         })),
         window_restore::ID => Box::new(WindowRestore::new(paths::window_layout_file())),
-        focus_module::ID => Box::new(FocusModule::default()),
+        // 關掉柚伴再打開：還沒結束的那一段接著倒數（關著的時候已經過了就不接）。
+        focus_module::ID => Box::new(FocusModule::resume(FocusStatus::load(&paths::focus_status_file(), local_now()))),
         _ => unreachable!("unknown module {id}"),
     }
 }
@@ -979,7 +980,7 @@ impl App {
     /// 專注開始、換段、停止時寫一份給設定程式（設定的專注頁顯示「停止專注」用）。
     /// 每次模組有動靜都會經過 `apply`，在這裡比對就不會漏掉哪個入口。
     fn write_focus_status(&mut self) {
-        let status = self.modules.session(local_now()).map(|s| FocusStatus { focusing: s.focusing, until: s.until });
+        let status = self.modules.session(local_now()).map(|s| FocusStatus { focusing: s.focusing, until: s.until, round: s.round });
         if self.focus_written == Some(status) {
             return;
         }
