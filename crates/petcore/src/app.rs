@@ -65,6 +65,7 @@ use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::tray::{self, Tray};
 use crate::updater::{self, WM_UPDATE_READY};
 use crate::window_restore::{self, WindowRestore};
+use petkit::relay_log::RelayLog;
 
 /// 設定程式靠這個類別名稱找到核心（`petkit::ipc::PET_WINDOW_CLASS`）。
 static PET_CLASS_NAME: LazyLock<HSTRING> = LazyLock::new(|| HSTRING::from(ipc::PET_WINDOW_CLASS));
@@ -171,9 +172,11 @@ const MENU_FEED: u32 = 13;
 const MENU_BALL: u32 = 14;
 /// 打開桌寵清單那一層（本身不會被選到）。
 const MENU_SWITCH_PET: u32 = 15;
+const MENU_RELAY_LOG: u32 = 16;
 const MENU_PET_BASE: u32 = 100;
 const SETTINGS_PAGE_REMINDERS: &str = "reminders";
 const SETTINGS_PAGE_PETS: &str = "pets";
+const SETTINGS_PAGE_RELAY: &str = "relay";
 
 #[derive(Debug, Clone, PartialEq)]
 enum Event {
@@ -624,7 +627,10 @@ fn make_module(id: &str) -> Box<dyn crate::modules::Module> {
             &paths::focus_status_file(),
             local_now(),
         ))),
-        relay_module::ID => Box::new(RelayModule::new(paths::relay_state_file())),
+        relay_module::ID => Box::new(RelayModule::new(
+            paths::relay_state_file(),
+            paths::relay_log_file(),
+        )),
         _ => unreachable!("unknown module {id}"),
     }
 }
@@ -1532,6 +1538,14 @@ impl App {
             if group.module == reminder_module::ID {
                 items.insert(0, Item::entry(MENU_ADD_REMINDER, "新增提醒…", Icon::Bell));
             }
+            if group.module == relay_module::ID {
+                let unread = RelayLog::load(&paths::relay_log_file()).map_or(0, |l| l.unread());
+                let label = match unread {
+                    0 => "傳話紀錄".to_string(),
+                    n => format!("傳話紀錄（{n}）"),
+                };
+                items.insert(0, Item::entry(MENU_RELAY_LOG, label, Icon::History));
+            }
             if !items.is_empty() {
                 entries.push(Entry::Header(group.name.into()));
                 entries.extend(items);
@@ -1583,6 +1597,7 @@ impl App {
         match id {
             MENU_EXIT => self.quit(),
             MENU_ADD_REMINDER => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
+            MENU_RELAY_LOG => self.open_settings(Some(SETTINGS_PAGE_RELAY)),
             MENU_SETTINGS => self.open_settings(None),
             MENU_DAYS => self.open_settings(Some(SETTINGS_PAGE_PETS)),
             MENU_FEED => self.spawn_toy(false),

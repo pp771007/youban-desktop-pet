@@ -36,7 +36,7 @@ function mockBackend(tokens) {
   const LUNAR_MONTHS = ['正月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
   const LUNAR_DAYS = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十', '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'notice', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'notice', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'notice', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'notice', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true, relay: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -46,6 +46,14 @@ function mockBackend(tokens) {
         { id: 'mom', title: '媽媽生日', enabled: true, date: { calendar: 'lunar', month: 3, day: 5, leap: false }, year: 1966, alerts: [{ daysBefore: 3, time: '09:00' }, { daysBefore: 0, time: '09:00' }] },
       ],
       dayOverrides: {},
+    },
+    relayLog: {
+      seenUntil: null,
+      entries: [
+        { key: '#1', title: '備份跑完了', detail: null, from: null, at: '2026-11-24T08:30:00', style: 'notice', done: false },
+        { key: '#2', title: 'PR 等你審', detail: '有 2 則新留言', from: 'Claude', at: '2026-11-24T09:00:00', style: 'confirm', done: false },
+        { key: '#3', title: '建置完成', detail: null, from: 'Claude', at: '2026-11-24T09:05:00', style: 'notice', done: false },
+      ],
     },
     calls: [],
     running: true,
@@ -106,7 +114,13 @@ function mockBackend(tokens) {
       if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
       if (command.cmd === 'focusStart') db.focusStopLabel = '停止專注（還剩 25 分）';
       if (command.cmd === 'focusStop') db.focusStopLabel = null;
+      // 傳話紀錄：跟 petkit::relay_log 一樣（清除留著還沒按完成的確認框）。
+      const waiting = (e) => e.style === 'confirm' && !e.done;
+      if (command.cmd === 'relayLogSeen') db.relayLog.seenUntil = '2026-11-24T23:59:00';
+      if (command.cmd === 'relayDone') for (const e of db.relayLog.entries) if (e.key === command.key) e.done = true;
+      if (command.cmd === 'relayLogClear') db.relayLog.entries = db.relayLog.entries.filter((e) => waiting(e) || ('from' in command && e.from !== command.from));
     },
+    load_relay_log: () => structuredClone(db.relayLog),
     focus_stop_label: () => db.focusStopLabel ?? null,
     update_status: () => (db.updateSteps.length > 1 ? db.updateSteps.shift() : db.updateSteps[0] ?? null),
     apply_update: () => { db.calls.push({ cmd: 'apply_update' }); },
@@ -437,6 +451,23 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '滑鼠移過去才顯示' }).click();
     check(await page.evaluate(() => { const c = window.__mock.config; return c.focusMinutes === 45 && c.focusCountdown === 'hover'; }), 'focus length and countdown mode write config');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-focus-light.png') });
+
+    // 傳話紀錄：照來源分組、打開就算看過、還沒按完成的確認框可以從這裡按完成、清除送指令給核心
+    await page.locator('.nav-item[data-page="relay"]').click();
+    await page.locator('.section h2', { hasText: 'Claude' }).waitFor();
+    check(JSON.stringify(await page.locator('.section h2').allInnerTexts()) === JSON.stringify(['Claude', '沒有署名']), 'relay log groups by sender, latest sender first');
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayLogSeen')), 'opening the relay log marks it seen');
+    check(await page.locator('.list-row', { hasText: '建置完成' }).getByRole('button', { name: '完成' }).count() === 0, 'notices have no done button');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-relay-light.png') });
+    await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayDone' && c.key === '#2')), 'done in the relay log is sent to the core');
+    await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).waitFor({ state: 'detached' });
+    await page.locator('.section', { hasText: '沒有署名' }).getByRole('button', { name: '清除' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayLogClear' && 'from' in c && c.from === null)), 'clearing one sender sends that sender');
+    await page.locator('.section h2', { hasText: '沒有署名' }).waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: '全部清除' }).click();
+    await page.locator('.empty-title', { hasText: '還沒有人傳話給你' }).waitFor();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayLogClear' && !('from' in c))), 'clear all sends no sender');
     await page.locator('.nav-item[data-page="windows"]').click();
 
     // 點一個視窗直接打數字改位置；寬高空著不能套用

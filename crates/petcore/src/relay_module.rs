@@ -6,12 +6,14 @@
 //! 核心的佇列滿了會丟掉最前面的卡，不這樣限制的話，一直送的程式會把使用者自己排的提醒擠掉。
 //!
 //! 確認框（排隊中、跳著的、按了稍後的）存在 `relay-state.json`，重開柚伴還會再跳；提示框不存，重開就算了。
+//! 每一則另外記進傳話紀錄（`petkit::relay_log`），這個模組是唯一寫它的地方。
 
 use std::path::PathBuf;
 
 use chrono::{Duration, NaiveDateTime};
 use petkit::config::{load_json, write_atomic};
-use petkit::ipc::{CMD_RELAY, Relay};
+use petkit::ipc::{CMD_RELAY, CMD_RELAY_DONE, CMD_RELAY_LOG_CLEAR, CMD_RELAY_LOG_SEEN, Relay};
+use petkit::relay_log::{LogEntry, RelayLog};
 use petkit::reminders::Style;
 use serde::{Deserialize, Serialize};
 
@@ -95,7 +97,9 @@ struct State {
 }
 
 pub struct RelayModule {
-    path: PathBuf,
+    state_path: PathBuf,
+    log_path: PathBuf,
+    log: RelayLog,
     waiting: Vec<Message>,
     shown: Option<Message>,
     snoozed: Vec<(Message, NaiveDateTime)>,
@@ -105,13 +109,19 @@ pub struct RelayModule {
 }
 
 impl RelayModule {
-    pub fn new(path: PathBuf) -> Self {
-        let state: State = load_json(&path).unwrap_or_else(|e| {
+    pub fn new(state_path: PathBuf, log_path: PathBuf) -> Self {
+        let state: State = load_json(&state_path).unwrap_or_else(|e| {
             log!("relay state unreadable ({e}); starting fresh");
             State::default()
         });
+        let log = RelayLog::load(&log_path).unwrap_or_else(|e| {
+            log!("relay log unreadable ({e}); starting fresh");
+            RelayLog::default()
+        });
         Self {
-            path,
+            state_path,
+            log_path,
+            log,
             waiting: state.waiting,
             shown: None,
             snoozed: state.snoozed,
@@ -132,6 +142,16 @@ impl RelayModule {
                 format!("{SEQ_KEY_PREFIX}{}", self.next_seq)
             }
         };
+        self.log.record(LogEntry {
+            key: key.clone(),
+            title: relay.title.clone(),
+            detail: relay.detail,
+            from: relay.from.clone(),
+            at: ctx.now,
+            style: relay.style,
+            done: false,
+        });
+        self.save_log();
         let msg = Message {
             key,
             title: relay.title,
@@ -192,6 +212,26 @@ impl RelayModule {
         }
     }
 
+    /// 傳話紀錄上按了「完成」：跳著的就收掉，還在排隊或稍後的就不用再跳了。
+    fn done(&mut self, key: &str, ctx: &mut Ctx) {
+        if self.shown.as_ref().is_some_and(|m| m.key == key) {
+            self.shown = None;
+            ctx.out.push(Request::Withdraw { key: key.into() });
+        }
+        self.waiting.retain(|m| m.key != key);
+        self.snoozed.retain(|(m, _)| m.key != key);
+        self.log.mark_done(key);
+        self.save_log();
+        self.pump(ctx);
+        self.save();
+    }
+
+    fn save_log(&self) {
+        if let Err(e) = self.log.save(&self.log_path) {
+            log!("save relay log failed: {e}");
+        }
+    }
+
     fn save(&self) {
         let state = State {
             waiting: self.shown.iter().chain(&self.waiting).cloned().collect(),
@@ -200,7 +240,7 @@ impl RelayModule {
         };
         match serde_json::to_vec_pretty(&state) {
             Ok(bytes) => {
-                if let Err(e) = write_atomic(&self.path, &bytes) {
+                if let Err(e) = write_atomic(&self.state_path, &bytes) {
                     log!("save relay state failed: {e}");
                 }
             }
@@ -246,6 +286,23 @@ impl Module for RelayModule {
                     Err(e) => log!("bad relay ({e})"),
                 }
             }
+            ModuleEvent::Command(v) => match v["cmd"].as_str() {
+                Some(CMD_RELAY_DONE) => {
+                    if let Some(key) = v["key"].as_str() {
+                        self.done(key, ctx);
+                    }
+                }
+                Some(CMD_RELAY_LOG_SEEN) => {
+                    self.log.seen_until = Some(ctx.now);
+                    self.save_log();
+                }
+                Some(CMD_RELAY_LOG_CLEAR) => {
+                    let from = v.get("from").map(|f| f.as_str());
+                    self.log.clear(from);
+                    self.save_log();
+                }
+                _ => {}
+            },
             ModuleEvent::Card { key, action } => {
                 if *key == NOTICE_KEY {
                     self.notice_slot.clear();
@@ -256,7 +313,11 @@ impl Module for RelayModule {
                             let until = ctx.now + Duration::minutes(i64::from(*minutes));
                             self.snoozed.extend(self.shown.take().map(|m| (m, until)));
                         }
-                        CardAction::Done | CardAction::Dismiss => self.shown = None,
+                        CardAction::Done | CardAction::Dismiss => {
+                            self.shown = None;
+                            self.log.mark_done(key);
+                            self.save_log();
+                        }
                     }
                 }
                 self.pump(ctx);
@@ -308,6 +369,41 @@ mod tests {
         dir.join("relay-state.json")
     }
 
+    fn open(state: &std::path::Path) -> RelayModule {
+        RelayModule::new(state.to_path_buf(), state.with_file_name("relay-log.json"))
+    }
+
+    #[test]
+    fn done_in_the_log_closes_the_card_and_shows_the_next() {
+        let path = state_path();
+        let mut m = open(&path);
+        send(
+            &mut m,
+            dt(24, 9, 0),
+            Style::Confirm,
+            "回信",
+            Some("Claude"),
+            None,
+        );
+        send(
+            &mut m,
+            dt(24, 9, 0),
+            Style::Confirm,
+            "審 PR",
+            Some("Claude"),
+            None,
+        );
+        let v = serde_json::json!({ "cmd": CMD_RELAY_DONE, "key": "#1" });
+        let out = run(&mut m, dt(24, 9, 5), |m, ctx| {
+            m.on_event(&ModuleEvent::Command(&v), ctx)
+        });
+        assert!(out.contains(&Request::Withdraw { key: "#1".into() }));
+        assert_eq!(titles(&out), ["審 PR"]);
+        let log = RelayLog::load(&path.with_file_name("relay-log.json")).unwrap();
+        let done: Vec<bool> = log.entries.iter().map(|e| e.done).collect();
+        assert_eq!(done, [true, false]);
+    }
+
     fn run(
         m: &mut RelayModule,
         now: NaiveDateTime,
@@ -338,6 +434,7 @@ mod tests {
             title: title.into(),
             from: from.map(Into::into),
             id: id.map(Into::into),
+            detail: None,
         })
         .unwrap();
         v["cmd"] = CMD_RELAY.into();
@@ -376,7 +473,7 @@ mod tests {
 
     #[test]
     fn shows_the_sender_and_time_on_the_card() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         let out = send(
             &mut m,
             dt(24, 14, 2),
@@ -401,7 +498,7 @@ mod tests {
 
     #[test]
     fn many_senders_take_at_most_one_confirm_and_one_notice_slot() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         let mut shown = Vec::new();
         for i in 0..50 {
             let from = format!("AI{i}");
@@ -448,7 +545,7 @@ mod tests {
 
     #[test]
     fn notices_from_the_same_sender_are_listed_together() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         send(
             &mut m,
             dt(24, 9, 0),
@@ -491,7 +588,7 @@ mod tests {
 
     #[test]
     fn same_sender_and_id_updates_instead_of_piling_up() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         send(
             &mut m,
             dt(24, 9, 0),
@@ -536,7 +633,7 @@ mod tests {
 
     #[test]
     fn updating_the_shown_card_replaces_it_in_place() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         send(
             &mut m,
             dt(24, 9, 0),
@@ -572,7 +669,7 @@ mod tests {
 
     #[test]
     fn snoozed_confirm_comes_back_later() {
-        let mut m = RelayModule::new(state_path());
+        let mut m = open(&state_path());
         send(&mut m, dt(24, 9, 0), Style::Confirm, "回信", None, None);
         assert!(cards(&press(&mut m, dt(24, 9, 1), "#1", CardAction::Snooze(5))).is_empty());
         assert!(cards(&run(&mut m, dt(24, 9, 5), |m, ctx| m.tick(ctx))).is_empty());
@@ -585,7 +682,7 @@ mod tests {
     #[test]
     fn confirms_survive_a_restart_but_notices_do_not() {
         let path = state_path();
-        let mut m = RelayModule::new(path.clone());
+        let mut m = open(&path);
         send(&mut m, dt(24, 9, 0), Style::Confirm, "跳著的", None, None);
         send(&mut m, dt(24, 9, 0), Style::Confirm, "排隊的", None, None);
         send(&mut m, dt(24, 9, 0), Style::Notice, "提示", None, None);
@@ -606,7 +703,7 @@ mod tests {
         send(&mut m, dt(24, 9, 2), Style::Confirm, "排隊的2", None, None);
 
         // 關掉再開：核心還回跳著的那張，排隊的、稍後的也都還在；提示框不會再跳。
-        let mut m = RelayModule::new(path);
+        let mut m = open(&path);
         let card = Card::Confirm {
             title: String::new(),
             time: String::new(),
@@ -630,9 +727,9 @@ mod tests {
     #[test]
     fn a_shown_confirm_the_core_did_not_save_still_comes_back() {
         let path = state_path();
-        let mut m = RelayModule::new(path.clone());
+        let mut m = open(&path);
         send(&mut m, dt(24, 9, 0), Style::Confirm, "回信", None, None);
-        let mut m = RelayModule::new(path);
+        let mut m = open(&path);
         let first = run(&mut m, dt(24, 10, 0), |m, ctx| m.tick(ctx));
         assert_eq!(titles(&first), ["回信"]);
     }

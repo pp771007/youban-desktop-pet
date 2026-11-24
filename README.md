@@ -79,8 +79,9 @@ Youban.exe --notice "測試全部通過了" --from "Claude"
 - `--notice` 跳**提示框**：過 15 秒自己消失
 - `--from`：框上顯示是誰傳的（可省略）
 - `--id`：同一件事給同一個代號（例如 `--id build`），之後的會更新前一則，不會疊一堆
+- `--detail`：補充說明，在傳話紀錄裡看得到（可省略）
 
-很多則同時進來時一次跳一個，看完一個才換下一個。安裝版的 `Youban.exe` 在 `%LOCALAPPDATA%\Programs\Youban Desktop Pet`。
+確認框一次跳一個，按掉一個才換下一個；好幾則提示框同時進來會合成一個清單。框收掉之後，對牠按右鍵 →「傳話紀錄」還找得到（留 7 天）。安裝版的 `Youban.exe` 在 `%LOCALAPPDATA%\Programs\Youban Desktop Pet`。
 
 送完會回一個數字，AI 可以靠它知道你有沒有收到：`0` 送到了、`1` 柚伴沒開、`2` 指令寫錯、`3` 傳話在設定裡關掉了。
 

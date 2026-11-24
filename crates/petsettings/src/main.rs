@@ -15,6 +15,7 @@ use petkit::config::{ColorScheme, Config, load_json};
 use petkit::focus_status::FocusStatus;
 use petkit::holidays::{self, DayKind};
 use petkit::paths;
+use petkit::relay_log::RelayLog;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
 use petkit::update_status::UpdateStatus;
 use petkit::{anniversary, ipc, pack, pack_edit, states};
@@ -163,6 +164,12 @@ fn load_reminders() -> CmdResult<ReminderFile> {
 #[tauri::command]
 fn save_reminders(file: ReminderFile) -> CmdResult<()> {
     file.save(&paths::reminders_file()).map_err(err)
+}
+
+/// 只讀：要改就送指令給核心（`petkit::relay_log` 只有核心寫）。
+#[tauri::command]
+fn load_relay_log() -> CmdResult<RelayLog> {
+    RelayLog::load(&paths::relay_log_file()).map_err(err)
 }
 
 #[tauri::command]
@@ -672,6 +679,7 @@ fn main() {
             save_config,
             load_reminders,
             save_reminders,
+            load_relay_log,
             preview,
             official_days,
             anniversary_info,

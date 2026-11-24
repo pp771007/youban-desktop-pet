@@ -46,12 +46,18 @@ const TOAST_MS = 2200;
 const CORE_POLL_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
 const LAYOUT_REFRESH_MS = 600;
+/** 核心收到指令先排進自己的事件佇列，下一圈才處理（寫好檔）：送完等這麼久再讀檔。 */
+const CORE_APPLY_MS = 300;
+const afterCoreApplies = () => new Promise((resolve) => setTimeout(resolve, CORE_APPLY_MS));
 const UPDATE_POLL_MS = 500;
 /** 核心還在查或下載，要繼續等結果。 */
 const UPDATE_BUSY = ['checking', 'downloading'];
 const DEFAULT_PAGE = 'reminders';
 /** 功能開關：設定檔 features 的欄位 → 名稱與它的頁面（側邊欄「功能」那一組）。 */
-const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows'], ['focus', '專注', 'focus']];
+const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows'], ['focus', '專注', 'focus'], ['relay', '傳話', 'relay']];
+/** 傳話紀錄空著時給的例子（完整用法在 README）。 */
+const RELAY_EXAMPLE = 'Youban.exe --notice "要說的話"';
+const RELAY_NO_SENDER = '沒有署名';
 
 const state = {
   page: DEFAULT_PAGE,
@@ -78,6 +84,8 @@ const state = {
   autostartError: '',
   /** 檢查更新的進度（`petkit::update_status::UpdateStatus`），沒按過「檢查更新」是 null。 */
   update: null,
+  /** 傳話紀錄（`petkit::relay_log::RelayLog`），還沒打開過那一頁是 null。 */
+  relayLog: null,
 };
 
 // ---------- 小工具 ----------
@@ -1334,6 +1342,73 @@ async function refreshFocus() {
   if (state.page === 'focus') render();
 }
 
+// ---------- 頁面：傳話 ----------
+// 傳話紀錄只讀：完成、清除、看過了都送指令給核心（只有核心寫那個檔），送完再讀回來。
+
+async function refreshRelayLog() {
+  state.relayLog = await invoke('load_relay_log');
+}
+
+async function relayCommand(command) {
+  await invoke('send_core', { command });
+  await afterCoreApplies();
+  await refreshRelayLog();
+  render();
+}
+
+/** 還沒按完成的確認框：清除時留著，要按「完成」才算數。 */
+const relayWaiting = (e) => e.style === 'confirm' && !e.done;
+
+function renderRelay(page) {
+  if (featureOff(page, 'relay')) return;
+  const entries = state.relayLog?.entries ?? [];
+  page.append(h('div', { class: 'page-head' },
+    featureTitle('relay'),
+    h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning || entries.every(relayWaiting), onclick: () => relayCommand({ cmd: 'relayLogClear' }) }, icon('trash-2'), '全部清除')));
+  if (!entries.length) {
+    page.append(h('div', { class: 'card empty' },
+      h('img', { src: currentPetImage(), alt: '' }),
+      h('div', { class: 'empty-title' }, '還沒有人傳話給你'),
+      h('div', { class: 'empty-desc' }, RELAY_EXAMPLE)));
+    return;
+  }
+  // 新的在上面；來源照最近一則的先後排。
+  const groups = Map.groupBy([...entries].reverse(), (e) => e.from ?? null);
+  for (const [from, list] of groups) {
+    page.append(h('section', { class: 'section' },
+      h('div', { class: 'section-head' },
+        h('h2', {}, from ?? RELAY_NO_SENDER),
+        h('button', { class: 'btn btn-ghost btn-small', disabled: !state.coreRunning || list.every(relayWaiting), onclick: () => relayCommand({ cmd: 'relayLogClear', from }) }, icon('trash-2'), '清除')),
+      h('div', { class: 'card list' }, list.map(relayRow))));
+  }
+}
+
+function relayRow(e) {
+  const waiting = relayWaiting(e);
+  return h('div', { class: 'list-row' },
+    h('span', { class: `row-dot${waiting ? '' : ' muted'}`, title: styleLabel(e.style) }, icon(e.style === 'notice' ? 'message-dots' : 'bell')),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', title: e.title }, e.title),
+      h('div', { class: 'row-meta' }, h('span', {}, friendlyWhen(e.at)), e.detail ? h('span', {}, e.detail) : null)),
+    waiting ? h('button', { class: 'btn btn-primary btn-small', disabled: !state.coreRunning, onclick: () => relayCommand({ cmd: 'relayDone', key: e.key }) }, icon('check'), '完成') : null);
+}
+
+/** 看到傳話頁 = 都看過了（右鍵選單上的未讀數字歸零）；停在這頁時新進來的也算。 */
+async function markRelaySeen() {
+  const { entries, seenUntil } = state.relayLog;
+  if (!state.coreRunning || !entries.some((e) => !seenUntil || e.at > seenUntil)) return;
+  await invoke('send_core', { command: { cmd: 'relayLogSeen' } });
+  await afterCoreApplies();
+  await refreshRelayLog();
+}
+
+async function pollRelayLog() {
+  const before = JSON.stringify(state.relayLog);
+  await refreshRelayLog();
+  await markRelaySeen();
+  if (JSON.stringify(state.relayLog) !== before) render();
+}
+
 // ---------- 頁面：一般 ----------
 
 function renderGeneral(page) {
@@ -1400,7 +1475,7 @@ async function pollUpdate() {
 
 // ---------- 骨架 ----------
 
-const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWindows, focus: renderFocus, general: renderGeneral, 'pet-edit': renderPetEdit };
+const PAGES = { reminders: renderReminders, pets: renderPets, windows: renderWindows, focus: renderFocus, relay: renderRelay, general: renderGeneral, 'pet-edit': renderPetEdit };
 /** 不在側欄上的頁面算在哪一個分類底下。 */
 const NAV_PARENT = { 'pet-edit': 'pets' };
 
@@ -1421,6 +1496,10 @@ function render() {
 async function go(name) {
   state.page = PAGES[name] && !NAV_PARENT[name] ? name : DEFAULT_PAGE;
   if (state.page === 'windows') await refreshWindows();
+  if (state.page === 'relay') {
+    await refreshRelayLog();
+    await markRelaySeen();
+  }
   if (state.page === 'general' && state.autostart === null) state.autostart = await invoke('autostart_status').catch(() => false);
   if (state.page === 'general' && state.update === null) {
     // 「已經是最新版」「連不上」是之前哪一次查的結果看不出來，不顯示；還在查、已經下載好的才接著顯示。
@@ -1442,6 +1521,7 @@ async function pollCore() {
     render();
   }
   await refreshFocus();
+  if (state.page === 'relay') await pollRelayLog();
 }
 
 async function main() {

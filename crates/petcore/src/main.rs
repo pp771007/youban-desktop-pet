@@ -58,8 +58,8 @@ const CONFIRM_FLAG: &str = "--confirm";
 const NOTICE_FLAG: &str = "--notice";
 const RELAY_FROM_OPT: &str = "--from";
 const RELAY_ID_OPT: &str = "--id";
-const RELAY_USAGE: &str =
-    "用法：Youban.exe --confirm|--notice <要說的話> [--from <誰傳的>] [--id <同一件事的代號>]";
+const RELAY_DETAIL_OPT: &str = "--detail";
+const RELAY_USAGE: &str = "用法：Youban.exe --confirm|--notice <要說的話> [--from <誰傳的>] [--id <同一件事的代號>] [--detail <補充說明>]";
 /// 傳話的結束碼：送程式的那一方靠它知道使用者有沒有收到。
 const RELAY_EXIT_SENT: i32 = 0;
 const RELAY_EXIT_NOT_RUNNING: i32 = 1;
@@ -189,18 +189,19 @@ fn run_app(soak_secs: Option<u64>, after_update: bool) {
     }
 }
 
-/// 把一段 JSON 指令送給正在跑的桌寵（設定程式與自動測試用）。
+/// `--confirm` / `--notice` 的參數組成一則傳話送給桌寵，回傳結束碼。
 fn relay(flag: &str, rest: &[String]) -> i32 {
     let usage = || {
         eprintln!("{RELAY_USAGE}");
         RELAY_EXIT_USAGE
     };
-    let (mut title, mut from, mut id) = (None, None, None);
+    let (mut title, mut from, mut id, mut detail) = (None, None, None, None);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         let slot = match a.as_str() {
             RELAY_FROM_OPT => &mut from,
             RELAY_ID_OPT => &mut id,
+            RELAY_DETAIL_OPT => &mut detail,
             _ if title.is_none() => {
                 title = Some(a.clone());
                 continue;
@@ -230,6 +231,7 @@ fn relay(flag: &str, rest: &[String]) -> i32 {
         title,
         from,
         id,
+        detail,
     })
     .expect("relay serializes");
     v["cmd"] = petkit::ipc::CMD_RELAY.into();
@@ -240,6 +242,7 @@ fn relay(flag: &str, rest: &[String]) -> i32 {
     }
 }
 
+/// 把一段 JSON 指令送給正在跑的桌寵（設定程式與自動測試用）。
 fn send(json: &str) -> bool {
     unsafe {
         let Ok(hwnd) = FindWindowW(app::pet_class(), PCWSTR::null()) else {

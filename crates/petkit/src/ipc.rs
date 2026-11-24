@@ -36,6 +36,12 @@ pub const AREA_ALLOWED: &str = "allowed";
 pub const AREA_FORBIDDEN: &str = "forbidden";
 /// 傳話：指令的其他欄位是一個 `Relay`。
 pub const CMD_RELAY: &str = "relay";
+/// 傳話紀錄上按「完成」`{"key"}`：跟在確認框上按一樣。
+pub const CMD_RELAY_DONE: &str = "relayDone";
+/// 打開了傳話紀錄：到現在為止的都算看過了。
+pub const CMD_RELAY_LOG_SEEN: &str = "relayLogSeen";
+/// 清掉傳話紀錄 `{"from"?}`：沒有 `from` = 全部，`"from": null` = 沒署名的那組。
+pub const CMD_RELAY_LOG_CLEAR: &str = "relayLogClear";
 
 /// 一則傳話（用詞見 `CONTEXT.md`）。`from` + `id` 一樣的，後來的更新前一則，不另外疊一則。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -46,4 +52,7 @@ pub struct Relay {
     pub from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// 補充說明：框上不顯示，傳話紀錄裡看得到。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }

@@ -91,6 +91,11 @@ pub fn focus_status_file() -> PathBuf {
     local_dir().join("focus.json")
 }
 
+/// 傳話紀錄（`relay_log::RelayLog`）：核心寫、設定程式讀。
+pub fn relay_log_file() -> PathBuf {
+    local_dir().join("relay-log.json")
+}
+
 /// `dumpStatus` 指令寫出的目前狀態。
 pub fn status_file() -> PathBuf {
     local_dir().join("status.json")
