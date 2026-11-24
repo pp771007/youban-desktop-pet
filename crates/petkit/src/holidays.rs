@@ -22,6 +22,10 @@ pub const BUNDLED: &[(i32, &str)] = &[
 const DGPA_WORKDAY: &str = "0";
 const DGPA_HOLIDAY: &str = "2";
 const DGPA_DATE_FORMAT: &str = "%Y%m%d";
+/// 官方日曆裡補假那天的備註。
+const MAKEUP_NOTE: &str = "補假";
+/// 補假離它補的節日最多幾天（春節初一初二逢週末，補到隔週）。
+const MAKEUP_MAX_GAP_DAYS: i64 = 7;
 /// 找下一個／上一個上班日時最多看幾天；連假最長也不會超過兩週。
 const MAX_WORKDAY_SEARCH_DAYS: u64 = 31;
 
@@ -98,6 +102,38 @@ impl Calendar {
         for d in days {
             self.years.insert(d.date.year());
             self.official.insert(d.date, d);
+        }
+        self.name_makeup_days();
+    }
+
+    /// 官方日曆的補假只寫「補假」：找出它補的是哪個落在週末的節日，改寫成「清明節補假」。
+    /// 規則是節日逢週六前一天補、逢週日後一天補（春節這種連假會往後排好幾天），
+    /// 所以從距離最近的一對開始配，一個節日只配一天；附近找不到的（節日在還沒公布的明年）維持「補假」。
+    fn name_makeup_days(&mut self) {
+        let is_weekend = |d: &CalendarDay| weekend_rule(d.date) == DayKind::Holiday;
+        let makeup: Vec<NaiveDate> = self.official.values().filter(|d| d.kind == DayKind::Holiday && !is_weekend(d) && d.note == MAKEUP_NOTE).map(|d| d.date).collect();
+        let festivals: Vec<(NaiveDate, String)> = self
+            .official
+            .values()
+            .filter(|d| d.kind == DayKind::Holiday && is_weekend(d) && !d.note.is_empty() && !d.note.ends_with(MAKEUP_NOTE))
+            .map(|d| (d.date, d.note.clone()))
+            .collect();
+        let mut pairs: Vec<(i64, NaiveDate, usize)> = makeup
+            .iter()
+            .flat_map(|m| festivals.iter().enumerate().map(move |(i, (f, _))| ((*m - *f).num_days().abs(), *m, i)))
+            .filter(|(gap, ..)| *gap <= MAKEUP_MAX_GAP_DAYS)
+            .collect();
+        pairs.sort();
+        let (mut used_days, mut used_festivals) = (BTreeSet::new(), BTreeSet::new());
+        for (_, day, i) in pairs {
+            if used_days.contains(&day) || used_festivals.contains(&i) {
+                continue;
+            }
+            used_days.insert(day);
+            used_festivals.insert(i);
+            if let Some(d) = self.official.get_mut(&day) {
+                d.note = format!("{}{MAKEUP_NOTE}", festivals[i].1);
+            }
         }
     }
 
@@ -214,6 +250,20 @@ mod tests {
         // 1/8 是本來就放的星期日，不列。
         assert_eq!(dates(d(2023, 1, 1)), vec![d(2023, 1, 2), d(2023, 1, 7)]);
         assert_eq!(dates(d(2023, 1, 3)), vec![d(2023, 1, 7)]);
+    }
+
+    #[test]
+    fn makeup_days_say_which_holiday_they_make_up_for() {
+        let mut cal = Calendar::default();
+        for &(_, text) in BUNDLED {
+            cal.add_official(parse_dgpa_csv(text).unwrap());
+        }
+        let note = |y, m, day| cal.note(d(y, m, day)).unwrap_or_default().to_owned();
+        assert_eq!(note(2026, 2, 20), "小年夜補假", "小年夜 falls on a Sunday five days before");
+        assert_eq!((note(2026, 4, 3), note(2026, 4, 6)), ("兒童節補假".into(), "清明節補假".into()), "Saturday → Friday, Sunday → Monday");
+        assert_eq!((note(2027, 2, 9), note(2027, 2, 10)), ("春節補假".into(), "春節補假".into()));
+        assert_eq!(note(2027, 12, 24), "行憲紀念日補假");
+        assert_eq!(note(2027, 12, 31), "補假", "next year's New Year's Day is not published yet");
     }
 
     #[test]
