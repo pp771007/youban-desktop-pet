@@ -36,7 +36,7 @@ function mockBackend(tokens) {
   const LUNAR_MONTHS = ['正月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
   const LUNAR_DAYS = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十', '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
   const db = {
-    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'auto', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'auto', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true } },
+    config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'notice', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'notice', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
@@ -151,7 +151,7 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.config.reminderSound) === false, 'reminder sound switch writes config');
     await page.getByRole('button', { name: '30 分' }).click();
     await page.locator('.section', { hasText: '休息提醒' }).getByRole('button', { name: '要按完成' }).click();
-    check(await page.evaluate(() => { const c = window.__mock.config; return c.restEveryMinutes === 30 && c.restStyle === 'card'; }), 'rest reminder interval and card style write config');
+    check(await page.evaluate(() => { const c = window.__mock.config; return c.restEveryMinutes === 30 && c.restStyle === 'confirm'; }), 'rest reminder interval and card style write config');
     await page.getByRole('checkbox', { name: '休息提醒' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.restReminder) === false && !(await page.getByText('連續用多久').isVisible()), 'turning the rest reminder off hides its options');
     await page.getByRole('checkbox', { name: '全螢幕時照樣跳出來' }).click({ force: true });
@@ -201,7 +201,7 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('#save-btn').click();
     await page.waitForSelector('.drawer:not(.open)');
     const stretch = await page.evaluate(() => window.__mock.file.reminders.find((r) => r.title === '起來伸展一下'));
-    check(stretch && stretch.repeat.kind === 'interval' && stretch.repeat.everyMinutes === 90 && stretch.time === '09:00' && stretch.repeat.until === '18:00' && stretch.style === 'auto', 'template fills an interval reminder that goes away by itself');
+    check(stretch && stretch.repeat.kind === 'interval' && stretch.repeat.everyMinutes === 90 && stretch.time === '09:00' && stretch.repeat.until === '18:00' && stretch.style === 'notice', 'template fills an interval reminder that goes away by itself');
     // 列表上：自己消失的用訊息泡泡圖示、要按完成的用鈴鐺
     const rowIcon = (title) => page.locator('.list-row', { hasText: title }).locator('.row-dot .icon').getAttribute('style');
     check((await rowIcon('起來伸展一下')).includes('message-dots') && (await rowIcon('站起來走走')).includes('bell'), 'list shows a message bubble for go-away reminders and a bell for the rest');
