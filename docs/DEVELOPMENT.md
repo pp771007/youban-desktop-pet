@@ -64,3 +64,8 @@ cargo test                                         # 規則與邏輯（排程、
 node crates/petsettings/ui-tests/settings.test.mjs # 設定畫面（無頭瀏覽器）
 target\debug\Youban.exe --soak 600                # 記憶體曲線要平
 ```
+
+## 排版
+
+Rust 程式用 `cargo fmt` 的預設排版（沒有 `rustfmt.toml`），commit 前跑一次。沒有自動檢查：放進發版流程的話，沒排好會讓推出去的版號發不出來。
+全專案重新排版的 commit 列在 `.git-blame-ignore-revs`，GitHub 的 blame 會自動跳過；本機要跳過的話設一次 `git config blame.ignoreRevsFile .git-blame-ignore-revs`。

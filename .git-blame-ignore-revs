@@ -1,0 +1,5 @@
+# 只改排版、不改行為的 commit：git blame 時跳過（GitHub 自動讀這個檔）。
+# 本機：git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# 排版: 全專案套用 cargo fmt 預設排版
+e2af9cb62ce74480d2ad33bf72b1fd7eab2652ce

@@ -32,6 +32,7 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 
 ## 改完怎麼驗
 
+- **commit 前跑 `cargo fmt`**：沒有自動檢查，漏了不會有人發現（原因見 `docs/DEVELOPMENT.md` 的「排版」）。
 - **改了 `crates/petsettings/ui/` 一定要重新 `cargo build -p petsettings`**：Tauri 把前端打包進執行檔，只改檔案的話實機看到的還是舊版。換了 `crates/petsettings/icons/icon.ico` 則要先 `cargo clean -p petsettings`，不然執行檔圖示不會更新。
 - 程式圖示（柚子）的原圖去背後放在四處：`docs/media/logo.png`（README）、`crates/petsettings/icons/icon.ico`、`crates/petcore/assets/app.ico`（`app.rc` 編進 Youban.exe）、`crates/petsettings/ui/logo.png`（設定側邊欄左下角，64px）。托盤圖示另外用目前這隻桌寵的站姿圖。
 - 看畫面不用動到使用者的螢幕：`Youban.exe --snapshot`（各狀態＋頭上特效）、`--snapshot-cards`（提醒卡、講話泡泡、點心與球）、`--frames`（每個動作 25fps PNG 序列）。
