@@ -231,6 +231,13 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('.drawer:not(.open)');
     check(await page.evaluate(() => window.__mock.file.reminders.length) === 3, 'confirming the dialog deletes');
 
+    // 分頁：一進來是「提醒」；假日、紀念日各在自己的分頁；右上角的新增按鈕跟著分頁換
+    const selectedTab = () => page.locator('[role=tab][aria-selected=true]').getAttribute('id');
+    check(await selectedTab() === 'tab-reminders' && !(await page.getByText('國定假日與補班').isVisible()) && await page.getByText('提醒方式').isVisible(), 'reminders tab comes first, holidays are not on it');
+    await page.locator('#tab-days').click();
+    check(await page.getByText('國定假日與補班').isVisible() && await page.getByRole('button', { name: /^新增/ }).count() === 0, 'holidays tab has no add button at the top');
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-days-tab-light.png') });
+
     // 額外上班／放假日
     await page.locator('input[type=date][aria-label="日期"]').fill('2027-07-29');
     await page.getByRole('button', { name: '加入' }).click();
@@ -254,11 +261,19 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '全部開啟' }).click();
     check(JSON.stringify(Object.keys(await overrides())) === '["2027-07-29"]' && await page.getByRole('button', { name: '全部開啟' }).isDisabled(), 'turn all back on keeps only the own special day');
 
+    // 左右鍵換分頁：從「紀念日」按右鍵到「假日」、再按左鍵回來
+    await page.locator('#tab-anniversaries').click();
+    await page.keyboard.press('ArrowRight');
+    const afterRight = [await selectedTab(), await page.evaluate(() => document.activeElement?.id)];
+    check(afterRight.join() === 'tab-days,tab-days', `arrow keys move between tabs and keep focus on the tab (${afterRight})`);
+    await page.keyboard.press('ArrowLeft');
+    check(await selectedTab() === 'tab-anniversaries' && await page.getByRole('button', { name: '新增紀念日' }).count() === 1 && await page.getByRole('button', { name: '新增提醒' }).count() === 0, 'anniversaries tab puts 新增紀念日 at the top');
+
     // 紀念日：列表看得到農曆日期、滿幾年、什麼時候提醒、還有幾天
     const momRow = page.locator('.list-row', { hasText: '媽媽生日' });
     const momText = await momRow.innerText();
     check(['農曆三月初五', '滿 61 年', '3 天前、當天 09:00', '12', '天後'].every((s) => momText.includes(s)), `anniversary row shows its lunar date, years, alerts and countdown (${momText.replace(/\n/g, ' ')})`);
-    if (shotDir) await page.locator('.section', { hasText: '新增紀念日' }).screenshot({ path: path.join(shotDir, 'anniversaries-light.png') });
+    if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-anniversaries-tab-light.png') });
     // 新增：國曆 2/29、2015 年、三個提醒裡刪掉一個、各自的時間
     await page.getByRole('button', { name: '新增紀念日' }).click();
     await page.waitForFunction(() => document.activeElement?.id === 'anniv-title');
@@ -309,6 +324,9 @@ for (const scheme of ['light', 'dark']) {
     await page.waitForSelector('.drawer:not(.open)');
     check(await page.evaluate(() => window.__mock.file.anniversaries.map((a) => a.title).join()) === '媽媽生日', 'anniversary deleted after confirming');
     await page.waitForFunction(() => document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
+    // 紀念日分頁底下那行帶到「提醒」分頁的提醒方式
+    await page.getByRole('button', { name: '去設定' }).click();
+    check(await selectedTab() === 'tab-reminders' && await page.locator('#reminder-style').isVisible(), '去設定 goes to the reminders tab and its 提醒方式');
 
     // 桌寵：換一隻寫進設定
     await page.locator('.nav-item[data-page="pets"]').click();
@@ -487,9 +505,14 @@ for (const scheme of ['light', 'dark']) {
   await page.locator('.nav-item[data-page="reminders"]').click();
   if (shotDir) await page.screenshot({ path: path.join(shotDir, `settings-reminders-${scheme}.png`) });
   if (shotDir) {
+    await page.locator('#tab-days').click();
+    await page.screenshot({ path: path.join(shotDir, `settings-days-${scheme}.png`) });
     const official = page.locator('.section', { hasText: '國定假日與補班' });
     await official.screenshot({ path: path.join(shotDir, `official-days-${scheme}.png`) });
-    const anniversaries = page.locator('.section', { hasText: '新增紀念日' });
+    await page.locator('#tab-anniversaries').click();
+    await page.locator('#tab-days').hover();
+    await page.screenshot({ path: path.join(shotDir, `settings-anniversaries-${scheme}.png`) });
+    const anniversaries = page.locator('.tab-panel');
     await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-${scheme}.png`) });
     // 其他樣子（只截圖用）：今天就是、暫停中、一筆都沒有。
     await page.evaluate(() => {
@@ -501,6 +524,7 @@ for (const scheme of ['light', 'dark']) {
     await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-today-paused-${scheme}.png`) });
     await page.evaluate(() => { state.file.anniversaries = []; render(); });
     await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-empty-${scheme}.png`) });
+    await page.locator('#tab-days').click();
     await official.getByRole('checkbox').first().click({ force: true });
     await official.getByRole('button', { name: '全部開啟' }).hover();
     await official.screenshot({ path: path.join(shotDir, `official-days-one-off-hover-${scheme}.png`) });

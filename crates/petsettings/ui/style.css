@@ -360,6 +360,61 @@ button, input, select { font: inherit; color: inherit; }
 .tag .icon { width: 13px; height: 13px; }
 .tag-accent { background: var(--color-accent-soft); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); color: var(--color-accent-pressed); }
 
+/* 頁面裡的分頁（提醒頁：提醒／紀念日／假日）：選到的那個底下一條強調色，旁邊小圓圈是幾筆。 */
+.tabs {
+  display: flex;
+  gap: calc(var(--space-1) * 1px);
+  margin-bottom: calc(var(--space-5) * 1px);
+  border-bottom: var(--outline) solid var(--color-border);
+}
+.tabs [role="tab"] {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--space-2) * 1px);
+  height: 44px;
+  padding: 0 calc(var(--space-4) * 1px);
+  border: 0;
+  border-radius: calc(var(--radius-md) * 1px) calc(var(--radius-md) * 1px) 0 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 700;
+  cursor: pointer;
+  transition: color calc(var(--motion-fast) * 1ms), background calc(var(--motion-fast) * 1ms);
+}
+.tabs [role="tab"]:hover { color: var(--color-text); background: var(--color-surface-sunken); }
+.tabs [role="tab"][aria-selected="true"] { color: var(--color-text); }
+.tabs [role="tab"][aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--space-3) * 1px);
+  right: calc(var(--space-3) * 1px);
+  bottom: calc(var(--outline) * -1);
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--color-accent);
+}
+.tab-count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: calc(var(--radius-full) * 1px);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  font-size: calc(var(--font-size-caption) * 1px);
+  font-variant-numeric: tabular-nums;
+}
+.tabs [aria-selected="true"] .tab-count { background: var(--color-accent-soft); color: var(--color-accent-pressed); }
+/* 分頁內容的第一塊緊接在分頁下面，不再多空一段。 */
+.tab-panel > .section:first-child { margin-top: 0; }
+/* 分頁最下面一行小字＋連到別的分頁。 */
+.tab-foot { display: flex; align-items: center; gap: calc(var(--space-2) * 1px); margin-top: calc(var(--space-4) * 1px); padding: 0 calc(var(--space-2) * 1px); color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); }
+.tab-foot .icon { width: 15px; height: 15px; }
+.tab-foot .btn { margin-left: auto; }
+.empty-desc { color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); margin-top: calc(var(--space-2) * -1px); }
+
 /* 區塊標題右邊放整塊一起動的按鈕（全部開啟／全部關閉）。 */
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--space-3) * 1px); margin-bottom: calc(var(--space-3) * 1px); }
 .section-head h2 { margin: 0; }

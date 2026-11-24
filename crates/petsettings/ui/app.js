@@ -57,6 +57,8 @@ const state = {
   page: DEFAULT_PAGE,
   config: null,
   file: { reminders: [], anniversaries: [], dayOverrides: {} },
+  /** 提醒頁停在哪個分頁（`REMINDER_TABS`）。 */
+  reminderTab: null,
   /** 紀念日 id → `anniversary_info`（日期寫法、接下來幾次、還有幾天）。 */
   anniversaryInfo: {},
   /** 農曆月份、日子的寫法（`petkit::anniversary`）。 */
@@ -281,16 +283,70 @@ function featureOff(page, key) {
 
 // ---------- 頁面：提醒 ----------
 
+// 一頁放三個分頁：提醒、紀念日、假日（都屬於「提醒」這個功能，共用標題旁的開關）。
+
+const REMINDER_TABS = [['reminders', '提醒'], ['anniversaries', '紀念日'], ['days', '假日']];
+const DEFAULT_REMINDER_TAB = 'reminders';
+/** 記住上次停在哪個分頁（只是方便，讀不到就回第一個）。 */
+const REMINDER_TAB_KEY = 'reminderTab';
+
+function loadReminderTab() {
+  try {
+    const tab = localStorage.getItem(REMINDER_TAB_KEY);
+    return REMINDER_TABS.some(([id]) => id === tab) ? tab : DEFAULT_REMINDER_TAB;
+  } catch {
+    return DEFAULT_REMINDER_TAB;
+  }
+}
+
+function setReminderTab(tab) {
+  state.reminderTab = tab;
+  try { localStorage.setItem(REMINDER_TAB_KEY, tab); } catch { /* 存不了下次就回第一個 */ }
+  render();
+}
+
+function reminderTabs() {
+  const counts = { reminders: state.file.reminders.length, anniversaries: state.file.anniversaries.length };
+  const ids = REMINDER_TABS.map(([id]) => id);
+  // 換分頁會整頁重畫、按鈕被換掉：焦點要放回新的那顆，不然左右鍵就沒作用了。
+  const select = (id) => {
+    setReminderTab(id);
+    document.getElementById(`tab-${id}`)?.focus();
+  };
+  // 左右鍵換分頁（tablist 的慣例）。
+  const onKey = (e) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+    if (step) select(ids[(ids.indexOf(state.reminderTab) + step + ids.length) % ids.length]);
+  };
+  return h('div', { class: 'tabs', role: 'tablist', 'aria-label': '提醒的分頁' }, REMINDER_TABS.map(([id, label]) => {
+    const on = state.reminderTab === id;
+    return h('button', { type: 'button', role: 'tab', id: `tab-${id}`, 'aria-selected': String(on), tabindex: on ? 0 : -1, onclick: () => select(id), onkeydown: onKey },
+      label, counts[id] ? h('span', { class: 'tab-count' }, String(counts[id])) : null);
+  }));
+}
+
 function renderReminders(page) {
   if (featureOff(page, 'reminders')) return;
+  const tab = state.reminderTab;
+  const add = { reminders: ['新增提醒', () => openEditor(null)], anniversaries: ['新增紀念日', () => openAnniversary(null)] }[tab];
+  page.append(h('div', { class: 'page-head' },
+    featureTitle('reminders'),
+    add ? h('button', { class: 'btn btn-primary', onclick: add[1] }, icon('plus'), add[0]) : null));
+  page.append(reminderTabs());
+  const panel = h('div', { class: 'tab-panel', role: 'tabpanel', 'aria-labelledby': `tab-${tab}` });
+  ({ reminders: renderReminderList, anniversaries: renderAnniversaries, days: renderDays })[tab](panel);
+  page.append(panel);
+}
+
+function renderDays(panel) {
+  panel.append(renderOfficialDays(), renderExtraDays());
+}
+
+function renderReminderList(page) {
   const sorted = state.file.reminders.slice().sort((a, b) => {
     const ta = state.nextTimes[a.id] || '9999', tb = state.nextTimes[b.id] || '9999';
     return (a.enabled === b.enabled ? 0 : a.enabled ? -1 : 1) || ta.localeCompare(tb);
   });
-  page.append(h('div', { class: 'page-head' },
-    featureTitle('reminders'),
-    h('button', { class: 'btn btn-primary', onclick: () => openEditor(null) }, icon('plus'), '新增提醒')));
-
   if (!sorted.length) {
     page.append(h('div', { class: 'card empty' },
       h('img', { src: currentPetImage(), alt: '' }),
@@ -299,8 +355,7 @@ function renderReminders(page) {
   } else {
     page.append(h('div', { class: 'card list' }, sorted.map(reminderRow)));
   }
-  page.append(renderAnniversaries());
-  page.append(h('section', { class: 'section' },
+  page.append(h('section', { class: 'section', id: 'reminder-style' },
     h('h2', {}, '提醒方式'),
     h('div', { class: 'card' },
       settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
@@ -313,7 +368,6 @@ function renderReminders(page) {
       settingRow('連續用電腦太久提醒起來動一動', configSwitch('restReminder', '休息提醒')),
       state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
       state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
-  page.append(renderOfficialDays(), renderExtraDays());
 }
 
 // ---------- 紀念日 ----------
@@ -347,18 +401,25 @@ function countdown(daysLeft) {
   return h('div', { class: 'countdown' }, h('span', { class: 'countdown-num' }, String(daysLeft)), h('span', { class: 'countdown-unit' }, '天後'));
 }
 
-function renderAnniversaries() {
+function renderAnniversaries(page) {
   const list = state.file.anniversaries.slice().sort((a, b) => {
     const da = state.anniversaryInfo[a.id]?.daysLeft ?? Infinity, db = state.anniversaryInfo[b.id]?.daysLeft ?? Infinity;
     return (a.enabled === b.enabled ? 0 : a.enabled ? -1 : 1) || da - db;
   });
-  return h('section', { class: 'section' },
-    h('div', { class: 'section-head' },
-      h('h2', {}, '紀念日'),
-      h('button', { class: 'btn btn-secondary btn-small', onclick: () => openAnniversary(null) }, icon('plus'), '新增紀念日')),
-    h('div', { class: 'card list' }, list.length
-      ? list.map(anniversaryRow)
-      : h('div', { class: 'list-row list-note' }, icon('cake'), '記下生日、紀念日（農曆也可以），時間到桌寵會提醒你')));
+  page.append(list.length
+    ? h('div', { class: 'card list' }, list.map(anniversaryRow))
+    : h('div', { class: 'card empty' },
+      h('img', { src: currentPetImage(), alt: '' }),
+      h('div', { class: 'empty-title' }, '還沒有紀念日'),
+      h('div', { class: 'empty-desc' }, '生日、紀念日記一次，每年都會提醒，農曆也可以'),
+      h('button', { class: 'btn btn-primary', onclick: () => openAnniversary(null) }, icon('plus'), '新增紀念日')));
+  // 提醒音、全螢幕時要不要跳出來跟一般提醒共用，設定只放在「提醒」分頁。
+  page.append(h('div', { class: 'tab-foot' },
+    icon('bell'), '提醒音與全螢幕時要不要跳出來，跟一般提醒共用',
+    h('button', { class: 'btn btn-ghost btn-small', onclick: () => {
+      setReminderTab('reminders');
+      document.getElementById('reminder-style')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } }, '去設定', icon('chevron-right'))));
 }
 
 function anniversaryRow(a) {
@@ -1385,8 +1446,10 @@ async function pollCore() {
 
 async function main() {
   applyTokens(await invoke('tokens'));
-  const [config, constants, pets] = await Promise.all([invoke('load_config'), invoke('constants'), invoke('list_pets')]);
+  const [config, constants, pets, initialPage] = await Promise.all([invoke('load_config'), invoke('constants'), invoke('list_pets'), invoke('initial_page')]);
   state.config = config;
+  // 從右鍵選單「新增提醒…」打開的固定停在「提醒」分頁，其他時候回到上次那個（在第一次畫畫面之前定好）。
+  state.reminderTab = initialPage === 'reminders' ? DEFAULT_REMINDER_TAB : loadReminderTab();
   state.sizes = constants.sizes;
   state.lunarMonths = constants.lunarMonths;
   state.lunarDays = constants.lunarDays;
@@ -1410,7 +1473,7 @@ async function main() {
     }
   });
   await pollCore();
-  await go((await invoke('initial_page')) || DEFAULT_PAGE);
+  await go(initialPage || DEFAULT_PAGE);
   setInterval(pollCore, CORE_POLL_MS);
   setInterval(tickPlayers, PLAYER_TICK_MS);
 }
