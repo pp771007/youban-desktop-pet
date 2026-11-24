@@ -475,7 +475,7 @@ function drawAnniversary(drawer, ed) {
         }),
         h('div', { class: 'row' }, monthSelect, daySelect,
           lunar ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!a.date.leap, onchange: (e) => { a.date.leap = e.target.checked; redraw(); } }), '閏月') : null)),
-      field('哪一年（選填）', h('input', { id: 'anniv-year', class: 'input input-number', type: 'number', min: 1901, max: 2100, placeholder: '例：1966', value: a.year ?? '',
+      field('哪一年（選填）', h('input', { id: 'anniv-year', class: 'input input-year', type: 'number', min: 1901, max: 2100, placeholder: '例：1966', value: a.year ?? '',
         onchange: (e) => { const y = Number(e.target.value); a.year = e.target.value && y >= 1901 && y <= 2100 ? y : null; refreshAnniversaryPreview(ed); } }), 'anniv-year'),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '提醒'),
         h('div', { class: 'alert-list' }, a.alerts.map(alertRow)),

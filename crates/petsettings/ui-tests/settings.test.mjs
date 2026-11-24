@@ -270,6 +270,20 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('combobox', { name: '月' }).selectOption('2');
     check(await page.getByRole('combobox', { name: '日' }).locator('option').count() === 29, 'February offers up to the 29th');
     await page.getByRole('combobox', { name: '日' }).selectOption('29');
+    const yearField = page.locator('.field', { has: page.locator('#anniv-year') });
+    if (shotDir) {
+      // 年份欄位的每種樣子（淺色、深色）：空的、滑鼠移上去（出現上下箭頭）、打字中。
+      for (const scheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await yearField.screenshot({ path: path.join(shotDir, `year-empty-${scheme}.png`) });
+        await page.locator('#anniv-year').hover();
+        await yearField.screenshot({ path: path.join(shotDir, `year-hover-${scheme}.png`) });
+        await page.locator('#anniv-year').fill('2015');
+        await yearField.screenshot({ path: path.join(shotDir, `year-typing-${scheme}.png`) });
+        await page.locator('#anniv-year').fill('');
+      }
+      await page.emulateMedia({ colorScheme: 'light' });
+    }
     await page.locator('#anniv-year').fill('2015');
     await page.locator('#anniv-year').blur();
     await page.getByRole('combobox', { name: '第 1 個提醒提前幾天' }).selectOption('7');

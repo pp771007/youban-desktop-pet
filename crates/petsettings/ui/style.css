@@ -232,6 +232,8 @@ button, input, select { font: inherit; color: inherit; }
 .input::placeholder { color: var(--color-text-disabled); }
 .input-time { width: 140px; }
 .input-number { width: 88px; }
+/* 四位數年份＋右邊的上下箭頭：88px 會把字擠掉，跟時間欄位一樣寬。 */
+.input-year { width: 140px; }
 .input-name { width: 200px; }
 
 .row { display: flex; align-items: center; gap: calc(var(--space-2) * 1px); flex-wrap: wrap; }
