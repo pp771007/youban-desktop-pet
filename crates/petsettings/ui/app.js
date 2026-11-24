@@ -57,6 +57,8 @@ const state = {
   page: DEFAULT_PAGE,
   config: null,
   file: { reminders: [], dayOverrides: {} },
+  /** 從今天起官方日曆裡的國定假日、補班（`petkit::holidays::CalendarDay`）。 */
+  officialDays: [],
   nextTimes: {},
   pets: [],
   sizes: [],
@@ -200,7 +202,7 @@ function applyTokens(tokens) {
 // ---------- 資料 ----------
 
 async function loadReminders() {
-  state.file = await invoke('load_reminders');
+  [state.file, state.officialDays] = await Promise.all([invoke('load_reminders'), invoke('official_days')]);
   state.file.dayOverrides = state.file.dayOverrides || {};
   await refreshNextTimes();
 }
@@ -302,7 +304,59 @@ function renderReminders(page) {
       settingRow('連續用電腦太久提醒起來動一動', configSwitch('restReminder', '休息提醒')),
       state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
       state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
-  page.append(renderSpecialDays());
+  page.append(renderOfficialDays(), renderSpecialDays());
+}
+
+// ---------- 國定假日與補班 ----------
+// 開著 = 照官方日曆；關掉 = 在 dayOverrides 寫成平常那樣（國定假日照常上班、補班照常放假）。
+
+const opposite = (kind) => (kind === 'holiday' ? 'workday' : 'holiday');
+const officialOn = (d) => (state.file.dayOverrides[d.date] ?? d.kind) === d.kind;
+const isOfficialDate = (date) => state.officialDays.some((d) => d.date === date);
+
+async function setOfficialDays(days, on) {
+  for (const d of days) {
+    if (on) delete state.file.dayOverrides[d.date];
+    else state.file.dayOverrides[d.date] = opposite(d.kind);
+  }
+  await saveReminders();
+  render();
+}
+
+function renderOfficialDays() {
+  const days = state.officialDays;
+  const onCount = days.filter(officialOn).length;
+  const byYear = Map.groupBy(days, (d) => d.date.slice(0, 4));
+  return h('section', { class: 'section' },
+    h('div', { class: 'section-head' },
+      h('h2', {}, '國定假日與補班'),
+      days.length ? h('div', { class: 'section-actions' },
+        h('button', { class: 'btn btn-ghost btn-small', disabled: onCount === days.length, onclick: () => setOfficialDays(days, true) }, icon('check'), '全部開啟'),
+        h('button', { class: 'btn btn-ghost btn-small', disabled: onCount === 0, onclick: () => setOfficialDays(days, false) }, icon('x'), '全部關閉')) : null),
+    days.length
+      ? h('div', { class: 'card list' }, [...byYear].flatMap(([year, list]) => [h('div', { class: 'list-year' }, `${year} 年`), ...list.map(officialRow)]))
+      : h('div', { class: 'card list' }, h('div', { class: 'list-row list-note' }, icon('calendar-off'), '接下來沒有國定假日，新的行事曆公布後會自動出現')));
+}
+
+function officialRow(d) {
+  const on = officialOn(d);
+  const holiday = d.kind === 'holiday';
+  const date = parseDate(d.date);
+  const name = d.note || (holiday ? '放假' : '補班');
+  return h('div', { class: `list-row day-row${on ? '' : ' off'}` },
+    h('div', { class: `date-tile${holiday ? '' : ' work'}`, 'aria-hidden': 'true' },
+      h('span', { class: 'date-tile-month' }, `${date.getMonth() + 1} 月`),
+      h('span', { class: 'date-tile-day' }, String(date.getDate()))),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', title: name }, name),
+      h('div', { class: 'row-meta' },
+        h('span', {}, `星期${WEEKDAYS[isoWeekday(date) - 1]}`),
+        on
+          ? h('span', { class: `tag${holiday ? ' tag-accent' : ''}` }, holiday ? '放假' : '補班')
+          : h('span', { class: 'tag tag-off' }, holiday ? '照常上班' : '照常放假'))),
+    h('label', { class: 'switch' },
+      h('input', { type: 'checkbox', checked: on, 'aria-label': `${shortDate(d.date)} ${name}`, onchange: (e) => setOfficialDays([d], e.target.checked) }),
+      h('span')));
 }
 
 function reminderRow(r) {
@@ -322,7 +376,8 @@ function reminderRow(r) {
 }
 
 function renderSpecialDays() {
-  const entries = Object.entries(state.file.dayOverrides).sort(([a], [b]) => a.localeCompare(b));
+  // 國定假日、補班那幾天在上面那塊開關，這裡只列使用者自己加的。
+  const entries = Object.entries(state.file.dayOverrides).filter(([date]) => !isOfficialDate(date)).sort(([a], [b]) => a.localeCompare(b));
   const draft = { date: isoDate(new Date()), kind: 'holiday' };
   const kindPicker = h('div');
   const drawKind = () => { kindPicker.replaceChildren(segmented(DAY_KINDS, draft.kind, (v) => { draft.kind = v; drawKind(); })); };

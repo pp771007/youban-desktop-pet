@@ -57,6 +57,12 @@ function mockBackend(tokens) {
     save_config: ({ config }) => { db.config = structuredClone(config); },
     load_reminders: () => structuredClone(db.file),
     save_reminders: ({ file }) => { db.file = structuredClone(file); },
+    official_days: () => [
+      { date: '2026-12-25', kind: 'holiday', note: '行憲紀念日' },
+      { date: '2027-01-01', kind: 'holiday', note: '開國紀念日' },
+      { date: '2027-02-20', kind: 'workday', note: '補行上班' },
+      { date: '2027-10-25', kind: 'holiday', note: '臺灣光復暨金門古寧頭大捷紀念日' },
+    ],
     preview: ({ reminder }) => {
       if (reminder.holiday === 'skip') {
         return [{ kind: 'skipped', date: '2027-01-01', note: '開國紀念日' }, { kind: 'fire', at: '2027-01-04T09:00:00', movedFrom: null, note: null }];
@@ -217,6 +223,23 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('input[type=date][aria-label="日期"]').fill('2027-07-29');
     await page.getByRole('button', { name: '加入' }).click();
     check(await page.evaluate(() => window.__mock.file.dayOverrides['2027-07-29']) === 'holiday', 'special day saved as holiday');
+
+    // 國定假日與補班：一天一個開關，關掉 = 照平常；全部關閉／全部開啟；關掉的不會跑到下面「特別日子」
+    const overrides = () => page.evaluate(() => window.__mock.file.dayOverrides);
+    const daySwitch = (name) => page.getByRole('checkbox', { name });
+    check(await page.locator('.list-year').allInnerTexts().then((t) => t.join()) === '2026 年,2027 年', 'official days are grouped by year');
+    await daySwitch('12/25（五） 行憲紀念日').click({ force: true });
+    await daySwitch('2/20（六） 補行上班').click({ force: true });
+    const o = await overrides();
+    check(o['2026-12-25'] === 'workday' && o['2027-02-20'] === 'holiday', 'turning a holiday off makes it a workday, a make-up day a day off');
+    check(await page.locator('.day-row.off .tag-off').allInnerTexts().then((t) => t.join()) === '照常上班,照常放假', 'a day turned off says what happens instead');
+    check(!(await page.locator('.section', { hasText: '特別日子' }).last().innerText()).includes('12/25'), 'days turned off stay out of the special days list');
+    if (shotDir) await page.locator('.section', { hasText: '國定假日與補班' }).screenshot({ path: path.join(shotDir, 'official-days-some-off-light.png') });
+    await page.getByRole('button', { name: '全部關閉' }).click();
+    check(Object.keys(await overrides()).length === 5 && await page.getByRole('button', { name: '全部關閉' }).isDisabled(), 'turn all off');
+    if (shotDir) await page.locator('.section', { hasText: '國定假日與補班' }).screenshot({ path: path.join(shotDir, 'official-days-all-off-light.png') });
+    await page.getByRole('button', { name: '全部開啟' }).click();
+    check(JSON.stringify(Object.keys(await overrides())) === '["2027-07-29"]' && await page.getByRole('button', { name: '全部開啟' }).isDisabled(), 'turn all back on keeps only the own special day');
 
     // 桌寵：換一隻寫進設定
     await page.locator('.nav-item[data-page="pets"]').click();
@@ -394,6 +417,13 @@ for (const scheme of ['light', 'dark']) {
 
   await page.locator('.nav-item[data-page="reminders"]').click();
   if (shotDir) await page.screenshot({ path: path.join(shotDir, `settings-reminders-${scheme}.png`) });
+  if (shotDir) {
+    const official = page.locator('.section', { hasText: '國定假日與補班' });
+    await official.screenshot({ path: path.join(shotDir, `official-days-${scheme}.png`) });
+    await official.getByRole('checkbox').first().click({ force: true });
+    await official.getByRole('button', { name: '全部開啟' }).hover();
+    await official.screenshot({ path: path.join(shotDir, `official-days-one-off-hover-${scheme}.png`) });
+  }
   check(errors.length === 0, `no page errors (${scheme}) ${errors.join(' | ')}`);
   await ctx.close();
 }

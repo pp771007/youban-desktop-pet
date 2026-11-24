@@ -138,6 +138,13 @@ fn preview(reminder: Reminder, overrides: BTreeMap<NaiveDate, DayKind>) -> Vec<P
     reminder.preview(chrono::Local::now().naive_local(), &cal, PREVIEW_COUNT)
 }
 
+/// 從今天起官方日曆裡跟平常不一樣的日子（國定假日、補班），給提醒頁一天一天開關。
+#[tauri::command]
+fn official_days() -> Vec<holidays::CalendarDay> {
+    let (cal, _) = holidays::load_calendar(&paths::holiday_cache_dir(), BTreeMap::new());
+    cal.official_changes(chrono::Local::now().date_naive()).cloned().collect()
+}
+
 #[tauri::command]
 fn list_pets() -> Vec<PetInfo> {
     let Some(dir) = paths::pets_dir() else { return Vec::new() };
@@ -497,6 +504,7 @@ fn main() {
             load_reminders,
             save_reminders,
             preview,
+            official_days,
             list_pets,
             window_layout,
             core_running,

@@ -32,7 +32,8 @@ pub enum DayKind {
     Holiday,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarDay {
     pub date: NaiveDate,
     pub kind: DayKind,
@@ -77,6 +78,14 @@ pub fn parse_dgpa_csv(text: &str) -> Result<Vec<CalendarDay>, ParseError> {
     Ok(days)
 }
 
+/// 沒有官方日曆時的規則：週末放假、平日上班。
+fn weekend_rule(date: NaiveDate) -> DayKind {
+    match date.weekday() {
+        Weekday::Sat | Weekday::Sun => DayKind::Holiday,
+        _ => DayKind::Workday,
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Calendar {
     official: BTreeMap<NaiveDate, CalendarDay>,
@@ -105,13 +114,13 @@ impl Calendar {
         if let Some(k) = self.overrides.get(&date) {
             return *k;
         }
-        if let Some(d) = self.official.get(&date) {
-            return d.kind;
-        }
-        match date.weekday() {
-            Weekday::Sat | Weekday::Sun => DayKind::Holiday,
-            _ => DayKind::Workday,
-        }
+        self.official.get(&date).map_or_else(|| weekend_rule(date), |d| d.kind)
+    }
+
+    /// `from` 當天起，官方日曆跟「週末放假」不一樣的日子（平日放的國定假日、要上班的週末），照日期排。
+    /// 設定程式列給使用者一天一天開關（關掉 = 覆寫成週末規則那樣）。
+    pub fn official_changes(&self, from: NaiveDate) -> impl Iterator<Item = &CalendarDay> {
+        self.official.range(from..).map(|(_, d)| d).filter(|d| d.kind != weekend_rule(d.date))
     }
 
     pub fn is_workday(&self, date: NaiveDate) -> bool {
@@ -195,6 +204,16 @@ mod tests {
         assert!(!cal.is_workday(d(2023, 1, 3)));
         assert_eq!(cal.workday_on_or_after(d(2023, 1, 2)), Some(d(2023, 1, 4)));
         assert_eq!(cal.workday_on_or_before(d(2023, 1, 8)), Some(d(2023, 1, 7)));
+    }
+
+    #[test]
+    fn lists_only_days_that_differ_from_the_weekend_rule_from_a_date_on() {
+        let mut cal = Calendar::default();
+        cal.add_official(parse_dgpa_csv(SAMPLE).unwrap());
+        let dates = |from| cal.official_changes(from).map(|d| d.date).collect::<Vec<_>>();
+        // 1/8 是本來就放的星期日，不列。
+        assert_eq!(dates(d(2023, 1, 1)), vec![d(2023, 1, 2), d(2023, 1, 7)]);
+        assert_eq!(dates(d(2023, 1, 3)), vec![d(2023, 1, 7)]);
     }
 
     #[test]
