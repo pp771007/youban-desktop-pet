@@ -244,7 +244,7 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.file.dayOverrides['2027-07-29']) === 'holiday', 'extra day saved as a day off');
     check((await page.locator('.section', { hasText: '額外上班／放假日' }).innerText()).includes('放假'), 'extra day listed as 放假');
 
-    // 國定假日與補班：一天一個開關，關掉 = 照平常；全部關閉／全部開啟；關掉的不會跑到下面「額外上班／放假日」
+    // 國定假日與補班：一天一個開關，關掉 = 照平常；全部關閉／全部開啟；關掉的不會跑到上面「額外上班／放假日」
     const overrides = () => page.evaluate(() => window.__mock.file.dayOverrides);
     const daySwitch = (name) => page.getByRole('checkbox', { name });
     check(await page.locator('.list-year').allInnerTexts().then((t) => t.join()) === '2026 年,2027 年', 'official days are grouped by year');

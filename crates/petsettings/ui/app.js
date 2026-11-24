@@ -339,7 +339,7 @@ function renderReminders(page) {
 }
 
 function renderDays(panel) {
-  panel.append(renderOfficialDays(), renderExtraDays());
+  panel.append(renderExtraDays(), renderOfficialDays());
 }
 
 function renderReminderList(page) {
@@ -632,7 +632,7 @@ function reminderRow(r) {
 }
 
 function renderExtraDays() {
-  // 國定假日、補班那幾天在上面那塊開關，這裡只列使用者自己加的額外上班／放假日。
+  // 國定假日、補班那幾天在下面那塊開關，這裡只列使用者自己加的額外上班／放假日。
   const entries = Object.entries(state.file.dayOverrides).filter(([date]) => !isOfficialDate(date)).sort(([a], [b]) => a.localeCompare(b));
   const draft = { date: isoDate(new Date()), kind: 'holiday' };
   const kindPicker = h('div');
