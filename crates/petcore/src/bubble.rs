@@ -37,7 +37,8 @@ const SPEECH_MAX_LINES: f32 = 3.0;
 /// 排平均時每次縮窄多少。
 const SPEECH_BALANCE_STEP_DIP: f32 = 6.0;
 
-#[derive(Debug, Clone, PartialEq)]
+/// 要按完成的卡（`needs_done`）由核心存進狀態檔，重開再跳，所以要能存讀。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Card {
     /// `icon`：左邊那格的圖示（一般提醒是鈴鐺、休息提醒是杯子）。
     Reminder { title: String, time: String, snooze_open: bool, icon: Icon },
@@ -56,9 +57,15 @@ impl Card {
     fn tap_to_dismiss(&self) -> bool {
         matches!(self, Card::Info { .. } | Card::Speech { .. } | Card::Nudge { .. })
     }
+
+    /// 要使用者按掉才算數的卡（要按完成的提醒、錯過的提醒）：沒按就關掉柚伴的話，重開再跳。
+    /// 新版本的卡由更新那邊每次啟動重新判斷，不在這裡。
+    pub fn needs_done(&self) -> bool {
+        matches!(self, Card::Reminder { .. } | Card::Missed { .. })
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Tone {
     Success,
     Warning,

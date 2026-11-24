@@ -72,6 +72,10 @@ pub trait Module {
     fn session(&self, _now: NaiveDateTime) -> Option<Session> {
         None
     }
+    /// 柚伴重開後，核心把上次還沒按掉的卡（要按完成的那種，核心統一存）交回給丟出它的模組：
+    /// 回傳要重新跳的卡（可以換成最新的內容），`None` = 不用再跳（那筆提醒刪掉了之類）。
+    /// 刻意不給預設：每個模組都要想清楚自己的卡重開後該怎樣；模組其他要跨重開的狀態自己存檔。
+    fn restore_card(&mut self, key: &str, card: Card, now: NaiveDateTime) -> Option<Card>;
 }
 
 /// 專注模組現在在哪一段、還剩多久。
@@ -160,6 +164,13 @@ impl ModuleHost {
         self.modules.iter().find_map(|m| m.session(now))
     }
 
+    /// 上次沒按掉的卡交給丟出它的模組；那個模組還在、也還要這張卡才回傳（連同模組 id）。
+    pub fn restore_card(&mut self, owner: &str, key: &str, card: Card, now: NaiveDateTime) -> Option<(&'static str, Card)> {
+        let m = self.modules.iter_mut().find(|m| m.id() == owner)?;
+        let id = m.id();
+        m.restore_card(key, card, now).map(|c| (id, c))
+    }
+
     /// 選單編號 → 交給對應的模組。
     pub fn menu_clicked(&mut self, menu_id: u32, now: NaiveDateTime, config: &Config, out: &mut Vec<(&'static str, Request)>) {
         let Some(offset) = menu_id.checked_sub(MENU_BASE) else { return };
@@ -204,6 +215,9 @@ mod tests {
         fn tick(&mut self, _ctx: &mut Ctx) {
             panic!("broken");
         }
+        fn restore_card(&mut self, _key: &str, _card: Card, _now: NaiveDateTime) -> Option<Card> {
+            None
+        }
     }
 
     struct Fine(u32);
@@ -217,6 +231,9 @@ mod tests {
         fn tick(&mut self, ctx: &mut Ctx) {
             self.0 += 1;
             ctx.info("tick", None);
+        }
+        fn restore_card(&mut self, _key: &str, card: Card, _now: NaiveDateTime) -> Option<Card> {
+            Some(card)
         }
         fn menu(&self, _now: NaiveDateTime, _config: &Config) -> Vec<(u32, String, Icon)> {
             vec![(3, "做事".into(), Icon::Check)]

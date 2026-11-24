@@ -32,7 +32,7 @@ use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platfor
 use crate::toy::{self, Toy, ToyKind, ToyPainter};
 use crate::glow::{GlowPainter, GlowStyle};
 use crate::area_editor::{AreaEditor, AreaInput, AreaKind, AreaPreview, Outcome};
-use crate::chatter::{self, Chatter, Say};
+use crate::chatter::{self, Chatter, ChatterSaved, Moment, Say};
 use crate::platforms;
 use crate::bubble::{self, Bubble, Card, CardAction, Pointer};
 use crate::effects::Effects;
@@ -139,6 +139,8 @@ const PRESENT_IDLE_SECS: f32 = 60.0;
 /// 第一天、紀念日的話：開機後至少等這麼久（先讓牠打完招呼），泡泡顯示久一點。
 const MILESTONE_AFTER_SECS: f64 = 10.0;
 const MILESTONE_SAY_SECS: f32 = 6.0;
+/// 狀態檔固定多久存一次（連續使用時間一直在走；存的時間也拿來判斷關了多久）。
+const STATE_SAVE_SECS: f64 = 60.0;
 /// 剛被取名字時那句話顯示幾秒。
 const NAMED_SAY_SECS: f32 = 5.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
@@ -217,13 +219,44 @@ fn push(event: Event) {
     });
 }
 
-/// 核心自己的執行狀態（設定程式不碰）。
+/// 核心自己的執行狀態（設定程式不碰）：重開柚伴之後還要記得的都放這裡，`save_state` 一個地方存。
+/// 新增會跨時間的狀態（等待中、今天做過、累計多久）先想：重開之後該不該還在？該 → 放這裡。
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 struct RuntimeState {
     position: Option<(i32, i32)>,
-    /// 上次打招呼是哪一天（重開桌寵同一天不再打一次）。
+    /// 講話那邊的（打招呼、今天講過的時間點、連續使用時間）；攤平是為了沿用舊檔的 `greeted_on`。
+    #[serde(flatten)]
+    chatter: ChatterSaved,
+    /// 今天的陪伴紀念日還沒慶祝（在等桌寵有空）：當天重開也要補上。
+    milestone: Option<(chrono::NaiveDate, u32)>,
+    /// 還沒按掉的卡（`Card::needs_done`）：重開時交回給丟出它的功能決定要不要再跳（`Module::restore_card`）。
+    cards: Vec<SavedCard>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SavedCard {
+    owner: String,
+    key: String,
+    card: Card,
+}
+
+/// 狀態檔裡一變就要馬上存的部分；連續使用時間這種一直在走的照 `STATE_SAVE_SECS` 存。
+#[derive(PartialEq)]
+struct StateMarks {
+    cards: Vec<SavedCard>,
     greeted_on: Option<chrono::NaiveDate>,
+    moments_day: Option<chrono::NaiveDate>,
+    moments_done: Vec<Moment>,
+    milestone: Option<(chrono::NaiveDate, u32)>,
+}
+
+/// 核心自己丟的卡，卡片的主人寫這個（模組的卡寫模組代號）。
+const CORE_OWNER: &str = "core";
+
+/// 核心自己丟的卡重開後要不要再跳：休息提醒要（跟一般提醒一樣，沒按掉不會因為重開就不見）；「看看樣子」的範例卡不用。
+fn restore_core_card(key: &str, card: Card) -> Option<Card> {
+    (key == REST_CARD_KEY).then_some(card)
 }
 
 /// 正在講的話。
@@ -306,8 +339,8 @@ struct App {
     /// (日期, 那天要不要上班)：一天算一次，日曆不常駐記憶體。
     workday: Option<(chrono::NaiveDate, bool)>,
     companions: CompanionFile,
-    /// 今天剛好是第一天或紀念日，等牠有空（沒在講別的、沒有提醒卡）再講。
-    pending_milestone: Option<u32>,
+    /// 今天剛好是第一天或紀念日，等牠有空（沒在講別的、沒有提醒卡）再講：(哪一天, 第幾天)。
+    pending_milestone: Option<(chrono::NaiveDate, u32)>,
     /// 上次看到站著的視窗在移動。
     last_ride_move: f64,
     toy: Option<ToySlot>,
@@ -329,6 +362,9 @@ struct App {
     area_preview: Option<AreaPreview>,
     /// 上次寫給設定程式的專注狀態；外層 `None` = 還沒寫過（剛啟動要先清掉上一次留下的檔）。
     focus_written: Option<Option<FocusStatus>>,
+    /// 上次存狀態檔時那些「一變就存」的值、什麼時候存的。
+    saved_marks: Option<StateMarks>,
+    last_state_save: f64,
 }
 
 pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
@@ -360,7 +396,9 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
     let wic = Wic::new()?;
     let renderer = PetRenderer::new(&gfx)?;
 
-    let runtime: RuntimeState = load_json(&paths::state_file()).unwrap_or_default();
+    let mut runtime: RuntimeState = load_json(&paths::state_file()).unwrap_or_default();
+    let saved_cards = std::mem::take(&mut runtime.cards);
+    let today = local_now().date();
     let primary_monitor = unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) };
     let primary = work_area(primary_monitor);
     let base_height = config.size_dip as f32 * monitor_dpi(primary_monitor) as f32 / BASE_DPI as f32;
@@ -416,11 +454,11 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         // `rand01`（取高位元）會一直挑到第一種點心／球。
         rng: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1,
         soak: soak_secs.map(|s| Soak::new(s, 0.0)),
-        chatter: Chatter::new(0.0, seed.rotate_left(17), runtime.greeted_on),
+        chatter: Chatter::new(0.0, seed.rotate_left(17), runtime.chatter, local_now()),
         speech: None,
         workday: None,
         companions: load_companions(),
-        pending_milestone: None,
+        pending_milestone: runtime.milestone.filter(|(day, _)| *day == today),
         last_ride_move: f64::NEG_INFINITY,
         toy: None,
         toy_hwnd,
@@ -435,8 +473,11 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         menu_pets: Vec::new(),
         focus_written: None,
         area_preview: None,
+        saved_marks: None,
+        last_state_save: f64::NEG_INFINITY,
     };
     app.resize_window()?;
+    app.restore_cards(saved_cards);
     if after_update {
         app.enqueue("core", "info".into(), Card::success(format!("已更新到 {}", env!("CARGO_PKG_VERSION")), None));
     }
@@ -1661,7 +1702,6 @@ impl App {
         self.apply(out);
 
         let ctx = self.talk_ctx(now);
-        let greeted = self.chatter.greeted_on();
         if let Some(say) = self.chatter.tick(&ctx) {
             self.say(say, now);
         }
@@ -1685,12 +1725,13 @@ impl App {
                 Style::Card => Card::Reminder { title: text, time, snooze_open: false, icon: REST_CARD_ICON },
                 Style::Auto => Card::Nudge { title: text, time, icon: REST_CARD_ICON },
             };
-            self.enqueue("core", REST_CARD_KEY.into(), card);
-        }
-        if self.chatter.greeted_on() != greeted {
-            self.save_state();
+            self.enqueue(CORE_OWNER, REST_CARD_KEY.into(), card);
         }
         self.count_day(now);
+        // 卡片、講過的話、等著慶祝的天數一變就存（隨時可能被關掉）；其他照固定間隔存。
+        if self.saved_marks.as_ref() != Some(&self.state_marks()) || now - self.last_state_save >= STATE_SAVE_SECS {
+            self.save_state();
+        }
 
         if let Some(leak) = self.memwatch.tick(Instant::now()) {
             self.memory_alert(&leak);
@@ -1885,7 +1926,7 @@ impl App {
                     log!("save companion failed: {e}");
                 }
                 if days == 1 || companion::is_milestone(days) {
-                    self.pending_milestone = Some(days);
+                    self.pending_milestone = Some((today, days));
                 }
             }
         }
@@ -1894,7 +1935,7 @@ impl App {
         if !free {
             return;
         }
-        let Some(days) = self.pending_milestone.take() else { return };
+        let Some((_, days)) = self.pending_milestone.take() else { return };
         self.pet.cheer(now);
         self.effects.spawn(Emote::Star, now);
         if self.config.talk != Talk::Never {
@@ -2119,10 +2160,72 @@ impl App {
     }
 
     fn save_state(&mut self) {
-        let state = RuntimeState { position: Some((self.pet.x.round() as i32, self.pet.y.round() as i32)), greeted_on: self.chatter.greeted_on() };
+        let now = self.now();
+        let state = RuntimeState {
+            position: Some((self.pet.x.round() as i32, self.pet.y.round() as i32)),
+            chatter: self.chatter.saved(now, local_now()),
+            milestone: self.pending_milestone,
+            cards: self.saved_cards(),
+        };
         let result = serde_json::to_vec_pretty(&state).map_err(std::io::Error::other).and_then(|b| write_atomic(&paths::state_file(), &b));
         if let Err(e) = result {
             log!("save state failed: {e}");
         }
+        self.saved_marks = Some(self.state_marks());
+        self.last_state_save = now;
+    }
+
+    /// 佇列裡要按完成的卡（「稍後」的選項打開著的話存成收起來的樣子）。
+    fn saved_cards(&self) -> Vec<SavedCard> {
+        self.cards
+            .iter()
+            .filter(|q| q.card.needs_done())
+            .map(|q| {
+                let mut card = q.card.clone();
+                if let Card::Reminder { snooze_open, .. } = &mut card {
+                    *snooze_open = false;
+                }
+                SavedCard { owner: q.owner.to_owned(), key: q.key.clone(), card }
+            })
+            .collect()
+    }
+
+    fn state_marks(&self) -> StateMarks {
+        let c = self.chatter.saved(self.now(), local_now());
+        StateMarks { cards: self.saved_cards(), greeted_on: c.greeted_on, moments_day: c.moments_day, moments_done: c.moments_done, milestone: self.pending_milestone }
+    }
+
+    /// 剛開起來：上次沒按掉的卡交回給丟出它的功能，它說還要（可能換成最新的內容）才再跳。
+    fn restore_cards(&mut self, saved: Vec<SavedCard>) {
+        let now = local_now();
+        for s in saved {
+            let restored = if s.owner == CORE_OWNER {
+                restore_core_card(&s.key, s.card).map(|c| (CORE_OWNER, c))
+            } else {
+                self.modules.restore_card(&s.owner, &s.key, s.card, now)
+            };
+            match restored {
+                Some((owner, card)) => self.enqueue(owner, s.key, card),
+                None => log!("not restoring card {}:{}", s.owner, s.key),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_file_keeps_old_fields_and_round_trips_unhandled_cards() {
+        // 舊版只存了位置和打招呼的日子：照樣讀得懂。
+        let old: RuntimeState = serde_json::from_str(r#"{ "position": [1, 2], "greeted_on": "2026-11-24" }"#).unwrap();
+        assert_eq!((old.position, old.chatter.greeted_on), (Some((1, 2)), chrono::NaiveDate::from_ymd_opt(2026, 11, 24)));
+        let card = Card::Reminder { title: "休息一下".into(), time: "15:20".into(), snooze_open: false, icon: REST_CARD_ICON };
+        let state = RuntimeState { cards: vec![SavedCard { owner: CORE_OWNER.into(), key: REST_CARD_KEY.into(), card: card.clone() }], ..old };
+        let back: RuntimeState = serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(back.cards, state.cards);
+        assert_eq!(restore_core_card(REST_CARD_KEY, card.clone()), Some(card.clone()), "an unhandled rest reminder comes back");
+        assert_eq!(restore_core_card("test", card), None, "the sample card does not");
     }
 }

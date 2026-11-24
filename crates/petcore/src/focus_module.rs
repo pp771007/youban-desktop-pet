@@ -165,6 +165,11 @@ impl Module for FocusModule {
         let s = self.status()?;
         Some(Session { focusing: s.focusing, secs_left: s.secs_left(now), minutes_left: s.minutes_left(now), until: s.until, round: s.round })
     }
+
+    /// 換段的卡（「休息一下吧」「休息結束囉」）重開照樣再跳：進度本來就接著跑（`resume`）。
+    fn restore_card(&mut self, _key: &str, card: Card, _now: NaiveDateTime) -> Option<Card> {
+        Some(card)
+    }
 }
 
 #[cfg(test)]

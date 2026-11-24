@@ -4,8 +4,8 @@
 //! 時間一律用「下一次觸發的絕對時間」排程；電腦睡眠或關機醒來時，tick 之間會出現大空檔，
 //! 那段時間該響的不一個一個轟出來，而是整理成一張「錯過的提醒」卡。
 //!
-//! 要按掉的卡（要按完成的提醒、錯過的提醒）按掉之前記在狀態檔裡：柚伴關掉再開（更新、當掉、手動重開）時重新跳出來，
-//! 跟 Outlook、macOS 提醒事項一樣「沒處理的提醒不會因為重開就不見」。會自己消失的提醒不留。
+//! 要按掉的卡（要按完成的提醒、錯過的提醒）沒按就關掉柚伴，重開時會再跳（核心統一存卡片，見 `Module::restore_card`），
+//! 跟 Outlook、macOS 提醒事項一樣「沒處理的提醒不會因為重開就不見」。這裡另外記著每張是幾點響的（`pending`），重開時用最新的內容重畫。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -48,7 +48,7 @@ pub struct Paths {
 struct State {
     last_checked: Option<NaiveDateTime>,
     snoozes: BTreeMap<String, NaiveDateTime>,
-    /// 跳出來、還沒按掉的卡（卡片代號 → 內容）。
+    /// 跳出來、還沒按掉的卡（卡片代號 → 幾點響的）：卡片本身核心會存，重開時靠這個重畫成最新的內容。
     pending: BTreeMap<String, Pending>,
 }
 
@@ -238,24 +238,6 @@ impl ReminderModule {
         self.state.pending.insert(MISSED_KEY.to_owned(), Pending::Missed { rows, more });
     }
 
-    /// 剛開起來：上次關掉時還沒按掉的卡重新跳出來（提醒改成自己消失、或被刪掉的就不跳）。
-    fn reshow_pending(&mut self, ctx: &mut Ctx) {
-        let now = ctx.now;
-        let mut kept = BTreeMap::new();
-        for (key, p) in std::mem::take(&mut self.state.pending) {
-            let card = match &p {
-                Pending::Reminder { at } => match self.entry(&key).filter(|e| e.needs_done()) {
-                    Some(e) => e.card(*at, now),
-                    None => continue,
-                },
-                Pending::Missed { rows, more } => Card::Missed { rows: rows.clone(), more: *more },
-            };
-            ctx.card(key.as_str(), card);
-            kept.insert(key, p);
-        }
-        self.state.pending = kept;
-    }
-
     /// 這段時間錯過的提醒：(每則一列：標題、最後一次的時間, 列不下的有幾則)。
     fn missed_rows(&self, from: NaiveDateTime, to: NaiveDateTime) -> Option<(Vec<(String, String)>, usize)> {
         let mut rows = Vec::new();
@@ -310,9 +292,6 @@ impl Module for ReminderModule {
             }
         }
 
-        if self.last_tick.is_none() {
-            self.reshow_pending(ctx);
-        }
         // 第一次 tick：從上次關掉時看到的時間接著算；之後：tick 之間的大空檔 = 睡過一覺。
         let gap_from = match self.last_tick {
             None => self.state.last_checked,
@@ -371,6 +350,15 @@ impl Module for ReminderModule {
                 self.reschedule(ctx.now);
             }
             _ => {}
+        }
+    }
+
+    /// 重開時核心還回來的卡：照提醒檔現在的樣子重畫（改過名顯示新的、紀念日的天數照今天算）；
+    /// 那筆刪掉了、改成自己消失、或已經按掉的不再跳。錯過的提醒照原樣。
+    fn restore_card(&mut self, key: &str, card: Card, now: NaiveDateTime) -> Option<Card> {
+        match self.state.pending.get(key)? {
+            Pending::Reminder { at } => self.entry(key).filter(|e| e.needs_done()).map(|e| e.card(*at, now)),
+            Pending::Missed { .. } => Some(card),
         }
     }
 }
@@ -492,32 +480,41 @@ mod tests {
         m.on_event(&ModuleEvent::Card { key, action }, &mut Ctx { now, config: &Config::default(), out: &mut Vec::new() });
     }
 
+    /// 重開柚伴：核心把上次沒按掉的卡（`needs_done`）還給模組，收集它說要重新跳的。
+    fn reopen(dir: &Path, shown: &[(String, Card)], now: NaiveDateTime) -> (ReminderModule, Vec<(String, Card)>) {
+        let mut m = restart(dir);
+        let back = shown.iter().filter(|(_, c)| c.needs_done()).filter_map(|(k, c)| Some((k.clone(), m.restore_card(k, c.clone(), now)?))).collect();
+        (m, back)
+    }
+
     #[test]
     fn unhandled_reminder_card_comes_back_after_restart_until_done() {
         let (mut m, dir) = setup(vec![daily("a", 9)]);
         tick(&mut m, dt(2, 8, 59));
-        tick(&mut m, dt(2, 9, 0));
-        // 響了還沒按就被關掉：重開時照原本的時間再跳一次。
-        let mut m = restart(&dir);
-        let shown = vec![("a".to_string(), Card::Reminder { title: "提醒a".into(), time: "09:00".into(), snooze_open: false, icon: Icon::BellRing })];
-        assert_eq!(cards(&tick(&mut m, dt(2, 9, 1))), shown);
-        // 再重開一次還在；按了完成之後就不再跳。
-        let mut m = restart(&dir);
-        assert_eq!(cards(&tick(&mut m, dt(2, 9, 2))), shown);
+        let shown = cards(&tick(&mut m, dt(2, 9, 0)));
+        // 響了還沒按就被關掉：重開時照原本的時間再跳一次；再重開一次還在。
+        let (_, back) = reopen(&dir, &shown, dt(2, 9, 1));
+        assert_eq!(back, shown);
+        let (mut m, back) = reopen(&dir, &shown, dt(2, 9, 2));
+        assert_eq!(back, shown);
+        // 按了完成之後就不再跳；隔天重開的話時間連日期一起寫。
         press(&mut m, "a", CardAction::Done, dt(2, 9, 2));
-        let mut m = restart(&dir);
-        assert!(cards(&tick(&mut m, dt(2, 9, 3))).is_empty());
+        assert!(reopen(&dir, &shown, dt(2, 9, 3)).1.is_empty());
+        tick(&mut m, dt(3, 9, 0));
+        let (_, back) = reopen(&dir, &shown, dt(4, 8, 0));
+        assert!(matches!(&back[..], [(_, Card::Reminder { time, .. })] if time == "3/3 09:00"), "{back:?}");
     }
 
     #[test]
-    fn auto_reminder_is_not_brought_back_after_restart() {
+    fn a_card_is_not_brought_back_once_the_reminder_goes_away_by_itself() {
+        let (mut m, dir) = setup(vec![daily("a", 9)]);
+        tick(&mut m, dt(2, 8, 59));
+        let shown = cards(&tick(&mut m, dt(2, 9, 0)));
+        // 關著的時候在設定裡改成「自己消失」：重開不再跳那張要按完成的卡。
         let mut r = daily("a", 9);
         r.style = Style::Auto;
-        let (mut m, dir) = setup(vec![r]);
-        tick(&mut m, dt(2, 8, 59));
-        tick(&mut m, dt(2, 9, 0));
-        let mut m = restart(&dir);
-        assert!(cards(&tick(&mut m, dt(2, 9, 1))).is_empty());
+        ReminderFile { reminders: vec![r], ..Default::default() }.save(&dir.join("reminders.json")).unwrap();
+        assert!(reopen(&dir, &shown, dt(2, 9, 1)).1.is_empty());
     }
 
     #[test]
@@ -526,11 +523,10 @@ mod tests {
         tick(&mut m, dt(2, 8, 0));
         let missed = cards(&tick(&mut m, dt(3, 11, 0)));
         assert!(matches!(&missed[..], [(k, Card::Missed { .. })] if k == MISSED_KEY));
-        let mut m = restart(&dir);
-        assert_eq!(cards(&tick(&mut m, dt(3, 11, 1))), missed);
+        let (mut m, back) = reopen(&dir, &missed, dt(3, 11, 1));
+        assert_eq!(back, missed);
         press(&mut m, MISSED_KEY, CardAction::Dismiss, dt(3, 11, 1));
-        let mut m = restart(&dir);
-        assert!(cards(&tick(&mut m, dt(3, 11, 2))).is_empty());
+        assert!(reopen(&dir, &missed, dt(3, 11, 2)).1.is_empty());
     }
 
     #[test]
@@ -544,10 +540,12 @@ mod tests {
         tick(&mut m, dt(2, 8, 0));
         let key = format!("{ANNIVERSARY_KEY_PREFIX}mom");
         let card = |title: &str| vec![(key.clone(), Card::Reminder { title: title.into(), time: "3/5（四） · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake })];
-        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), card("再 3 天就是媽媽生日囉～"));
+        let shown = cards(&tick(&mut m, dt(2, 9, 0)));
+        assert_eq!(shown, card("再 3 天就是媽媽生日囉～"));
         // 沒按完成就關掉柚伴：隔兩天重開還在，天數照當天算。
-        let mut m = restart(&dir);
-        assert_eq!(cards(&tick(&mut m, dt(4, 7, 0))), card("明天就是媽媽生日囉～"));
+        let (mut m, back) = reopen(&dir, &shown, dt(4, 7, 0));
+        assert_eq!(back, card("明天就是媽媽生日囉～"));
+        tick(&mut m, dt(4, 7, 0));
         press(&mut m, &key, CardAction::Done, dt(4, 7, 0));
         assert_eq!(cards(&tick(&mut m, dt(5, 8, 0))), card("今天是媽媽生日喔～"));
         assert!(cards(&tick(&mut m, dt(5, 8, 1))).is_empty());

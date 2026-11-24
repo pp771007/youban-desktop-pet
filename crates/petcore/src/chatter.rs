@@ -11,6 +11,7 @@ use std::collections::VecDeque;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike, Weekday};
 use petkit::config::Talk;
+use serde::{Deserialize, Serialize};
 
 use crate::behavior::{Emote, Happening};
 
@@ -104,8 +105,8 @@ pub fn milestone_line(days: u32, name: Option<&str>) -> String {
 }
 
 /// 每天一次、在某段時間內講的話。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Moment {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Moment {
     Lunch,
     Snack,
     OffWork,
@@ -196,9 +197,28 @@ pub struct Chatter {
     last_rest: f64,
 }
 
+/// 重開柚伴之後還要記得的（存在核心的狀態檔）。時間存成牆上的時鐘，讀回來再換成這次執行的秒數。
+/// 新增會跨時間的狀態（今天做過什麼、從什麼時候開始算）先想：重開之後該不該還在？該 → 放這裡。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChatterSaved {
+    /// 上次打招呼是哪一天：同一天重開不再打一次。
+    pub greeted_on: Option<NaiveDate>,
+    /// 今天講過哪幾個時間點（午餐、下班……）：在那段時間裡重開不再講一次。
+    pub moments_day: Option<NaiveDate>,
+    pub moments_done: Vec<Moment>,
+    /// 從什麼時候開始連續用電腦、上次休息提醒什麼時候：重開接著算，休息提醒不會被重開延後。
+    pub active_since: Option<NaiveDateTime>,
+    pub last_rest: Option<NaiveDateTime>,
+    /// 存的時候是幾點：關掉超過 `BREAK_SECS` 才打開，連續使用時間不接著算（等於休息過了）。
+    pub saved_at: Option<NaiveDateTime>,
+}
+
 impl Chatter {
-    /// `greeted_on`：上次打招呼是哪一天（存在磁碟上，重開桌寵同一天不會再打一次）。
-    pub fn new(now: f64, seed: u64, greeted_on: Option<NaiveDate>) -> Self {
+    /// `now` 是這次執行的秒數、`clock` 是同一刻的牆上時鐘（兩個一起才換算得回存起來的時間）。
+    pub fn new(now: f64, seed: u64, saved: ChatterSaved, clock: NaiveDateTime) -> Self {
+        let secs_ago = |t: NaiveDateTime| (clock - t).num_milliseconds() as f64 / 1000.0;
+        let away_too_long = saved.saved_at.is_none_or(|t| secs_ago(t) > f64::from(BREAK_SECS));
         Self {
             rng: seed | 1,
             started: now,
@@ -206,17 +226,26 @@ impl Chatter {
             last_react: f64::NEG_INFINITY,
             next_idle: None,
             recent: VecDeque::new(),
-            greeted_on,
-            moments_day: None,
-            moments_done: Vec::new(),
+            greeted_on: saved.greeted_on,
+            moments_day: saved.moments_day,
+            moments_done: saved.moments_done,
             pokes: VecDeque::new(),
-            active_since: None,
-            last_rest: f64::NEG_INFINITY,
+            active_since: saved.active_since.filter(|_| !away_too_long).map(|t| now - secs_ago(t)),
+            last_rest: saved.last_rest.map_or(f64::NEG_INFINITY, |t| now - secs_ago(t)),
         }
     }
 
-    pub fn greeted_on(&self) -> Option<NaiveDate> {
-        self.greeted_on
+    /// 要存的那份（`now`、`clock` 同 `new`）。
+    pub fn saved(&self, now: f64, clock: NaiveDateTime) -> ChatterSaved {
+        let at = |t: f64| (t.is_finite()).then(|| clock - Duration::milliseconds(((now - t) * 1000.0) as i64));
+        ChatterSaved {
+            greeted_on: self.greeted_on,
+            moments_day: self.moments_day,
+            moments_done: self.moments_done.clone(),
+            active_since: self.active_since.and_then(at),
+            last_rest: at(self.last_rest),
+            saved_at: Some(clock),
+        }
     }
 
     /// 桌寵身上發生了某件事，要不要回一句。
@@ -380,6 +409,11 @@ mod tests {
         NaiveDate::from_ymd_opt(y, m, d).unwrap().and_hms_opt(h, min, 0).unwrap()
     }
 
+    /// 這天已經打過招呼（測別的不會被招呼插隊）。
+    fn greeted(y: i32, m: u32, d: u32) -> ChatterSaved {
+        ChatterSaved { greeted_on: NaiveDate::from_ymd_opt(y, m, d), ..ChatterSaved::default() }
+    }
+
     /// 2026-11-23 是星期一。
     fn ctx(now: f64, clock: NaiveDateTime) -> Ctx {
         Ctx { now, clock, idle_input_secs: 0.0, talk: Talk::Sometimes, workday: true, can_speak: true, asleep: false, name: None, user_name: None }
@@ -403,12 +437,13 @@ mod tests {
     #[test]
     fn greets_once_a_day_and_not_again_after_a_restart() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 9, 0));
-        let mut c = Chatter::new(now, 7, None);
+        let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
         let said = run(&mut c, &mut now, &mut clock, 10, |_| {});
         assert_eq!(said.len(), 1);
         assert!(MONDAY_MORNING.contains(&said[0].as_str()), "Monday morning greeting, got {said:?}");
 
-        let mut restarted = Chatter::new(now, 8, c.greeted_on());
+        let mut restarted = Chatter::new(0.0, 8, c.saved(now, clock), clock);
+        now = 0.0;
         assert!(run(&mut restarted, &mut now, &mut clock, 10, |_| {}).is_empty(), "same day after restart: no second greeting");
 
         let mut next_day = at(2026, 11, 24, 9, 0);
@@ -419,7 +454,7 @@ mod tests {
     #[test]
     fn stays_quiet_when_nobody_is_there_or_talk_is_off() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 12, 0));
-        let mut c = Chatter::new(now, 7, None);
+        let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
         assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.idle_input_secs = 600.0).is_empty(), "away from the computer");
         assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.talk = Talk::Never).is_empty(), "talk off");
         assert!(run(&mut c, &mut now, &mut clock, 120, |x| x.can_speak = false).is_empty(), "a reminder card is up");
@@ -429,10 +464,50 @@ mod tests {
     #[test]
     fn says_each_moment_once_inside_its_window() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 11, 40));
-        let mut c = Chatter::new(now, 7, Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()));
+        let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
         let said = run(&mut c, &mut now, &mut clock, 60 * 60, |_| {});
         let lunch = MOMENTS.iter().find(|r| r.moment == Moment::Lunch).unwrap().lines;
         assert_eq!(said.iter().filter(|s| lunch.contains(&s.as_str())).count(), 1, "lunch exactly once, got {said:?}");
+    }
+
+    #[test]
+    fn a_restart_inside_a_moment_window_does_not_say_it_again() {
+        let (mut now, mut clock) = (0.0, at(2026, 11, 23, 11, 50));
+        let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
+        let lunch = MOMENTS.iter().find(|r| r.moment == Moment::Lunch).unwrap().lines;
+        assert!(run(&mut c, &mut now, &mut clock, 60, |_| {}).iter().any(|s| lunch.contains(&s.as_str())));
+        // 12:00 關掉再開（自動更新也會這樣）：午餐那句不再講。
+        let mut c = Chatter::new(0.0, 8, c.saved(now, clock), clock);
+        now = 0.0;
+        let said = run(&mut c, &mut now, &mut clock, 20 * 60, |_| {});
+        assert!(!said.iter().any(|s| lunch.contains(&s.as_str())), "{said:?}");
+    }
+
+    #[test]
+    fn continuous_use_survives_a_quick_restart_but_not_a_long_one() {
+        const EVERY: f64 = 30.0 * 60.0;
+        let (mut now, mut clock) = (0.0, at(2026, 11, 23, 13, 0));
+        let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
+        let quiet = |x: &mut Ctx| x.talk = Talk::Never;
+        run(&mut c, &mut now, &mut clock, 20 * 60, quiet);
+        let saved = c.saved(now, clock);
+        // 一分鐘後重開：已經用了 21 分鐘，再 9 分鐘就提醒（不是從 0 重算）。
+        clock += Duration::minutes(1);
+        let mut quick = Chatter::new(0.0, 8, saved.clone(), clock);
+        let mut t = 0.0;
+        let mut due = Vec::new();
+        for _ in 0..10 * 60 {
+            t += 1.0;
+            clock += Duration::seconds(1);
+            let mut x = ctx(t, clock);
+            quiet(&mut x);
+            quick.tick(&x);
+            due.extend(quick.rest_due(t, EVERY));
+        }
+        assert_eq!(due.len(), 1, "rest reminder about 9 minutes after the restart");
+        // 關了十分鐘才打開：當作休息過了，重新算。
+        let mut long = Chatter::new(0.0, 8, saved, clock + Duration::minutes(10));
+        assert!(long.rest_due(25.0 * 60.0, EVERY).is_none() && long.active_since.is_none());
     }
 
     #[test]
@@ -449,7 +524,7 @@ mod tests {
         const EVERY: f64 = 30.0 * 60.0;
         let now = std::cell::Cell::new(0.0);
         let mut clock = at(2026, 11, 23, 13, 0);
-        let mut c = Chatter::new(now.get(), 7, Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()));
+        let mut c = Chatter::new(now.get(), 7, greeted(2026, 11, 23), clock);
         // 一秒一秒跑：`tick` 記連續使用時間，`rest_due` 問要不要提醒。
         let mut run_rest = |c: &mut Chatter, secs: u32, idle: f32| -> Vec<String> {
             let mut out = Vec::new();
@@ -483,7 +558,7 @@ mod tests {
     #[test]
     fn complains_when_poked() {
         let clock = at(2026, 11, 23, 10, 0);
-        let mut c = Chatter::new(0.0, 7, Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()));
+        let mut c = Chatter::new(0.0, 7, greeted(2026, 11, 23), clock);
         let mut said = Vec::new();
         for i in 0..5 {
             said.extend(c.on(Happening::Clicked, &ctx(100.0 + i as f64, clock)));
@@ -496,7 +571,7 @@ mod tests {
     #[test]
     fn greets_and_welcomes_back_by_the_users_name() {
         let (mut now, mut clock) = (0.0, at(2026, 11, 23, 9, 0));
-        let mut c = Chatter::new(now, 7, None);
+        let mut c = Chatter::new(now, 7, ChatterSaved::default(), clock);
         let said = run(&mut c, &mut now, &mut clock, 10, |x| x.user_name = Some("小明".into()));
         assert!(said.len() == 1 && said[0].starts_with("小明，"), "{said:?}");
         let mut x = ctx(now + 100.0, clock);
@@ -507,11 +582,10 @@ mod tests {
 
     #[test]
     fn calls_itself_by_its_name_now_and_then_only_once_named() {
-        let day = Some(NaiveDate::from_ymd_opt(2026, 11, 23).unwrap());
         // 晚上七點到十點半：沒有時間點的話，只剩閒聊。
         let chat = |name: Option<&str>| {
             let (mut now, mut clock) = (0.0, at(2026, 11, 23, 19, 0));
-            let mut c = Chatter::new(now, 7, day);
+            let mut c = Chatter::new(now, 7, greeted(2026, 11, 23), clock);
             run(&mut c, &mut now, &mut clock, 3 * 3600 + 30 * 60, |x| {
                 x.talk = Talk::Often;
                 x.name = name.map(str::to_owned);
@@ -529,7 +603,7 @@ mod tests {
 
     #[test]
     fn idle_chat_does_not_repeat_recent_lines() {
-        let mut c = Chatter::new(0.0, 7, None);
+        let mut c = Chatter::new(0.0, 7, ChatterSaved::default(), at(2026, 11, 23, 10, 0));
         let lines: Vec<String> = (0..IDLE_CHAT.len()).map(|i| c.say(IDLE_CHAT, None, i as f64).text).collect();
         let mut unique = lines.clone();
         unique.sort();

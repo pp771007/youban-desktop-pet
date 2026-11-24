@@ -272,6 +272,11 @@ impl Module for WindowRestore {
     fn menu(&self, _now: chrono::NaiveDateTime, _config: &petkit::config::Config) -> Vec<(u32, String, Icon)> {
         vec![(MENU_SAVE, "記住目前位置".into(), Icon::Save), (MENU_RESTORE, "恢復位置".into(), Icon::RotateCcw)]
     }
+
+    /// 只丟會自己消失的通知卡（「搬回原位囉」），沒有要按完成的卡；重開不用再跳。
+    fn restore_card(&mut self, _key: &str, _card: crate::bubble::Card, _now: chrono::NaiveDateTime) -> Option<crate::bubble::Card> {
+        None
+    }
 }
 
 fn monitor_geometry() -> Vec<[i32; 4]> {

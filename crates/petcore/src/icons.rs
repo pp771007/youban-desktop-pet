@@ -15,7 +15,8 @@ use crate::theme::Rgba;
 /// 每隻桌寵的強調色不同，換來換去會一直多出新顏色的圖示：滿了就整個重來。
 const CACHE_MAX: usize = 32;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// 會跟著卡片存進狀態檔（重開再跳），所以要能存讀。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Icon {
     BellRing,
     Bell,
