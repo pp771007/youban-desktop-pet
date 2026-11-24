@@ -368,18 +368,18 @@ function renderReminderList(page) {
     h('div', { class: 'card' },
       settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
       settingRow('全螢幕時照樣跳出來', configSwitch('remindInFullscreen', '全螢幕時照樣跳出來')),
-      settingRow('提醒卡', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是提醒卡的樣子' } }) }, icon('play'), '看看樣子')))));
+      settingRow('確認框', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是確認框的樣子' } }) }, icon('play'), '看看樣子')))));
   const setRest = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
   page.append(h('section', { class: 'section' },
     h('h2', {}, '休息提醒'),
     h('div', { class: 'card' },
       settingRow('連續用電腦太久提醒起來動一動', configSwitch('restReminder', '休息提醒')),
       state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
-      state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
+      state.config.restReminder ? settingRow('跳出方式', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
 }
 
 // ---------- 紀念日 ----------
-// 每年同一天（國曆或農曆），一筆可以有好幾個「提前幾天、幾點」的提醒；卡片一定要按完成才收掉。
+// 每年同一天（國曆或農曆），一筆可以有好幾個「提前幾天、幾點」的提醒；一律跳確認框。
 
 /** 提前幾天的選項（0 = 當天）。 */
 const DAYS_BEFORE_CHOICES = [0, 1, 2, 3, 5, 7, 14, 30];
@@ -827,7 +827,7 @@ function drawEditor() {
       repeatExtra,
       usesHolidayPolicy(r) ? h('div', { class: 'field' }, h('span', { class: 'field-label' }, '遇到假日'),
         segmented(HOLIDAY_POLICIES, r.holiday, (p) => { r.holiday = p; changed(); })) : null,
-      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '卡片'),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '跳出方式'),
         segmented(STYLE_CHOICES, r.style || 'confirm', (s) => { r.style = s; changed(); })),
       h('div', { class: 'field' }, h('span', { class: 'field-label' }, '接下來'), h('div', { class: 'preview', id: 'preview' }))),
     h('div', { class: 'drawer-foot' },
@@ -1322,7 +1322,7 @@ function renderFocus(page) {
     settingRow('短休息', segmented(SHORT_BREAK_CHOICES, c.shortBreakMinutes, (v) => set('shortBreakMinutes', v))),
     settingRow(`長休息（每 ${c.focusRoundsBeforeLong} 輪一次）`, segmented(LONG_BREAK_CHOICES, c.longBreakMinutes, (v) => set('longBreakMinutes', v))),
     settingRow('休息完自動開始下一輪', configSwitch('focusAutoContinue', '休息完自動開始下一輪')),
-    settingRow('卡片', segmented(STYLE_CHOICES, c.focusStyle, (v) => set('focusStyle', v))),
+    settingRow('跳出方式', segmented(STYLE_CHOICES, c.focusStyle, (v) => set('focusStyle', v))),
     settingRow('倒數', segmented(COUNTDOWN_CHOICES, c.focusCountdown, (v) => set('focusCountdown', v)))));
 }
 

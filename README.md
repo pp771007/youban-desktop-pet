@@ -38,7 +38,7 @@
 
 <p align="center">
   <img src="docs/media/toys.png" alt="點心與球"><br>
-  <img src="docs/media/cards.png" alt="提醒卡與講話泡泡">
+  <img src="docs/media/cards.png" alt="確認框、提示框與講話泡泡">
 </p>
 
 <p align="center">
