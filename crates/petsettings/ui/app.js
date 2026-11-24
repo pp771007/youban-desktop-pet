@@ -56,7 +56,12 @@ const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視�
 const state = {
   page: DEFAULT_PAGE,
   config: null,
-  file: { reminders: [], dayOverrides: {} },
+  file: { reminders: [], anniversaries: [], dayOverrides: {} },
+  /** 紀念日 id → `anniversary_info`（日期寫法、接下來幾次、還有幾天）。 */
+  anniversaryInfo: {},
+  /** 農曆月份、日子的寫法（`petkit::anniversary`）。 */
+  lunarMonths: [],
+  lunarDays: [],
   /** 從今天起官方日曆裡的國定假日、補班（`petkit::holidays::CalendarDay`）。 */
   officialDays: [],
   nextTimes: {},
@@ -204,6 +209,7 @@ function applyTokens(tokens) {
 async function loadReminders() {
   [state.file, state.officialDays] = await Promise.all([invoke('load_reminders'), invoke('official_days')]);
   state.file.dayOverrides = state.file.dayOverrides || {};
+  state.file.anniversaries = state.file.anniversaries || [];
   await refreshNextTimes();
 }
 
@@ -214,6 +220,8 @@ async function refreshNextTimes() {
     return [r.id, fire ? fire.at : null];
   }));
   state.nextTimes = Object.fromEntries(entries);
+  const infos = await Promise.all(state.file.anniversaries.map(async (a) => [a.id, await invoke('anniversary_info', { anniversary: a })]));
+  state.anniversaryInfo = Object.fromEntries(infos);
 }
 
 async function saveReminders() {
@@ -291,6 +299,7 @@ function renderReminders(page) {
   } else {
     page.append(h('div', { class: 'card list' }, sorted.map(reminderRow)));
   }
+  page.append(renderAnniversaries());
   page.append(h('section', { class: 'section' },
     h('h2', {}, '提醒方式'),
     h('div', { class: 'card' },
@@ -305,6 +314,192 @@ function renderReminders(page) {
       state.config.restReminder ? settingRow('連續用多久', segmented(REST_CHOICES, state.config.restEveryMinutes, (v) => setRest('restEveryMinutes', v))) : null,
       state.config.restReminder ? settingRow('卡片', segmented(STYLE_CHOICES, state.config.restStyle, (v) => setRest('restStyle', v))) : null)));
   page.append(renderOfficialDays(), renderExtraDays());
+}
+
+// ---------- 紀念日 ----------
+// 每年同一天（國曆或農曆），一筆可以有好幾個「提前幾天、幾點」的提醒；卡片一定要按完成才收掉。
+
+/** 提前幾天的選項（0 = 當天）。 */
+const DAYS_BEFORE_CHOICES = [0, 1, 2, 3, 5, 7, 14, 30];
+/** 一筆紀念日最多幾個提醒。 */
+const ALERTS_MAX = 5;
+const NEW_ALERTS = [{ daysBefore: 3, time: '09:00' }, { daysBefore: 0, time: '09:00' }];
+/** 國曆每個月最多幾天（2 月給 29，平年那天照 2/28 過）。 */
+const SOLAR_MONTH_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const LUNAR_MONTH_DAYS = 30;
+const ANNIVERSARY_TITLE_MAX = 30;
+
+const daysBeforeLabel = (n) => (n === 0 ? '當天' : n === 1 ? '前一天' : `${n} 天前`);
+
+/** 「3 天前、當天 09:00」；時間不一樣就各寫各的。 */
+function alertsSummary(alerts) {
+  const sorted = alerts.slice().sort((a, b) => b.daysBefore - a.daysBefore);
+  const sameTime = sorted.every((a) => a.time === sorted[0].time);
+  return sameTime
+    ? `${sorted.map((a) => daysBeforeLabel(a.daysBefore)).join('、')} ${sorted[0]?.time ?? ''}`
+    : sorted.map((a) => `${daysBeforeLabel(a.daysBefore)} ${a.time}`).join('、');
+}
+
+/** 「今天」「明天」「12 天後」的那顆。 */
+function countdown(daysLeft) {
+  if (daysLeft == null) return null;
+  if (daysLeft <= 1) return h('div', { class: 'countdown soon' }, h('span', { class: 'countdown-num' }, daysLeft === 0 ? '今天' : '明天'));
+  return h('div', { class: 'countdown' }, h('span', { class: 'countdown-num' }, String(daysLeft)), h('span', { class: 'countdown-unit' }, '天後'));
+}
+
+function renderAnniversaries() {
+  const list = state.file.anniversaries.slice().sort((a, b) => {
+    const da = state.anniversaryInfo[a.id]?.daysLeft ?? Infinity, db = state.anniversaryInfo[b.id]?.daysLeft ?? Infinity;
+    return (a.enabled === b.enabled ? 0 : a.enabled ? -1 : 1) || da - db;
+  });
+  return h('section', { class: 'section' },
+    h('div', { class: 'section-head' },
+      h('h2', {}, '紀念日'),
+      h('button', { class: 'btn btn-secondary btn-small', onclick: () => openAnniversary(null) }, icon('plus'), '新增紀念日')),
+    h('div', { class: 'card list' }, list.length
+      ? list.map(anniversaryRow)
+      : h('div', { class: 'list-row list-note' }, icon('cake'), '記下生日、紀念日（農曆也可以），時間到桌寵會提醒你')));
+}
+
+function anniversaryRow(a) {
+  const info = state.anniversaryInfo[a.id];
+  const next = info?.upcoming[0];
+  const date = next ? parseDate(next.date) : null;
+  const lunar = a.date.calendar === 'lunar';
+  const toggle = h('label', { class: 'switch', onclick: (e) => e.stopPropagation(), title: a.enabled ? '暫停這個紀念日' : '恢復這個紀念日' },
+    h('input', { type: 'checkbox', checked: a.enabled, 'aria-label': `${a.title} 啟用`, onchange: async (e) => { a.enabled = e.target.checked; await saveReminders(); render(); } }),
+    h('span'));
+  return h('div', { class: `list-row clickable day-row${a.enabled ? '' : ' off'}`, onclick: () => openAnniversary(a) },
+    date
+      ? h('div', { class: 'date-tile', 'aria-hidden': 'true' }, h('span', { class: 'date-tile-month' }, `${date.getMonth() + 1} 月`), h('span', { class: 'date-tile-day' }, String(date.getDate())))
+      : h('span', { class: 'row-dot' }, icon('cake')),
+    h('div', { class: 'row-main' },
+      h('div', { class: 'row-title', title: a.title }, a.title),
+      h('div', { class: 'row-meta' },
+        lunar && info ? h('span', { class: 'tag tag-accent' }, info.label) : null,
+        next?.nth > 0 ? h('span', { class: 'tag' }, `滿 ${next.nth} 年`) : null,
+        a.alerts.length ? h('span', { class: 'tag' }, icon('bell'), alertsSummary(a.alerts)) : null)),
+    a.enabled ? countdown(info?.daysLeft) : null,
+    toggle);
+}
+
+function newAnniversary() {
+  const today = new Date();
+  return {
+    id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()),
+    title: '',
+    enabled: true,
+    date: { calendar: 'solar', month: today.getMonth() + 1, day: today.getDate() },
+    year: null,
+    alerts: structuredClone(NEW_ALERTS),
+  };
+}
+
+function openAnniversary(existing) {
+  const ed = { draft: structuredClone(existing || newAnniversary()), isNew: !existing, info: null };
+  openDrawer((drawer) => drawAnniversary(drawer, ed));
+  refreshAnniversaryPreview(ed);
+  setTimeout(() => document.getElementById('anniv-title')?.focus(), 50);
+}
+
+const anniversaryValid = (a) => a.title.trim() && a.alerts.length > 0 && a.alerts.every((x) => x.time);
+
+function refreshAnniversaryPreview(ed) {
+  clearTimeout(refreshAnniversaryPreview.timer);
+  refreshAnniversaryPreview.timer = setTimeout(async () => {
+    ed.info = await invoke('anniversary_info', { anniversary: ed.draft });
+    drawAnniversaryPreview(ed);
+  }, PREVIEW_DEBOUNCE_MS);
+}
+
+function drawAnniversaryPreview(ed) {
+  const box = document.getElementById('anniv-preview');
+  if (!box || !ed.info) return;
+  box.replaceChildren(...ed.info.upcoming.map((o, i) => {
+    const d = parseDate(o.date);
+    return h('div', { class: 'preview-row' },
+      h('span', { class: 'when' }, `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}（${WEEKDAYS[isoWeekday(d) - 1]}）`),
+      o.nth > 0 ? h('span', { class: 'tag' }, `滿 ${o.nth} 年`) : null,
+      i === 0 && ed.info.daysLeft != null ? h('span', { class: 'tag tag-accent' }, ed.info.daysLeft === 0 ? '今天' : `${ed.info.daysLeft} 天後`) : null);
+  }));
+}
+
+function drawAnniversary(drawer, ed) {
+  const a = ed.draft;
+  const lunar = a.date.calendar === 'lunar';
+  const redraw = () => { drawAnniversary(drawer, ed); refreshAnniversaryPreview(ed); };
+  const saveBtn = () => document.getElementById('anniv-save');
+  const revalidate = () => { saveBtn().disabled = !anniversaryValid(a); };
+
+  const monthNames = lunar ? state.lunarMonths : Array.from({ length: 12 }, (_, i) => `${i + 1} 月`);
+  const dayCount = lunar ? LUNAR_MONTH_DAYS : SOLAR_MONTH_DAYS[a.date.month - 1];
+  const dayName = (d) => (lunar ? state.lunarDays[d - 1] : `${d} 日`);
+  const monthSelect = h('select', { class: 'select', 'aria-label': '月', onchange: (e) => {
+    a.date.month = Number(e.target.value);
+    if (!lunar) a.date.day = Math.min(a.date.day, SOLAR_MONTH_DAYS[a.date.month - 1]);
+    redraw();
+  } }, monthNames.map((name, i) => h('option', { value: i + 1, selected: a.date.month === i + 1 }, name)));
+  const daySelect = h('select', { class: 'select', 'aria-label': '日', onchange: (e) => { a.date.day = Number(e.target.value); redraw(); } },
+    Array.from({ length: dayCount }, (_, i) => h('option', { value: i + 1, selected: a.date.day === i + 1 }, dayName(i + 1))));
+
+  const alertRow = (alert, i) => h('div', { class: 'alert-row' },
+    h('select', { class: 'select', 'aria-label': `第 ${i + 1} 個提醒提前幾天`, onchange: (e) => { alert.daysBefore = Number(e.target.value); refreshAnniversaryPreview(ed); } },
+      DAYS_BEFORE_CHOICES.map((n) => h('option', { value: n, selected: alert.daysBefore === n }, daysBeforeLabel(n)))),
+    h('input', { class: 'input input-time', type: 'time', value: alert.time, 'aria-label': `第 ${i + 1} 個提醒幾點`, onchange: (e) => { alert.time = e.target.value; revalidate(); } }),
+    h('button', { type: 'button', class: 'btn btn-ghost btn-small', 'aria-label': `刪掉第 ${i + 1} 個提醒`, disabled: a.alerts.length === 1, onclick: () => { a.alerts.splice(i, 1); redraw(); } }, icon('x')));
+
+  const deleteBtn = ed.isNew ? null : h('button', {
+    class: 'btn btn-danger',
+    onclick: async () => {
+      if (!await confirmDialog({ title: `刪除「${a.title}」？`, confirm: '刪除' })) return;
+      state.file.anniversaries = state.file.anniversaries.filter((x) => x.id !== a.id);
+      await saveReminders();
+      closeEditor();
+      toast('已刪除');
+      render();
+    },
+  }, icon('trash-2'), '刪除');
+
+  const scrolled = drawer.querySelector('.drawer-body')?.scrollTop ?? 0;
+  drawer.replaceChildren(
+    h('div', { class: 'drawer-head' },
+      h('h2', {}, ed.isNew ? '新增紀念日' : '編輯紀念日'),
+      h('button', { class: 'btn btn-ghost btn-small', 'aria-label': '關閉', onclick: closeEditor }, icon('x'))),
+    h('div', { class: 'drawer-body' },
+      field('名稱', h('input', { id: 'anniv-title', class: 'input', placeholder: '例：媽媽生日、結婚紀念日', value: a.title, maxlength: ANNIVERSARY_TITLE_MAX,
+        oninput: (e) => { a.title = e.target.value; revalidate(); } }), 'anniv-title'),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '日期'),
+        segmented([['solar', '國曆'], ['lunar', '農曆']], a.date.calendar, (c) => {
+          a.date = c === 'lunar' ? { calendar: c, month: a.date.month, day: Math.min(a.date.day, LUNAR_MONTH_DAYS), leap: false } : { calendar: c, month: a.date.month, day: Math.min(a.date.day, SOLAR_MONTH_DAYS[a.date.month - 1]) };
+          redraw();
+        }),
+        h('div', { class: 'row' }, monthSelect, daySelect,
+          lunar ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!a.date.leap, onchange: (e) => { a.date.leap = e.target.checked; redraw(); } }), '閏月') : null)),
+      field('哪一年（選填）', h('input', { id: 'anniv-year', class: 'input input-number', type: 'number', min: 1901, max: 2100, placeholder: '例：1966', value: a.year ?? '',
+        onchange: (e) => { const y = Number(e.target.value); a.year = e.target.value && y >= 1901 && y <= 2100 ? y : null; refreshAnniversaryPreview(ed); } }), 'anniv-year'),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '提醒'),
+        h('div', { class: 'alert-list' }, a.alerts.map(alertRow)),
+        a.alerts.length < ALERTS_MAX ? h('div', {}, h('button', { type: 'button', class: 'btn btn-ghost btn-small', onclick: () => {
+          const used = new Set(a.alerts.map((x) => x.daysBefore));
+          a.alerts.push({ daysBefore: DAYS_BEFORE_CHOICES.find((n) => !used.has(n)) ?? 0, time: a.alerts.at(-1)?.time ?? '09:00' });
+          redraw();
+        } }, icon('plus'), '再加一個提醒')) : null),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, '接下來'), h('div', { class: 'preview', id: 'anniv-preview' }))),
+    h('div', { class: 'drawer-foot' },
+      deleteBtn,
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'btn btn-ghost', onclick: closeEditor }, '取消'),
+      h('button', { id: 'anniv-save', class: 'btn btn-primary', disabled: !anniversaryValid(a), onclick: async () => {
+        a.title = a.title.trim();
+        const i = state.file.anniversaries.findIndex((x) => x.id === a.id);
+        if (i >= 0) state.file.anniversaries[i] = a; else state.file.anniversaries.push(a);
+        await saveReminders();
+        closeEditor();
+        toast('已儲存');
+        render();
+      } }, icon('check'), '儲存')));
+  drawAnniversaryPreview(ed);
+  drawer.querySelector('.drawer-body').scrollTop = scrolled;
 }
 
 // ---------- 國定假日與補班 ----------
@@ -343,7 +538,7 @@ function officialRow(d) {
   const holiday = d.kind === 'holiday';
   const date = parseDate(d.date);
   const name = d.note || (holiday ? '放假' : '補班');
-  return h('div', { class: `list-row day-row${on ? '' : ' off'}` },
+  return h('div', { class: `list-row day-row official-row${on ? '' : ' off'}` },
     h('div', { class: `date-tile${holiday ? '' : ' work'}`, 'aria-hidden': 'true' },
       h('span', { class: 'date-tile-month' }, `${date.getMonth() + 1} 月`),
       h('span', { class: 'date-tile-day' }, String(date.getDate()))),
@@ -1193,6 +1388,8 @@ async function main() {
   const [config, constants, pets] = await Promise.all([invoke('load_config'), invoke('constants'), invoke('list_pets')]);
   state.config = config;
   state.sizes = constants.sizes;
+  state.lunarMonths = constants.lunarMonths;
+  state.lunarDays = constants.lunarDays;
   state.version = constants.version;
   document.getElementById('app-version').textContent = constants.version;
   state.pets = pets;

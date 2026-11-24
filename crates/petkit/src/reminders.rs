@@ -10,6 +10,7 @@ use std::path::Path;
 use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
 
+use crate::anniversary::Anniversary;
 use crate::holidays::{Calendar, DayKind};
 
 /// 遇假日往前／往後挪最多幾天；名目日期要往回多看這麼多天，才不會漏掉「挪到今天」的那一次。
@@ -96,6 +97,7 @@ pub enum HolidayPolicy {
 #[serde(default, rename_all = "camelCase")]
 pub struct ReminderFile {
     pub reminders: Vec<Reminder>,
+    pub anniversaries: Vec<Anniversary>,
     /// 手動覆寫：颱風假、請假（視同假日），或平常放假但這天要上班的日子（視同上班）。
     pub day_overrides: BTreeMap<NaiveDate, DayKind>,
 }
@@ -110,7 +112,7 @@ impl ReminderFile {
     }
 }
 
-mod hhmm {
+pub(crate) mod hhmm {
     use chrono::NaiveTime;
     use serde::{Deserialize, Deserializer, Serializer};
 

@@ -37,6 +37,7 @@ pub enum Icon {
     Stop,
     Tomato,
     Cup,
+    Cake,
 }
 
 impl Icon {
@@ -62,6 +63,7 @@ impl Icon {
             Icon::Stop => include_str!("../../petsettings/ui/icons/x.svg"),
             Icon::Tomato => include_str!("../../petsettings/ui/icons/tomato.svg"),
             Icon::Cup => include_str!("../../petsettings/ui/icons/cup.svg"),
+            Icon::Cake => include_str!("../../petsettings/ui/icons/cake.svg"),
         }
     }
 }

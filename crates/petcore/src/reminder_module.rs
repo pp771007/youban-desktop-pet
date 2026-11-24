@@ -1,4 +1,5 @@
 //! 提醒模組：讀 `reminders.json`（設定程式寫的），到點丟提醒卡，處理「稍後」與錯過的提醒。
+//! 紀念日也在這裡排：每個「提前幾天、幾點」到了跳一張要按完成的卡（`Entry` 把兩種放在同一條排程上）。
 //!
 //! 時間一律用「下一次觸發的絕對時間」排程；電腦睡眠或關機醒來時，tick 之間會出現大空檔，
 //! 那段時間該響的不一個一個轟出來，而是整理成一張「錯過的提醒」卡。
@@ -6,12 +7,13 @@
 //! 要按掉的卡（要按完成的提醒、錯過的提醒）按掉之前記在狀態檔裡：柚伴關掉再開（更新、當掉、手動重開）時重新跳出來，
 //! 跟 Outlook、macOS 提醒事項一樣「沒處理的提醒不會因為重開就不見」。會自己消失的提醒不留。
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use chrono::{Duration, NaiveDateTime};
+use chrono::{Datelike, Duration, NaiveDateTime};
+use petkit::anniversary::{AnnualDate, Anniversary};
 use petkit::config::{load_json, write_atomic};
 use petkit::holidays::{self, Calendar};
 use petkit::reminders::{Reminder, ReminderFile, Style};
@@ -30,6 +32,9 @@ const STATE_SAVE_SECS: i64 = 60;
 const MISSED_KEY: &str = "missed";
 const TIME_FORMAT: &str = "%H:%M";
 const DATE_TIME_FORMAT: &str = "%-m/%-d %H:%M";
+/// 紀念日的卡片代號 = 這個前綴 + 紀念日 id（跟提醒的 id 分開，不會撞到）。
+const ANNIVERSARY_KEY_PREFIX: &str = "anniversary:";
+const WEEKDAYS: [&str; 7] = ["一", "二", "三", "四", "五", "六", "日"];
 
 pub struct Paths {
     pub reminders: PathBuf,
@@ -70,6 +75,92 @@ fn stamp(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
+/// 排程上的一筆：一般提醒，或紀念日。
+#[derive(Clone, Copy)]
+enum Entry<'a> {
+    Reminder(&'a Reminder),
+    Anniversary(&'a Anniversary),
+}
+
+impl Entry<'_> {
+    fn key(&self) -> String {
+        match self {
+            Entry::Reminder(r) => r.id.clone(),
+            Entry::Anniversary(a) => format!("{ANNIVERSARY_KEY_PREFIX}{}", a.id),
+        }
+    }
+
+    fn title(&self) -> &str {
+        match self {
+            Entry::Reminder(r) => &r.title,
+            Entry::Anniversary(a) => &a.title,
+        }
+    }
+
+    fn next_after(&self, after: NaiveDateTime, cal: &Calendar) -> Option<NaiveDateTime> {
+        match self {
+            Entry::Reminder(r) => r.next_after(after, cal),
+            Entry::Anniversary(a) => a.next_alert_after(after),
+        }
+    }
+
+    fn occurrences_between(&self, from: NaiveDateTime, to: NaiveDateTime, cal: &Calendar) -> (usize, Option<NaiveDateTime>) {
+        match self {
+            Entry::Reminder(r) => r.occurrences_between(from, to, cal),
+            Entry::Anniversary(a) => a.alerts_between(from, to),
+        }
+    }
+
+    /// 要按完成才收掉（按掉之前記在 `pending`，重開會再跳）。紀念日一定要，免得沒看到。
+    fn needs_done(&self) -> bool {
+        match self {
+            Entry::Reminder(r) => r.style == Style::Card,
+            Entry::Anniversary(_) => true,
+        }
+    }
+
+    /// `at` 響的這一次的卡片；不是今天響的（重開時補跳之前沒按掉的）時間連日期一起寫。
+    fn card(&self, at: NaiveDateTime, now: NaiveDateTime) -> Card {
+        match self {
+            Entry::Reminder(r) => {
+                let (title, time) = (r.title.clone(), when(at, now));
+                match r.style {
+                    Style::Card => Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing },
+                    Style::Auto => Card::Nudge { title, time, icon: Icon::BellRing },
+                }
+            }
+            Entry::Anniversary(a) => {
+                // 這一張是為哪一次響的；還有幾天照今天算（按「稍後」、隔天重開都對）。
+                let (title, time) = match a.next_on_or_after(at.date()) {
+                    Some(o) => {
+                        let lunar = matches!(a.date, AnnualDate::Lunar { .. }).then(|| format!(" · {}", a.date.label())).unwrap_or_default();
+                        let years = o.nth.filter(|n| *n > 0).map(|n| format!(" · 滿 {n} 年")).unwrap_or_default();
+                        let day = format!("{}/{}（{}）{lunar}{years}", o.date.month(), o.date.day(), WEEKDAYS[o.date.weekday().num_days_from_monday() as usize]);
+                        (anniversary_line(&a.title, (o.date - now.date()).num_days()), day)
+                    }
+                    None => (a.title.clone(), a.date.label()),
+                };
+                Card::Reminder { title, time, snooze_open: false, icon: Icon::Cake }
+            }
+        }
+    }
+}
+
+fn when(at: NaiveDateTime, now: NaiveDateTime) -> String {
+    if at.date() == now.date() { at.format(TIME_FORMAT) } else { at.format(DATE_TIME_FORMAT) }.to_string()
+}
+
+/// 紀念日卡片上的話（桌寵的口氣）：還有幾天（滿幾年寫在上面那行日期旁邊，這句才短）。
+fn anniversary_line(title: &str, days_left: i64) -> String {
+    match days_left {
+        0 => format!("今天是{title}喔～"),
+        1 => format!("明天就是{title}囉～"),
+        -1 => format!("昨天是{title}喔～"),
+        n if n < 0 => format!("{} 天前是{title}喔～", -n),
+        n => format!("再 {n} 天就是{title}囉～"),
+    }
+}
+
 impl ReminderModule {
     pub fn new(paths: Paths) -> Self {
         let state: State = load_json(&paths.state).unwrap_or_else(|e| {
@@ -108,25 +199,29 @@ impl ReminderModule {
         self.calendar = cal;
     }
 
-    fn reschedule(&mut self, from: NaiveDateTime) {
-        self.next = self.file.reminders.iter().filter_map(|r| Some((r.id.clone(), r.next_after(from, &self.calendar)?))).collect();
-        self.state.snoozes.retain(|id, _| self.file.reminders.iter().any(|r| &r.id == id));
-        self.state.pending.retain(|id, _| id == MISSED_KEY || self.file.reminders.iter().any(|r| &r.id == id));
+    fn entries(&self) -> impl Iterator<Item = Entry<'_>> {
+        self.file.reminders.iter().map(Entry::Reminder).chain(self.file.anniversaries.iter().map(Entry::Anniversary))
     }
 
-    /// 時間到：照這則提醒的方式跳要按完成的卡（記進 `pending`），或會自己消失的卡。
-    fn fire(&mut self, ctx: &mut Ctx, id: &str, at: NaiveDateTime) {
-        let Some(r) = self.file.reminders.iter().find(|r| r.id == id) else { return };
-        let (title, time) = (r.title.clone(), at.format(TIME_FORMAT).to_string());
-        match r.style {
-            Style::Card => {
-                ctx.card(id, Card::Reminder { title, time, snooze_open: false, icon: Icon::BellRing });
-                self.state.pending.insert(id.to_owned(), Pending::Reminder { at });
-            }
-            Style::Auto => {
-                ctx.card(id, Card::Nudge { title, time, icon: Icon::BellRing });
-                self.state.pending.remove(id);
-            }
+    fn entry(&self, key: &str) -> Option<Entry<'_>> {
+        self.entries().find(|e| e.key() == key)
+    }
+
+    fn reschedule(&mut self, from: NaiveDateTime) {
+        self.next = self.entries().filter_map(|e| Some((e.key(), e.next_after(from, &self.calendar)?))).collect();
+        let keys: HashSet<String> = self.entries().map(|e| e.key()).collect();
+        self.state.snoozes.retain(|id, _| keys.contains(id));
+        self.state.pending.retain(|id, _| id == MISSED_KEY || keys.contains(id));
+    }
+
+    /// 時間到：跳要按完成的卡（記進 `pending`），或會自己消失的卡。
+    fn fire(&mut self, ctx: &mut Ctx, key: &str, at: NaiveDateTime) {
+        let Some((card, keep)) = self.entry(key).map(|e| (e.card(at, ctx.now), e.needs_done())) else { return };
+        ctx.card(key, card);
+        if keep {
+            self.state.pending.insert(key.to_owned(), Pending::Reminder { at });
+        } else {
+            self.state.pending.remove(key);
         }
     }
 
@@ -146,33 +241,30 @@ impl ReminderModule {
     /// 剛開起來：上次關掉時還沒按掉的卡重新跳出來（提醒改成自己消失、或被刪掉的就不跳）。
     fn reshow_pending(&mut self, ctx: &mut Ctx) {
         let now = ctx.now;
-        self.state.pending.retain(|id, p| match p {
-            Pending::Reminder { at } => {
-                let Some(r) = self.file.reminders.iter().find(|r| &r.id == id).filter(|r| r.style == Style::Card) else { return false };
-                let time = if at.date() == now.date() { at.format(TIME_FORMAT) } else { at.format(DATE_TIME_FORMAT) }.to_string();
-                ctx.card(id, Card::Reminder { title: r.title.clone(), time, snooze_open: false, icon: Icon::BellRing });
-                true
-            }
-            Pending::Missed { rows, more } => {
-                ctx.card(id, Card::Missed { rows: rows.clone(), more: *more });
-                true
-            }
-        });
-    }
-
-    fn find(&self, id: &str) -> Option<&Reminder> {
-        self.file.reminders.iter().find(|r| r.id == id)
+        let mut kept = BTreeMap::new();
+        for (key, p) in std::mem::take(&mut self.state.pending) {
+            let card = match &p {
+                Pending::Reminder { at } => match self.entry(&key).filter(|e| e.needs_done()) {
+                    Some(e) => e.card(*at, now),
+                    None => continue,
+                },
+                Pending::Missed { rows, more } => Card::Missed { rows: rows.clone(), more: *more },
+            };
+            ctx.card(key.as_str(), card);
+            kept.insert(key, p);
+        }
+        self.state.pending = kept;
     }
 
     /// 這段時間錯過的提醒：(每則一列：標題、最後一次的時間, 列不下的有幾則)。
     fn missed_rows(&self, from: NaiveDateTime, to: NaiveDateTime) -> Option<(Vec<(String, String)>, usize)> {
         let mut rows = Vec::new();
-        for r in &self.file.reminders {
-            let (count, last) = r.occurrences_between(from, to, &self.calendar);
+        for e in self.entries() {
+            let (count, last) = e.occurrences_between(from, to, &self.calendar);
             let Some(last) = last else { continue };
-            let when = if last.date() == to.date() { last.format(TIME_FORMAT) } else { last.format(DATE_TIME_FORMAT) }.to_string();
+            let when = when(last, to);
             let when = if count > 1 { format!("{when}（{count} 次）") } else { when };
-            rows.push((last, r.title.clone(), when));
+            rows.push((last, e.title().to_owned(), when));
         }
         if rows.is_empty() {
             return None;
@@ -213,7 +305,7 @@ impl Module for ReminderModule {
             self.reload_file();
             let before: Vec<String> = self.next.keys().cloned().collect();
             self.reschedule(now);
-            for id in before.iter().filter(|id| self.find(id).is_none()) {
+            for id in before.iter().filter(|id| self.entry(id).is_none()) {
                 ctx.out.push(crate::modules::Request::Withdraw { key: id.clone() });
             }
         }
@@ -244,7 +336,7 @@ impl Module for ReminderModule {
         for id in due {
             let fired_at = self.next[&id];
             self.fire(ctx, &id, fired_at);
-            match self.find(&id).and_then(|r| r.next_after(now, &self.calendar)) {
+            match self.entry(&id).and_then(|e| e.next_after(now, &self.calendar)) {
                 Some(next) => self.next.insert(id, next),
                 None => self.next.remove(&id),
             };
@@ -439,6 +531,26 @@ mod tests {
         press(&mut m, MISSED_KEY, CardAction::Dismiss, dt(3, 11, 1));
         let mut m = restart(&dir);
         assert!(cards(&tick(&mut m, dt(3, 11, 2))).is_empty());
+    }
+
+    #[test]
+    fn anniversary_alerts_say_how_many_days_are_left_and_stay_until_done() {
+        use petkit::anniversary::{Alert, AnnualDate, Anniversary};
+        let alert = |days_before, h| Alert { days_before, time: NaiveTime::from_hms_opt(h, 0, 0).unwrap() };
+        let a = Anniversary { id: "mom".into(), title: "媽媽生日".into(), enabled: true, date: AnnualDate::Solar { month: 3, day: 5 }, year: Some(1966), alerts: vec![alert(3, 9), alert(0, 8)] };
+        let (_, dir) = setup(Vec::new());
+        ReminderFile { anniversaries: vec![a], ..Default::default() }.save(&dir.join("reminders.json")).unwrap();
+        let mut m = restart(&dir);
+        tick(&mut m, dt(2, 8, 0));
+        let key = format!("{ANNIVERSARY_KEY_PREFIX}mom");
+        let card = |title: &str| vec![(key.clone(), Card::Reminder { title: title.into(), time: "3/5（四） · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake })];
+        assert_eq!(cards(&tick(&mut m, dt(2, 9, 0))), card("再 3 天就是媽媽生日囉～"));
+        // 沒按完成就關掉柚伴：隔兩天重開還在，天數照當天算。
+        let mut m = restart(&dir);
+        assert_eq!(cards(&tick(&mut m, dt(4, 7, 0))), card("明天就是媽媽生日囉～"));
+        press(&mut m, &key, CardAction::Done, dt(4, 7, 0));
+        assert_eq!(cards(&tick(&mut m, dt(5, 8, 0))), card("今天是媽媽生日喔～"));
+        assert!(cards(&tick(&mut m, dt(5, 8, 1))).is_empty());
     }
 
     #[test]

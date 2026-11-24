@@ -5,6 +5,7 @@
 /// 執行檔名稱不跟著改；資料夾已改名，舊的會自動搬過來（`paths::migrate_legacy_dirs`）。
 pub const APP_NAME: &str = "柚伴";
 
+pub mod anniversary;
 pub mod companion;
 pub mod config;
 pub mod focus_status;

@@ -17,7 +17,7 @@ use petkit::holidays::{self, DayKind};
 use petkit::paths;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
 use petkit::update_status::UpdateStatus;
-use petkit::{ipc, pack, pack_edit, states};
+use petkit::{anniversary, ipc, pack, pack_edit, states};
 use serde::Serialize;
 use tauri::State;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WPARAM};
@@ -108,7 +108,33 @@ fn tokens() -> serde_json::Value {
 /// 前端要跟 Rust 同一份的常數。
 #[tauri::command]
 fn constants() -> serde_json::Value {
-    serde_json::json!({ "sizes": petkit::config::SIZE_CHOICES_DIP, "version": env!("CARGO_PKG_VERSION") })
+    serde_json::json!({
+        "sizes": petkit::config::SIZE_CHOICES_DIP,
+        "version": env!("CARGO_PKG_VERSION"),
+        "lunarMonths": anniversary::LUNAR_MONTHS,
+        "lunarDays": anniversary::LUNAR_DAYS,
+    })
+}
+
+/// 紀念日接下來幾次（列表的倒數、編輯面板的預覽），以及日期的寫法（「農曆三月初五」）。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnniversaryInfo {
+    label: String,
+    upcoming: Vec<anniversary::Occurrence>,
+    /// 離下一次還有幾天（0 = 今天）。
+    days_left: Option<i64>,
+}
+
+/// 編輯面板預覽幾次。
+const ANNIVERSARY_PREVIEW_COUNT: usize = 3;
+
+#[tauri::command]
+fn anniversary_info(anniversary: anniversary::Anniversary) -> AnniversaryInfo {
+    let today = chrono::Local::now().date_naive();
+    let upcoming = anniversary.upcoming(today, ANNIVERSARY_PREVIEW_COUNT);
+    let days_left = upcoming.first().map(|o| (o.date - today).num_days());
+    AnniversaryInfo { label: anniversary.date.label(), upcoming, days_left }
 }
 
 #[tauri::command]
@@ -505,6 +531,7 @@ fn main() {
             save_reminders,
             preview,
             official_days,
+            anniversary_info,
             list_pets,
             window_layout,
             core_running,

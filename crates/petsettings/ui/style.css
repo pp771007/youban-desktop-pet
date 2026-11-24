@@ -395,11 +395,22 @@ button, input, select { font: inherit; color: inherit; }
 .date-tile-month { background: var(--color-accent); color: var(--color-on-accent); font-size: 11px; font-weight: 700; line-height: 18px; }
 .date-tile-day { font-size: calc(var(--font-size-title) * 1px); font-weight: 700; line-height: 30px; font-variant-numeric: tabular-nums; }
 .date-tile.work .date-tile-month { background: var(--color-text-muted); color: var(--color-surface-raised); }
-/* 關掉的那天：小日曆和名字淡掉、月份變灰；「照常上班」那個標籤不淡，一眼看得出關掉之後會怎樣。 */
-.list-row.day-row.off .row-main { opacity: 1; }
+/* 關掉的那天：小日曆和名字淡掉、月份變灰；國定假日那列「照常上班」的標籤不淡，一眼看得出關掉之後會怎樣。 */
+.list-row.official-row.off .row-main { opacity: 1; }
 .day-row.off .date-tile, .day-row.off .row-title { opacity: 0.45; }
 .day-row.off .date-tile-month { background: var(--color-text-disabled); color: var(--color-surface-raised); }
 .tag-off { border-style: dashed; color: var(--color-text); }
+
+/* 紀念日右邊的倒數：數字大、「天後」小；今天、明天用強調色。 */
+.countdown { min-width: 52px; flex: none; display: flex; flex-direction: column; align-items: center; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.countdown-num { font-size: calc(var(--font-size-title) * 1px); font-weight: 700; }
+.countdown-unit { color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); }
+.countdown.soon .countdown-num { color: var(--color-accent); }
+
+/* 紀念日編輯面板：一個提醒一列（提前幾天、幾點、刪掉）。 */
+.alert-list { display: flex; flex-direction: column; gap: calc(var(--space-2) * 1px); }
+.alert-row { display: flex; align-items: center; gap: calc(var(--space-2) * 1px); }
+.alert-row .select { width: 120px; }
 
 .empty {
   display: flex;

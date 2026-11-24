@@ -32,12 +32,18 @@ const tokens = (await import(pathToFileURL(path.join(here, '..', '..', '..', 'de
 
 // 假後端：跟 src/main.rs 的指令同名同參數。
 function mockBackend(tokens) {
+  // 整個函式會被送進頁面裡跑，用到的東西都要寫在裡面（同 petkit::anniversary::LUNAR_MONTHS / LUNAR_DAYS）。
+  const LUNAR_MONTHS = ['正月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+  const LUNAR_DAYS = ['初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十', '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十', '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十'];
   const db = {
     config: { pet: 'capybara', sizeDip: 128, sleepAfterSecs: 300, activity: 'normal', roam: 'screen', talk: 'sometimes', standOnWindows: true, hideInFullscreen: true, reminderSound: true, remindInFullscreen: false, autoUpdate: true, announceNewWindows: true, restReminder: true, restEveryMinutes: 50, restStyle: 'auto', focusMinutes: 25, shortBreakMinutes: 5, longBreakMinutes: 15, focusRoundsBeforeLong: 4, focusAutoContinue: true, focusStyle: 'auto', focusCountdown: 'always', allowedArea: null, forbiddenAreas: [{ left: 100, top: 900, right: 700, bottom: 1040 }], features: { reminders: true, windowRestore: true, focus: true } },
     file: {
       reminders: [
         { id: 'a', title: '喝水', enabled: true, time: '14:00', repeat: { kind: 'daily' }, holiday: 'normal', startDate: '2026-01-01' },
         { id: 'b', title: '繳卡費', enabled: false, time: '10:30', repeat: { kind: 'monthly', rule: { kind: 'day', day: 25 } }, holiday: 'prevWorkday', startDate: '2026-01-01' },
+      ],
+      anniversaries: [
+        { id: 'mom', title: '媽媽生日', enabled: true, date: { calendar: 'lunar', month: 3, day: 5, leap: false }, year: 1966, alerts: [{ daysBefore: 3, time: '09:00' }, { daysBefore: 0, time: '09:00' }] },
       ],
       dayOverrides: {},
     },
@@ -52,7 +58,13 @@ function mockBackend(tokens) {
   const handlers = {
     initial_page: () => null,
     tokens: () => tokens,
-    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0' }),
+    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS }),
+    // 真的換算在 Rust（petkit::anniversary 有測）；這裡只回固定的「下一次在 2027/4/11、還有 12 天」。
+    anniversary_info: ({ anniversary: a }) => ({
+      label: a.date.calendar === 'lunar' ? `農曆${a.date.leap ? '閏' : ''}${LUNAR_MONTHS[a.date.month - 1]}${LUNAR_DAYS[a.date.day - 1]}` : `國曆 ${a.date.month}/${a.date.day}`,
+      upcoming: [2027, 2028, 2029].map((y, i) => ({ date: `${y}-04-${11 + i}`, nth: a.year ? y - a.year : null })),
+      daysLeft: 12,
+    }),
     load_config: () => structuredClone(db.config),
     save_config: ({ config }) => { db.config = structuredClone(config); },
     load_reminders: () => structuredClone(db.file),
@@ -242,6 +254,48 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '全部開啟' }).click();
     check(JSON.stringify(Object.keys(await overrides())) === '["2027-07-29"]' && await page.getByRole('button', { name: '全部開啟' }).isDisabled(), 'turn all back on keeps only the own special day');
 
+    // 紀念日：列表看得到農曆日期、滿幾年、什麼時候提醒、還有幾天
+    const momRow = page.locator('.list-row', { hasText: '媽媽生日' });
+    const momText = await momRow.innerText();
+    check(['農曆三月初五', '滿 61 年', '3 天前、當天 09:00', '12', '天後'].every((s) => momText.includes(s)), `anniversary row shows its lunar date, years, alerts and countdown (${momText.replace(/\n/g, ' ')})`);
+    if (shotDir) await page.locator('.section', { hasText: '新增紀念日' }).screenshot({ path: path.join(shotDir, 'anniversaries-light.png') });
+    // 新增：國曆 2/29、2015 年、三個提醒裡刪掉一個、各自的時間
+    await page.getByRole('button', { name: '新增紀念日' }).click();
+    await page.waitForFunction(() => document.activeElement?.id === 'anniv-title');
+    check(await page.locator('#anniv-save').isDisabled(), 'anniversary save disabled until named');
+    await page.locator('#anniv-title').fill('結婚紀念日');
+    await page.getByRole('button', { name: '農曆' }).click();
+    check(await page.getByRole('combobox', { name: '月' }).locator('option').first().innerText() === '正月' && await page.getByRole('checkbox', { name: '閏月' }).isVisible(), 'lunar dates pick from 正月 and can be a leap month');
+    await page.getByRole('button', { name: '國曆' }).click();
+    await page.getByRole('combobox', { name: '月' }).selectOption('2');
+    check(await page.getByRole('combobox', { name: '日' }).locator('option').count() === 29, 'February offers up to the 29th');
+    await page.getByRole('combobox', { name: '日' }).selectOption('29');
+    await page.locator('#anniv-year').fill('2015');
+    await page.locator('#anniv-year').blur();
+    await page.getByRole('combobox', { name: '第 1 個提醒提前幾天' }).selectOption('7');
+    await page.getByRole('button', { name: '再加一個提醒' }).click();
+    await page.getByLabel('第 3 個提醒幾點').fill('20:00');
+    await page.getByRole('button', { name: '刪掉第 2 個提醒' }).click();
+    const previewed = await page.waitForFunction(() => document.getElementById('anniv-preview')?.innerText.includes('滿 12 年'), null, { timeout: 3000 }).then(() => true, () => false);
+    check(previewed && await page.locator('#anniv-preview .preview-row').count() === 3, 'editor previews the next times with years');
+    if (shotDir) {
+      await page.screenshot({ path: path.join(shotDir, 'anniversary-edit-light.png') });
+      await page.evaluate(() => { const b = document.querySelector('.drawer-body'); b.scrollTop = b.scrollHeight; });
+      await page.locator('.drawer').screenshot({ path: path.join(shotDir, 'anniversary-edit-bottom-light.png') });
+    }
+    await page.locator('#anniv-save').click();
+    await page.waitForSelector('.drawer:not(.open)');
+    const wedding = await page.evaluate(() => window.__mock.file.anniversaries.find((a) => a.title === '結婚紀念日'));
+    check(JSON.stringify([wedding?.date, wedding?.year, wedding?.alerts]) === JSON.stringify([{ calendar: 'solar', month: 2, day: 29 }, 2015, [{ daysBefore: 7, time: '09:00' }, { daysBefore: 1, time: '20:00' }]]), `anniversary saved with its date, year and alerts (${JSON.stringify(wedding)})`);
+    // 刪除要先確認
+    await page.waitForFunction(() => document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
+    await page.locator('.list-row', { hasText: '結婚紀念日' }).click();
+    await page.locator('.drawer').getByRole('button', { name: '刪除' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '刪除' }).click();
+    await page.waitForSelector('.drawer:not(.open)');
+    check(await page.evaluate(() => window.__mock.file.anniversaries.map((a) => a.title).join()) === '媽媽生日', 'anniversary deleted after confirming');
+    await page.waitForFunction(() => document.getElementById('drawer').getBoundingClientRect().left >= window.innerWidth);
+
     // 桌寵：換一隻寫進設定
     await page.locator('.nav-item[data-page="pets"]').click();
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).click();
@@ -421,6 +475,18 @@ for (const scheme of ['light', 'dark']) {
   if (shotDir) {
     const official = page.locator('.section', { hasText: '國定假日與補班' });
     await official.screenshot({ path: path.join(shotDir, `official-days-${scheme}.png`) });
+    const anniversaries = page.locator('.section', { hasText: '新增紀念日' });
+    await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-${scheme}.png`) });
+    // 其他樣子（只截圖用）：今天就是、暫停中、一筆都沒有。
+    await page.evaluate(() => {
+      state.file.anniversaries.push({ ...structuredClone(state.file.anniversaries[0]), id: 'paused', title: '爸爸生日', enabled: false });
+      state.anniversaryInfo.paused = { ...state.anniversaryInfo.mom };
+      state.anniversaryInfo.mom = { ...state.anniversaryInfo.mom, daysLeft: 0 };
+      render();
+    });
+    await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-today-paused-${scheme}.png`) });
+    await page.evaluate(() => { state.file.anniversaries = []; render(); });
+    await anniversaries.screenshot({ path: path.join(shotDir, `anniversaries-empty-${scheme}.png`) });
     await official.getByRole('checkbox').first().click({ force: true });
     await official.getByRole('button', { name: '全部開啟' }).hover();
     await official.screenshot({ path: path.join(shotDir, `official-days-one-off-hover-${scheme}.png`) });
