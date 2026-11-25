@@ -36,16 +36,14 @@ mod window_restore;
 
 use petkit::reminders::Style;
 use windows::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WAIT_ABANDONED, WAIT_OBJECT_0, WPARAM,
+    ERROR_ALREADY_EXISTS, GetLastError, WAIT_ABANDONED, WAIT_OBJECT_0,
 };
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
-use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageW, WM_COPYDATA};
-use windows::core::{PCWSTR, w};
+use windows::core::w;
 
 const SNAPSHOT_FLAG: &str = "--snapshot";
 const SNAPSHOT_CARDS_FLAG: &str = "--snapshot-cards";
@@ -314,26 +312,13 @@ fn relay(flag: &str, rest: &[String]) -> i32 {
     RELAY_EXIT_SENT
 }
 
-/// 把一段 JSON 指令送給正在跑的桌寵（設定程式與自動測試用）。
+/// 把一段 JSON 指令送給正在跑的桌寵，等它做完才回來（傳話、自動測試用）。
 fn send(json: &str) -> bool {
-    unsafe {
-        let Ok(hwnd) = FindWindowW(app::pet_class(), PCWSTR::null()) else {
-            eprintln!("desktop pet is not running");
-            return false;
-        };
-        let data = COPYDATASTRUCT {
-            dwData: 0,
-            cbData: json.len() as u32,
-            lpData: json.as_ptr() as *mut _,
-        };
-        SendMessageW(
-            hwnd,
-            WM_COPYDATA,
-            Some(WPARAM(0)),
-            Some(LPARAM(&data as *const _ as isize)),
-        );
-        true
+    let sent = petkit::ipc::send(json).is_ok();
+    if !sent {
+        eprintln!("desktop pet is not running");
     }
+    sent
 }
 
 #[cfg(test)]

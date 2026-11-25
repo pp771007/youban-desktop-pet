@@ -43,7 +43,7 @@ Youban.exe（crate petcore；Rust，常駐，可設定開機自動啟動）
 ├─ 時鐘與排程器：全程式只有一個
 ├─ 模組（每個功能一個）：reminder / window-restore / pet-switch / …
 ├─ 托盤選單、log、記憶體看門狗
-└─ 收設定程式的指令（WM_COPYDATA，JSON；指令名稱在 `petkit::ipc`），每秒檢查設定檔有沒有變
+└─ 收設定程式的指令（WM_COPYDATA，JSON；指令名稱在 `petkit::ipc`，送的一方用 `ipc::send` 會等到做完才回來），每秒檢查設定檔有沒有變
 
 YoubanSettings.exe（crate petsettings；Tauri，用到才開，關掉即結束）
 └─ 提醒編輯、桌寵切換、各模組設定

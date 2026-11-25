@@ -23,17 +23,7 @@ pub enum UpdateStatus {
     Unavailable,
 }
 
-/// 檔案裡的樣子：進度 ＋ 這是在回應哪一次「檢查更新」（設定程式送指令時帶的編號）。
-/// 核心收到指令是下一圈才處理，設定程式送完馬上讀到的會是上一次的結果；要等到編號對上才算數。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UpdateReport {
-    #[serde(default)]
-    pub request: u64,
-    #[serde(flatten)]
-    pub status: UpdateStatus,
-}
-
-impl UpdateReport {
+impl UpdateStatus {
     /// 檔案不在或讀不懂都當成沒有。
     pub fn load(path: &Path) -> Option<Self> {
         serde_json::from_str(&fs::read_to_string(path).ok()?).ok()

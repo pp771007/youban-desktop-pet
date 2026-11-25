@@ -111,14 +111,8 @@ function mockBackend(tokens) {
     core_running: () => db.running,
     send_core: ({ command }) => {
       db.calls.push(command);
-      // 核心查新版：跟真的一樣下一圈才開始（送完馬上讀，讀到的還是上一次的結果）；
-      // 之後每讀一次進度往前走一步，停在最後一個，每一步都帶著這次的 request。
-      if (command.cmd === 'checkUpdate') {
-        const { request } = command;
-        setTimeout(() => {
-          db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }].map((s) => ({ ...s, request }));
-        }, 300);
-      }
+      // 核心查新版（send_core 跟真的一樣做完才回來）：每讀一次進度往前走一步，停在最後一個。
+      if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
       if (command.cmd === 'focusStart') db.focusStopLabel = '停止專注（還剩 25 分）';
       if (command.cmd === 'focusStop') db.focusStopLabel = null;
       // 傳話紀錄：跟 petkit::relay_log 一樣（清除留著還沒按完成的確認框）。

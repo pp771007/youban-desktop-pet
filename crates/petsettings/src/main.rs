@@ -17,16 +17,14 @@ use petkit::holidays::{self, DayKind};
 use petkit::paths;
 use petkit::relay_log::RelayLog;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
-use petkit::update_status::UpdateReport;
+use petkit::update_status::UpdateStatus;
 use petkit::{anniversary, ipc, pack, pack_edit, states};
 use serde::Serialize;
 use tauri::State;
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, LPARAM, WPARAM};
-use windows::Win32::System::DataExchange::COPYDATASTRUCT;
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SendMessageW, SetForegroundWindow,
-    ShowWindow, WM_COPYDATA,
+    ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -556,26 +554,21 @@ fn core_running() -> bool {
     core_window().is_some()
 }
 
+/// 送指令給核心；等它做完才回來（在背景等，畫面不會卡），前端 `await` 之後讀到的就是新的結果。
 #[tauri::command]
-fn send_core(command: serde_json::Value) -> CmdResult<()> {
-    let hwnd = core_window().ok_or("柚伴沒有在執行")?;
+async fn send_core(command: serde_json::Value) -> CmdResult<()> {
     let text = command.to_string();
-    let data = COPYDATASTRUCT {
-        dwData: 0,
-        cbData: text.len() as u32,
-        lpData: text.as_ptr() as *mut _,
-    };
+    tauri::async_runtime::spawn_blocking(move || send_core_now(&text))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn send_core_now(text: &str) -> CmdResult<()> {
+    // 核心可能要把自己的畫面拉到最前面（畫範圍要收得到 Esc）：前景權在按按鈕的設定程式手上，先讓出來。
     unsafe {
-        // 核心可能要把自己的畫面拉到最前面（畫範圍要收得到 Esc）：前景權在按按鈕的設定程式手上，先讓出來。
         let _ = AllowSetForegroundWindow(ASFW_ANY);
-        SendMessageW(
-            hwnd,
-            WM_COPYDATA,
-            Some(WPARAM(0)),
-            Some(LPARAM(&data as *const _ as isize)),
-        );
     }
-    Ok(())
+    ipc::send(text).map_err(|_| "柚伴沒有在執行".to_string())
 }
 
 /// 正在專注／休息時，「停止專注」按鈕的文字（跟右鍵選單同一句）；沒在專注是 `None`。
@@ -588,14 +581,14 @@ fn focus_stop_label() -> Option<String> {
 }
 
 #[tauri::command]
-fn update_status() -> Option<UpdateReport> {
-    UpdateReport::load(&paths::update_status_file())
+fn update_status() -> Option<UpdateStatus> {
+    UpdateStatus::load(&paths::update_status_file())
 }
 
 /// 換新版時設定程式也會被換掉：送出指令後自己先關，不要開著舊版的畫面。
 #[tauri::command]
 fn apply_update(app: tauri::AppHandle) -> CmdResult<()> {
-    send_core(serde_json::json!({ "cmd": ipc::CMD_APPLY_UPDATE }))?;
+    send_core_now(&serde_json::json!({ "cmd": ipc::CMD_APPLY_UPDATE }).to_string())?;
     app.exit(0);
     Ok(())
 }

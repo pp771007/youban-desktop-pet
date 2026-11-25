@@ -195,7 +195,8 @@ enum Event {
     HolidaysUpdated,
     /// 新版下載解好了，等空檔換上。
     UpdateReady,
-    Command(String),
+    /// 送來的指令與它的號碼（做完要記到 `COMMANDS_DONE`，送的一方在等）。
+    Command(u64, String),
     Card(Pointer, f32, f32),
     /// 在桌面上的點心／球上按下、放開左鍵（拖動算抓起來，沒拖算點一下）、按右鍵（收掉）。
     ToyDown,
@@ -220,6 +221,9 @@ struct ToySlot {
 
 thread_local! {
     static EVENTS: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+    /// 收到第幾個指令、做完到第幾個（`ipc::send` 靠它等到核心真的做完）。
+    static COMMANDS_RECEIVED: Cell<u64> = const { Cell::new(0) };
+    static COMMANDS_DONE: Cell<u64> = const { Cell::new(0) };
     /// 滑鼠在卡片按鈕上（給 WM_SETCURSOR 換成手指游標）。
     static OVER_BUTTON: Cell<bool> = const { Cell::new(false) };
 }
@@ -798,6 +802,7 @@ fn create_windows() -> Result<(HWND, HWND, HWND, HWND, HWND)> {
     // 設定程式（可能不是系統管理員權限）也要能送指令給以系統管理員權限執行的核心。
     unsafe {
         let _ = ChangeWindowMessageFilterEx(pet, WM_COPYDATA, MSGFLT_ALLOW, None);
+        let _ = ChangeWindowMessageFilterEx(pet, ipc::WM_COMMANDS_DONE, MSGFLT_ALLOW, None);
     }
     Ok((pet, card, toy, glow, countdown))
 }
@@ -937,15 +942,24 @@ extern "system" fn pet_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
                 push(Event::UpdateReady);
                 LRESULT(0)
             }
+            // 回這個指令的號碼；送的一方再用 WM_COMMANDS_DONE 問到做完為止。
             WM_COPYDATA => {
                 let data = &*(lparam.0 as *const COPYDATASTRUCT);
-                if !data.lpData.is_null() {
+                let seq = COMMANDS_RECEIVED.get() + 1;
+                COMMANDS_RECEIVED.set(seq);
+                if data.lpData.is_null() {
+                    COMMANDS_DONE.set(seq);
+                } else {
                     let bytes =
                         std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize);
-                    push(Event::Command(String::from_utf8_lossy(bytes).into_owned()));
+                    push(Event::Command(
+                        seq,
+                        String::from_utf8_lossy(bytes).into_owned(),
+                    ));
                 }
-                LRESULT(1)
+                LRESULT(seq as isize)
             }
+            ipc::WM_COMMANDS_DONE => LRESULT(COMMANDS_DONE.get() as isize),
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)
@@ -1164,7 +1178,11 @@ impl App {
                 }
                 Event::UpdateReady => self.update_ready = true,
                 Event::SettingChanged => self.refresh_palette(),
-                Event::Command(text) => self.command(&text)?,
+                Event::Command(seq, text) => {
+                    let result = self.command(&text);
+                    COMMANDS_DONE.set(seq);
+                    result?
+                }
                 Event::Area(input) => self.area_input(input)?,
                 Event::ToyDown => self.toy_press = Some(cursor()),
                 Event::ToyUp => {
@@ -1469,10 +1487,7 @@ impl App {
                 });
             }
             ipc::CMD_QUIT => self.quit(),
-            ipc::CMD_CHECK_UPDATE => {
-                updater::requested(v["request"].as_u64().unwrap_or_default());
-                self.check_update_now();
-            }
+            ipc::CMD_CHECK_UPDATE => self.check_update_now(),
             ipc::CMD_APPLY_UPDATE => self.update_now(),
             _ => self.broadcast(&ModuleEvent::Command(&v)),
         }

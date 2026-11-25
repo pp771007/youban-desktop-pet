@@ -46,9 +46,6 @@ const TOAST_MS = 2200;
 const CORE_POLL_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
 const LAYOUT_REFRESH_MS = 600;
-/** 核心收到指令先排進自己的事件佇列，下一圈才處理（寫好檔）：送完等這麼久再讀檔。 */
-const CORE_APPLY_MS = 300;
-const afterCoreApplies = () => new Promise((resolve) => setTimeout(resolve, CORE_APPLY_MS));
 const UPDATE_POLL_MS = 500;
 /** 核心還在查或下載，要繼續等結果。 */
 const UPDATE_BUSY = ['checking', 'downloading'];
@@ -1342,7 +1339,7 @@ function focusButton() {
     : h('button', { class: 'btn btn-primary', disabled: !state.coreRunning, onclick: () => send('focusStart') }, icon('tomato'), '開始專注');
 }
 
-/** 核心處理完指令才回來（`SendMessage`），送完馬上讀就是新的狀態。 */
+/** `send_core` 等核心做完指令才回來，送完馬上讀就是新的狀態。 */
 async function refreshFocus() {
   const label = await invoke('focus_stop_label');
   if (label === state.focusStopLabel) return;
@@ -1351,7 +1348,7 @@ async function refreshFocus() {
 }
 
 // ---------- 頁面：傳話 ----------
-// 傳話紀錄只讀：完成、清除、看過了都送指令給核心（只有核心寫那個檔），送完再讀回來。
+// 傳話紀錄只讀：完成、清除、看過了都送指令給核心（只有核心寫那個檔），`send_core` 等核心做完才回來，接著讀回來。
 
 async function refreshRelayLog() {
   state.relayLog = await invoke('load_relay_log');
@@ -1359,7 +1356,6 @@ async function refreshRelayLog() {
 
 async function relayCommand(command) {
   await invoke('send_core', { command });
-  await afterCoreApplies();
   await refreshRelayLog();
   render();
 }
@@ -1407,7 +1403,6 @@ async function markRelaySeen() {
   const { entries, seenUntil } = state.relayLog;
   if (!state.coreRunning || !entries.some((e) => !seenUntil || e.at > seenUntil)) return;
   await invoke('send_core', { command: { cmd: 'relayLogSeen' } });
-  await afterCoreApplies();
   await refreshRelayLog();
 }
 
@@ -1470,23 +1465,16 @@ function updateRow() {
 }
 
 async function checkUpdate() {
-  // 這次的編號：核心下一圈才處理指令，送完馬上讀到的是上一次的結果，要等到檔案裡的編號是這次的才算數。
-  const request = Date.now();
-  state.update = { state: 'checking' };
-  render();
-  await invoke('send_core', { command: { cmd: 'checkUpdate', request } });
-  await pollUpdate(request);
+  await invoke('send_core', { command: { cmd: 'checkUpdate' } });
+  await pollUpdate();
 }
 
-/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。`request`：在等哪一次「檢查更新」的結果（沒給 = 接著顯示現在的進度）。 */
-async function pollUpdate(request) {
+/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。 */
+async function pollUpdate() {
   clearTimeout(pollUpdate.timer);
-  const u = await invoke('update_status');
-  const answered = request === undefined || u?.request === request;
-  if (answered) state.update = u;
+  state.update = await invoke('update_status');
   if (state.page === 'general') render();
-  const waiting = !answered || UPDATE_BUSY.includes(u?.state);
-  if (waiting && state.coreRunning) pollUpdate.timer = setTimeout(() => pollUpdate(request), UPDATE_POLL_MS);
+  if (UPDATE_BUSY.includes(state.update?.state)) pollUpdate.timer = setTimeout(pollUpdate, UPDATE_POLL_MS);
 }
 
 // ---------- 骨架 ----------
