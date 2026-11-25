@@ -1361,6 +1361,17 @@ async function relayCommand(command) {
   render();
 }
 
+/** 貼給 AI 的一段話：叫它自己去看 `--relay-help`、照裡面的說明接 Claude Code 的 hook（路徑寫實際的位置）。 */
+function relayPrompt() {
+  const exe = state.coreExe ? `"${state.coreExe}"` : 'Youban.exe';
+  return [
+    '我裝了桌寵「柚伴」，可以透過牠跟我說話。',
+    `先執行 ${exe} --relay-help 看完整用法（在 PowerShell 要在後面接 | Out-String 才看得到輸出）。`,
+    '照說明裡的 CLAUDE CODE HOOKS 幫我接 Claude Code 的 hook：做完事、或要我決定的時候都透過柚伴通知我。',
+    '動手前先問我：要接全部專案還是只接某幾個、框上想寫什麼。',
+  ].join('\n');
+}
+
 /** 還沒按完成的確認框：清除時留著，要按「完成」才算數。 */
 const relayWaiting = (e) => e.style === 'confirm' && !e.done;
 
@@ -1370,7 +1381,9 @@ function renderRelay(page) {
   page.append(h('div', { class: 'page-head' },
     featureTitle('relay'),
     h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning || entries.every(relayWaiting), onclick: () => relayCommand({ cmd: 'relayLogClear' }) }, icon('trash-2'), '全部清除')));
-  page.append(h('div', { class: 'page-hint' }, '完整用法：', h('code', {}, RELAY_HELP_COMMAND)));
+  page.append(h('div', { class: 'page-hint' },
+    h('span', {}, '完整用法：', h('code', {}, RELAY_HELP_COMMAND)),
+    h('button', { class: 'btn btn-ghost btn-small', onclick: async () => { await navigator.clipboard.writeText(relayPrompt()); toast('已複製，貼給 AI 就好'); } }, icon('copy'), '複製給 AI 的說明')));
   if (!entries.length) {
     page.append(h('div', { class: 'card empty' },
       h('img', { src: currentPetImage(), alt: '' }),
@@ -1539,6 +1552,7 @@ async function main() {
   state.lunarMonths = constants.lunarMonths;
   state.lunarDays = constants.lunarDays;
   state.version = constants.version;
+  state.coreExe = constants.coreExe;
   document.getElementById('app-version').textContent = constants.version;
   state.pets = pets;
   await loadReminders();

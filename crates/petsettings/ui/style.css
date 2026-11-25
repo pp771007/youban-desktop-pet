@@ -129,7 +129,7 @@ button, input, select { font: inherit; color: inherit; }
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--space-3) * 1px); margin-bottom: calc(var(--space-5) * 1px); }
 .page-head h1 { margin: 0; font-size: calc(var(--font-size-display) * 1px); font-weight: 700; letter-spacing: 0.04em; }
 /* 標題底下一行小字（緊貼標題）；裡面的指令點一下就整段選起來，方便複製。 */
-.page-hint { color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); margin: calc(var(--space-4) * -1px) 0 calc(var(--space-5) * 1px); }
+.page-hint { display: flex; align-items: center; gap: calc(var(--space-3) * 1px); flex-wrap: wrap; color: var(--color-text-muted); font-size: calc(var(--font-size-caption) * 1px); margin: calc(var(--space-4) * -1px) 0 calc(var(--space-5) * 1px); }
 .page-hint code { font-family: Consolas, monospace; color: var(--color-text); user-select: all; }
 
 .section { margin-top: calc(var(--space-6) * 1px); }

@@ -67,7 +67,7 @@ function mockBackend(tokens) {
   const handlers = {
     initial_page: () => null,
     tokens: () => tokens,
-    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS }),
+    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS, coreExe: 'C:\\Pets\\Youban.exe' }),
     // 真的換算在 Rust（petkit::anniversary 有測）；這裡只回固定的「下一次在 2027/4/11、還有 12 天」。
     anniversary_info: ({ anniversary: a }) => ({
       label: a.date.calendar === 'lunar' ? `農曆${a.date.leap ? '閏' : ''}${LUNAR_MONTHS[a.date.month - 1]}${LUNAR_DAYS[a.date.day - 1]}` : `國曆 ${a.date.month}/${a.date.day}`,
@@ -465,6 +465,9 @@ for (const scheme of ['light', 'dark']) {
     check(JSON.stringify(await page.locator('.section h2').allInnerTexts()) === JSON.stringify(['Claude', '沒有署名']), 'relay log groups by sender, latest sender first');
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayLogSeen')), 'opening the relay log marks it seen');
     check(await page.locator('.page-hint code').innerText() === 'Youban.exe --relay-help', 'relay page points to the full usage');
+    await page.evaluate(() => { navigator.clipboard.writeText = async (t) => { window.__copied = t; }; });
+    await page.getByRole('button', { name: '複製給 AI 的說明' }).click();
+    check(await page.evaluate(() => window.__copied?.includes('"C:\\Pets\\Youban.exe" --relay-help') && window.__copied.includes('CLAUDE CODE HOOKS')), 'copy for AI gives the real path and points to the hook guide');
     check(await page.locator('.list-row', { hasText: '建置完成' }).getByRole('button', { name: '完成' }).count() === 0, 'notices have no done button');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-relay-light.png') });
     await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).click();

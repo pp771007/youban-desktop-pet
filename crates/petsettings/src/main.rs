@@ -115,6 +115,8 @@ fn constants() -> serde_json::Value {
         "version": env!("CARGO_PKG_VERSION"),
         "lunarMonths": anniversary::LUNAR_MONTHS,
         "lunarDays": anniversary::LUNAR_DAYS,
+        // 「複製給 AI 的說明」要寫出柚伴實際在哪（安裝版、免安裝版位置不同）。
+        "coreExe": paths::sibling_exe(paths::CORE_EXE),
     })
 }
 
