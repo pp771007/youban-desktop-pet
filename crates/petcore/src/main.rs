@@ -6,6 +6,7 @@ mod area_editor;
 mod autostart;
 mod behavior;
 mod bubble;
+mod card_stack;
 mod chatter;
 mod countdown;
 mod effects;
@@ -81,8 +82,9 @@ WHICH ONE
   --confirm  A box with Done / Later buttons. Stays until the user presses Done,
              and comes back if Youban restarts. Use it when the user has to act
              or decide: review a PR, answer a question, a job failed.
-  --notice   Disappears by itself after {notice_secs} seconds. Use it for FYI: build
-             passed, task finished. Notices arriving together merge into one list.
+  --notice   Disappears by itself after {notice_secs} seconds (the countdown waits
+             while the user is away). Use it for FYI: build passed, task finished.
+             Notices arriving together merge into one list.
   When unsure, use --notice. Do not send one for every small step.
 
 OPTIONS
@@ -109,7 +111,7 @@ POWERSHELL
   unless the output is piped:
     Youban.exe --notice "Build passed" --from Claude | Out-String; $LASTEXITCODE
 "#,
-        notice_secs = app::NOTICE_SECS,
+        notice_secs = card_stack::NOTICE_SECS,
         sent = RELAY_EXIT_SENT,
         not_running = RELAY_EXIT_NOT_RUNNING,
         usage = RELAY_EXIT_USAGE,

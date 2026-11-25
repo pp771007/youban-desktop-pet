@@ -80,6 +80,10 @@ pub trait Module {
     /// 回傳要重新跳的卡（可以換成最新的內容），`None` = 不用再跳（那筆提醒刪掉了之類）。
     /// 刻意不給預設：每個模組都要想清楚自己的卡重開後該怎樣；模組其他要跨重開的狀態自己存檔。
     fn restore_card(&mut self, key: &str, card: Card, now: NaiveDateTime) -> Option<Card>;
+    /// 還沒放上頭頂、在模組這邊排隊的則數（頭上的「+N」會算進去）。
+    fn waiting(&self) -> usize {
+        0
+    }
 }
 
 /// 專注模組現在在哪一段、還剩多久。
@@ -194,6 +198,10 @@ impl ModuleHost {
 
     pub fn session(&self, now: NaiveDateTime) -> Option<Session> {
         self.modules.iter().find_map(|m| m.session(now))
+    }
+
+    pub fn waiting(&self) -> usize {
+        self.modules.iter().map(|m| m.waiting()).sum()
     }
 
     /// 上次沒按掉的卡交給丟出它的模組；那個模組還在、也還要這張卡才回傳（連同模組 id）。

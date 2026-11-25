@@ -12,7 +12,8 @@ use windows::core::{Error, Result};
 
 use crate::app::{anchor, window_size};
 use crate::behavior::{Emote, Env, Input, Pet, Pose};
-use crate::bubble::{Card, CardPainter};
+use crate::bubble::{Card, CardPainter, Scene as CardScene, Shown};
+use crate::card_stack;
 use crate::effects::Effects;
 use crate::icons::Icon;
 use crate::paths;
@@ -269,10 +270,76 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         (Card::Speech { text: "已經連續用電腦 50 分鐘了，起來走走吧".into() }, None),
         (Card::Speech { text: "早安！今天也一起加油吧。昨天睡得好嗎？我做了一個很長很長的夢，夢到一大片橘子園，還有溫泉可以泡，真想再睡一次".into() }, None),
     ];
+    // 會自己消失的放上面那區（倒數走了三分之一），其他放下面那區。
+    let mut scenes: Vec<(CardScene, Option<usize>)> = samples
+        .into_iter()
+        .map(|(card, hover)| {
+            let transient = card_stack::linger_secs(&card).is_some();
+            let shown = Some(Shown { id: 1, card });
+            let scene = if transient {
+                CardScene {
+                    top: shown,
+                    progress: 0.35,
+                    ..CardScene::default()
+                }
+            } else {
+                CardScene {
+                    front: shown,
+                    ..CardScene::default()
+                }
+            };
+            (scene, hover)
+        })
+        .collect();
+    let reminder = Card::Confirm {
+        title: "繳電話費".into(),
+        time: "14:00".into(),
+        snooze_open: false,
+        icon: Icon::BellRing,
+    };
+    let relayed = |title: &str, time: &str| Card::Confirm {
+        title: title.into(),
+        time: time.into(),
+        snooze_open: false,
+        icon: Icon::MessageDots,
+    };
+    let behind = vec![
+        relayed("PR 有 2 則新留言", "Claude · 14:02"),
+        relayed("要你確認部署", "Codex · 14:05"),
+        relayed("磁碟快滿了", "備份腳本 · 14:06"),
+    ];
+    let notice = Shown {
+        id: 2,
+        card: Card::Notice {
+            title: "測試全部通過了".into(),
+            time: "Claude · 14:07".into(),
+            icon: Icon::MessageDots,
+        },
+    };
+    // 兩區都有、後面疊著三則（滑過「+3」）；同一個畫面攤開（滑過清單第一列的 ✓）。
+    let stacked = CardScene {
+        top: Some(notice),
+        progress: 0.6,
+        front: Some(Shown {
+            id: 1,
+            card: reminder,
+        }),
+        behind,
+        waiting: 0,
+        expanded: false,
+    };
+    scenes.push((stacked.clone(), Some(1)));
+    scenes.push((
+        CardScene {
+            expanded: true,
+            ..stacked
+        },
+        Some(2),
+    ));
     let mut sheet = Sheet { tiles: Vec::new() };
     for palette in [&theme::LIGHT, &theme::DARK] {
-        for (card, hover) in &samples {
-            let (w, h) = painter.render(card, palette, s, *hover)?;
+        for (scene, hover) in &scenes {
+            let (w, h) = painter.render(scene, palette, s, *hover, None)?;
             sheet.push(w, h, painter.canvas.pixels());
         }
     }

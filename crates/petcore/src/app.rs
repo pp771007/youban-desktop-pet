@@ -1,7 +1,6 @@
 //! 主程式：桌寵視窗、提醒卡視窗、訊息迴圈，把行為層、功能模組與繪圖層接起來。
 
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -41,7 +40,10 @@ use windows_numerics::Vector2;
 
 use crate::area_editor::{AreaEditor, AreaInput, AreaKind, AreaPreview, Outcome};
 use crate::behavior::{self, Emote, Env, Happening, Input, ItemView, Pet, Platform, Rect};
-use crate::bubble::{self, Bubble, Card, CardAction, Pointer};
+use crate::bubble::{
+    self, Bubble, Card, CardAction, More, Pointer, Press, Scene as CardScene, Shown,
+};
+use crate::card_stack::{self, CardStack};
 use crate::chatter::{self, Chatter, ChatterSaved, Moment, Say};
 use crate::countdown::{self, Countdown};
 use crate::effects::Effects;
@@ -116,10 +118,13 @@ const DEFAULT_OFFSET_HEIGHTS: f32 = 1.5;
 const HUNDRED_NS_PER_SEC: f32 = 10_000_000.0;
 /// 功能模組、設定檔變動檢查的頻率。
 const MODULE_TICK_SECS: f64 = 1.0;
-/// 一般通知卡顯示多久自動收掉。
-const INFO_SECS: f64 = 5.0;
-/// 排隊中的卡片上限（超過先丟最舊的一般通知）。
-const MAX_CARDS: usize = 32;
+/// 滑鼠鍵盤多久沒動算「人不在」：會自己消失的框停止倒數，等人回來。
+/// 不用設定裡的「多久睡著」：那個通常設好幾分鐘，人早就錯過了。
+const AWAY_SECS: f32 = 60.0;
+/// 倒數一格最多推進多久：躲起來（全螢幕）那段沒在畫，回來時不要一口氣算掉。
+const MAX_CARD_DT: f64 = 0.25;
+/// 提示音的最短間隔：一陣子連續來好幾則只響一聲。
+const CHIME_GAP_SECS: f64 = 3.0;
 /// 多久看一次要不要下載新的辦公日曆（真的下載還要看上次是何時）。
 const HOLIDAY_CHECK_SECS: f64 = 3600.0;
 const UPDATE_CHECK_SECS: f64 = 3600.0;
@@ -158,8 +163,6 @@ const STATE_SAVE_SECS: f64 = 60.0;
 const NAMED_SAY_SECS: f32 = 5.0;
 /// 功能模組請桌寵講的話（例如記住了新視窗）顯示幾秒。
 const MODULE_SAY_SECS: f32 = 4.0;
-/// 提示框留多久：比一般通知（`INFO_SECS`）久，人轉頭過來還看得到。
-pub const NOTICE_SECS: f64 = 15.0;
 
 /// `windows` crate 把它放在 Controls 功能底下（為了一個常數不值得開那整包）。
 const WM_MOUSELEAVE: u32 = 0x02A3;
@@ -317,12 +320,6 @@ struct Anim {
     elapsed_ms: f32,
 }
 
-struct Queued {
-    owner: &'static str,
-    key: String,
-    card: Card,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Phase {
     Out,
@@ -360,8 +357,16 @@ struct App {
     memwatch: MemWatch,
     tray: Tray,
     bubble: Bubble,
-    cards: VecDeque<Queued>,
-    shown_card: bool,
+    cards: CardStack,
+    /// 上一次算框的倒數是什麼時候。
+    last_cards_tick: f64,
+    /// 上一格滑鼠在不在框上（離開時把攤開的清單收起來）。
+    cards_hovered: bool,
+    /// 有新消息要響（下一次畫框時響，太密就不響）。
+    chime_due: bool,
+    last_chime: f64,
+    /// 講第幾句話（講話泡泡在畫面上的身分，換一句重播出場動畫）。
+    speech_count: u64,
     modules: ModuleHost,
     /// 目前的深淺色，再換上這隻桌寵的強調色。
     palette: Palette,
@@ -500,8 +505,12 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         memwatch: MemWatch::new(started),
         tray,
         bubble: Bubble::new(card_hwnd, &gfx)?,
-        cards: VecDeque::new(),
-        shown_card: false,
+        cards: CardStack::default(),
+        last_cards_tick: 0.0,
+        cards_hovered: false,
+        chime_due: false,
+        last_chime: f64::NEG_INFINITY,
+        speech_count: 0,
         modules,
         palette,
         transition: None,
@@ -1178,10 +1187,10 @@ impl App {
                     }
                 }
                 Event::Card(kind, x, y) => {
-                    let action = self.bubble.pointer(kind, x, y);
+                    let press = self.bubble.pointer(kind, x, y);
                     OVER_BUTTON.set(self.bubble.is_over_button(x, y));
-                    if let Some(action) = action {
-                        self.card_action(action);
+                    if let Some(press) = press {
+                        self.card_press(press);
                     }
                 }
             }
@@ -1201,9 +1210,7 @@ impl App {
         for (owner, request) in requests {
             match request {
                 Request::Card { key, card } => self.enqueue(owner, key, card),
-                Request::Withdraw { key } => {
-                    self.cards.retain(|q| !(q.owner == owner && q.key == key))
-                }
+                Request::Withdraw { key } => self.cards.withdraw(owner, &key),
                 Request::Say { text } => {
                     let now = self.now();
                     let ctx = self.talk_ctx(now);
@@ -1248,45 +1255,65 @@ impl App {
     }
 
     fn enqueue(&mut self, owner: &'static str, key: String, card: Card) {
-        if let Some(q) = self
-            .cards
-            .iter_mut()
-            .find(|q| q.owner == owner && q.key == key)
-        {
-            q.card = card;
-            self.shown_card = false;
-            return;
+        let chimes = matches!(
+            card,
+            Card::Confirm { .. }
+                | Card::Notice { .. }
+                | Card::NoticeList { .. }
+                | Card::Missed { .. }
+        );
+        if self.cards.push(owner, key, card) && chimes {
+            self.chime_due = true;
         }
-        if self.cards.len() >= MAX_CARDS {
-            let drop_at = self
-                .cards
-                .iter()
-                .position(|q| matches!(q.card, Card::Info { .. }))
-                .unwrap_or(0);
-            self.cards.remove(drop_at);
-        }
-        self.cards.push_back(Queued { owner, key, card });
     }
 
-    fn card_action(&mut self, action: CardAction) {
-        if matches!(self.bubble.card(), Some(Card::Speech { .. })) {
-            self.speech = None;
-            self.pet.stop_talking(self.now());
-            return;
+    /// 框上按了什麼。
+    fn card_press(&mut self, press: Press) {
+        match press {
+            Press::Front(action) => {
+                if self.cards.front().is_none() && self.speech.is_some() {
+                    self.speech = None;
+                    self.pet.stop_talking(self.now());
+                    return;
+                }
+                let Some(front) = self.cards.front_mut() else {
+                    return;
+                };
+                if action == CardAction::OpenSnooze {
+                    if let Card::Confirm { snooze_open, .. } = &mut front.card {
+                        *snooze_open = true;
+                    }
+                    return;
+                }
+                let seq = front.seq;
+                self.finish_card(seq, action);
+            }
+            Press::Top(action) => {
+                if let Some(seq) = self.cards.top().map(|q| q.seq) {
+                    self.finish_card(seq, action);
+                }
+            }
+            Press::Toggle => self.cards.expanded = !self.cards.expanded,
+            Press::Pick(i) => {
+                if let Some(seq) = self.cards.behind().get(i).map(|q| q.seq) {
+                    self.cards.pick(seq);
+                }
+            }
+            Press::Done(i) => {
+                if let Some(seq) = self.cards.behind().get(i).map(|q| q.seq) {
+                    self.finish_card(seq, CardAction::Done);
+                }
+            }
+            Press::More(More::RelayLog) => self.open_settings(Some(SETTINGS_PAGE_RELAY)),
+            Press::More(More::Reminders) => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
         }
-        let Some(front) = self.cards.front_mut() else {
+    }
+
+    /// 某一則按掉了：核心自己的在這裡處理，其他的告訴丟出它的模組。
+    fn finish_card(&mut self, seq: u64, action: CardAction) {
+        let Some(q) = self.cards.take(seq) else {
             return;
         };
-        if action == CardAction::OpenSnooze {
-            if let Card::Confirm { snooze_open, .. } = &mut front.card {
-                *snooze_open = true;
-                let card = front.card.clone();
-                self.bubble.show(card, self.now(), false);
-            }
-            return;
-        }
-        let q = self.cards.pop_front().expect("front exists");
-        self.shown_card = false;
         if q.owner == "core" && q.key == REST_CARD_KEY {
             if let CardAction::Snooze(minutes) = action {
                 let every = self.rest_every_secs();
@@ -1305,7 +1332,7 @@ impl App {
     }
 
     /// 卡片收掉了（按了按鈕，或時間到自己消失）：告訴丟出它的模組。
-    fn card_closed(&mut self, q: &Queued, action: CardAction) {
+    fn card_closed(&mut self, q: &card_stack::Item, action: CardAction) {
         let mut out = Vec::new();
         self.modules.send(
             q.owner,
@@ -1345,8 +1372,11 @@ impl App {
                     "snooze" => Some(CardAction::Snooze(v["minutes"].as_u64().unwrap_or(5) as u32)),
                     _ => None,
                 };
+                // 預設按下面那區最前面那則；`"target": "top"`（或下面沒有框時）按上面那區的。
+                let top = v["target"].as_str() == Some("top")
+                    || self.cards.front().is_none() && self.cards.top().is_some();
                 if let Some(a) = action {
-                    self.card_action(a);
+                    self.card_press(if top { Press::Top(a) } else { Press::Front(a) });
                 }
             }
             ipc::CMD_SWITCH_PET => {
@@ -1476,6 +1506,8 @@ impl App {
             "x": self.pet.x,
             "y": self.pet.y,
             "card": self.cards.front().map(|q| format!("{}:{}:{:?}", q.owner, q.key, q.card)),
+            "topCard": self.cards.top().map(|q| format!("{}:{}:{:?}", q.owner, q.key, q.card)),
+            "behind": self.cards.behind().len(),
             "speech": self.speech.as_ref().map(|s| s.text.clone()),
             "days": self.companions.days(&self.pack.id),
             "toy": self.toy.as_ref().map(|t| serde_json::json!({ "kind": format!("{:?}", t.toy.kind), "x": t.toy.x, "y": t.toy.y, "resting": t.toy.resting, "kicks": t.toy.kicks })),
@@ -1705,7 +1737,6 @@ impl App {
                 if busy {
                     self.glow.hide(self.glow_hwnd);
                     self.bubble.hide();
-                    self.shown_card = false;
                 } else {
                     // 重新出現時馬上放回最上層。
                     self.last_topmost = f64::NEG_INFINITY;
@@ -2391,8 +2422,8 @@ impl App {
                     icon: Icon::BellRing,
                 },
             ),
-            Action::OpenSnooze => self.card_action(CardAction::OpenSnooze),
-            Action::Done => self.card_action(CardAction::Done),
+            Action::OpenSnooze => self.card_press(Press::Front(CardAction::OpenSnooze)),
+            Action::Done => self.card_press(Press::Front(CardAction::Done)),
             Action::ShowInfo => self.enqueue(
                 "core",
                 "info".into(),
@@ -2462,7 +2493,7 @@ impl App {
                 .modules
                 .sync(&enabled_modules(&self.config), make_module)
             {
-                self.cards.retain(|q| q.owner != id);
+                self.cards.remove_owner(id);
             }
             log!("modules now {:?}", self.modules.ids());
         }
@@ -2573,6 +2604,7 @@ impl App {
         if let Some(e) = say.emote {
             self.effects.spawn(e, now);
         }
+        self.speech_count += 1;
         self.speech = Some(Speech {
             text: say.text,
             until: now + say.secs as f64,
@@ -2589,56 +2621,61 @@ impl App {
             self.speech = None;
             self.pet.stop_talking(now);
         }
-        let linger = self.cards.front().and_then(|q| match q.card {
-            Card::Info { .. } => Some(INFO_SECS),
-            Card::Notice { .. } | Card::NoticeList { .. } => Some(NOTICE_SECS),
-            _ => None,
-        });
-        if let Some(secs) = linger
-            && self.shown_card
-            && self.bubble.shown_for(now) >= secs
-        {
-            let q = self.cards.pop_front().expect("front exists");
-            self.shown_card = false;
-            self.card_closed(&q, CardAction::Dismiss);
+        let dt = (now - self.last_cards_tick).clamp(0.0, MAX_CARD_DT);
+        self.last_cards_tick = now;
+        let hovered = self.bubble.hovered();
+        if self.cards_hovered && !hovered {
+            self.cards.expanded = false;
         }
-        match self.cards.front() {
-            Some(q) => {
-                if !self.shown_card || self.bubble.card() != Some(&q.card) {
-                    let animate = !self.shown_card;
-                    if animate
-                        && self.config.reminder_sound
-                        && matches!(
-                            q.card,
-                            Card::Confirm { .. }
-                                | Card::Notice { .. }
-                                | Card::NoticeList { .. }
-                                | Card::Missed { .. }
-                        )
-                    {
-                        play_reminder_sound();
-                    }
-                    self.bubble.show(q.card.clone(), now, animate);
-                    self.shown_card = true;
+        self.cards_hovered = hovered;
+        self.cards.refresh(hovered);
+        let away = idle_input_secs() >= AWAY_SECS;
+        if let Some(q) = self.cards.tick(dt, hovered || away) {
+            self.card_closed(&q, CardAction::Dismiss);
+            self.cards.refresh(hovered);
+        }
+        if std::mem::take(&mut self.chime_due)
+            && self.config.reminder_sound
+            && now - self.last_chime >= CHIME_GAP_SECS
+        {
+            play_reminder_sound();
+            self.last_chime = now;
+        }
+        let shown = |q: &card_stack::Item| Shown {
+            id: q.seq,
+            card: q.card.clone(),
+        };
+        let top = self.cards.top().map(shown);
+        let front = self.cards.front().map(shown);
+        if top.is_some() || front.is_some() {
+            let scene = CardScene {
+                top,
+                progress: self.cards.top_progress(),
+                front,
+                behind: self.cards.behind().iter().map(|q| q.card.clone()).collect(),
+                waiting: self.modules.waiting(),
+                expanded: self.cards.expanded,
+            };
+            self.bubble.set_scene(scene, now);
+        } else {
+            match &self.speech {
+                Some(s) => {
+                    let scene = CardScene {
+                        front: Some(Shown {
+                            id: u64::MAX - self.speech_count,
+                            card: Card::Speech {
+                                text: s.text.clone(),
+                            },
+                        }),
+                        ..CardScene::default()
+                    };
+                    self.bubble.set_scene(scene, now);
+                    self.bubble
+                        .set_fade(((s.until - now) / SPEECH_FADE_SECS) as f32);
                 }
-            }
-            None => {
-                self.shown_card = false;
-                match &self.speech {
-                    Some(s) => {
-                        let card = Card::Speech {
-                            text: s.text.clone(),
-                        };
-                        if self.bubble.card() != Some(&card) {
-                            self.bubble.show(card, now, true);
-                        }
-                        self.bubble
-                            .set_fade(((s.until - now) / SPEECH_FADE_SECS) as f32);
-                    }
-                    None => {
-                        self.bubble.hide();
-                        OVER_BUTTON.set(false);
-                    }
+                None => {
+                    self.bubble.hide();
+                    OVER_BUTTON.set(false);
                 }
             }
         }
@@ -2906,12 +2943,13 @@ impl App {
 
     /// 換日：佇列裡還沒按掉的卡照今天重畫，原地換掉（不重跳、不響）。說不用再跳的照原樣留著，等使用者按。
     fn redraw_cards_for_new_day(&mut self, now: chrono::NaiveDateTime) {
-        for i in 0..self.cards.len() {
-            let q = &self.cards[i];
-            if !q.card.needs_done() {
-                continue;
-            }
-            let (owner, key, old) = (q.owner, q.key.clone(), q.card.clone());
+        let waiting: Vec<(u64, &'static str, String, Card)> = self
+            .cards
+            .iter()
+            .filter(|q| q.card.needs_done())
+            .map(|q| (q.seq, q.owner, q.key.clone(), q.card.clone()))
+            .collect();
+        for (seq, owner, key, old) in waiting {
             let Some((_, mut card)) = self.restore_card(owner, &key, old.clone(), now) else {
                 continue;
             };
@@ -2925,7 +2963,9 @@ impl App {
             {
                 *snooze_open = *was_open;
             }
-            self.cards[i].card = card;
+            if let Some(q) = self.cards.iter_mut().find(|q| q.seq == seq) {
+                q.card = card;
+            }
         }
     }
 

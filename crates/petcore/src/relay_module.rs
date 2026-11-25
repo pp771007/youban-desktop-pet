@@ -1,12 +1,12 @@
 //! 傳話模組：AI 或其他程式用 `Youban.exe --confirm/--notice` 送來的話，跳確認框或提示框（用詞見 `CONTEXT.md`）。
 //!
-//! 好幾個來源可能同時送、也可能一直送，所以傳話在核心的卡片佇列裡**最多只佔兩格**：
-//! 一格確認框（其他的在這裡排隊，按掉一張才送下一張）、一格提示框（還沒收掉之前來的都併進去，
-//! 兩則以上就變成提示清單，照來源排在一起）。
-//! 核心的佇列滿了會丟掉最前面的卡，不這樣限制的話，一直送的程式會把使用者自己排的提醒擠掉。
+//! 好幾個來源可能同時送、也可能一直送：
+//! - 確認框每則一個，疊在頭上的下面那區（排在使用者自己的提醒後面，見 `card_stack`）。
+//!   一次最多放 `MAX_SHOWN` 個上去，其餘在這裡排隊，按掉一個補一個；排隊的則數算進頭上的「+N」。
+//! - 提示框只佔一格：還沒收掉之前來的都併進去，兩則以上就變成提示清單，照來源排在一起。
 //!
 //! 確認框（排隊中、跳著的、按了稍後的）存在 `relay-state.json`，重開柚伴還會再跳；提示框不存，重開就算了。
-//! 每一則另外記進傳話紀錄（`petkit::relay_log`），這個模組是唯一寫它的地方。
+//! 每一則另外記進傳話紀錄（`petkit::relay_log`），這個模組是唯一寫它的地方；頭上看不到的，紀錄裡都還在。
 
 use std::path::PathBuf;
 
@@ -23,6 +23,8 @@ use crate::log;
 use crate::modules::{Ctx, Module, ModuleEvent, Request};
 
 pub const ID: &str = "relay";
+/// 確認框一次最多幾個放上頭頂：一直送的程式不會把核心的框佇列塞滿（也就擠不掉使用者自己的提醒）。
+pub const MAX_SHOWN: usize = 8;
 /// 提示框在核心佇列裡那一格的卡片代號（確認框用每則自己的代號，按鈕才知道按的是哪一則）。
 const NOTICE_KEY: &str = "notice";
 /// 沒帶 `id` 的傳話，卡片代號是這個前綴 + 流水號（帶 `id` 的是 JSON 陣列，不會撞到）。
@@ -87,7 +89,7 @@ fn notice_slot_card(slot: &[Message], now: NaiveDateTime) -> Option<Card> {
     }
 }
 
-/// 只存確認框：跳著的那則存檔時放回排隊的最前面（核心有沒有存到那張卡不一定，這裡自己負責再跳）。
+/// 只存確認框：跳著的存檔時放在排隊的最前面（核心有沒有存到那些卡不一定，這裡自己負責再跳）。
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct State {
@@ -101,7 +103,8 @@ pub struct RelayModule {
     log_path: PathBuf,
     log: RelayLog,
     waiting: Vec<Message>,
-    shown: Option<Message>,
+    /// 放上頭頂的確認框（最多 `MAX_SHOWN` 個），照進來的先後。
+    shown: Vec<Message>,
     snoozed: Vec<(Message, NaiveDateTime)>,
     /// 提示框那一格裡的全部（核心佇列裡有這一格 ⇔ 不是空的）。
     notice_slot: Vec<Message>,
@@ -123,7 +126,7 @@ impl RelayModule {
             log_path,
             log,
             waiting: state.waiting,
-            shown: None,
+            shown: Vec::new(),
             snoozed: state.snoozed,
             notice_slot: Vec::new(),
             next_seq: state.next_seq,
@@ -160,7 +163,7 @@ impl RelayModule {
         };
         self.waiting.retain(|m| m.key != msg.key);
         self.snoozed.retain(|(m, _)| m.key != msg.key);
-        let shown_here = self.shown.as_ref().is_some_and(|m| m.key == msg.key);
+        let shown_at = self.shown.iter().position(|m| m.key == msg.key);
         let in_slot = self.notice_slot.iter().position(|m| m.key == msg.key);
         match relay.style {
             Style::Confirm => {
@@ -168,16 +171,17 @@ impl RelayModule {
                     self.notice_slot.remove(i);
                     self.refresh_notice_slot(ctx);
                 }
-                if shown_here {
-                    ctx.card(msg.key.clone(), msg.confirm_card(ctx.now));
-                    self.shown = Some(msg);
-                } else {
-                    self.waiting.push(msg);
+                match shown_at {
+                    Some(i) => {
+                        ctx.card(msg.key.clone(), msg.confirm_card(ctx.now));
+                        self.shown[i] = msg;
+                    }
+                    None => self.waiting.push(msg),
                 }
             }
             Style::Notice => {
-                if shown_here {
-                    self.shown = None;
+                if let Some(i) = shown_at {
+                    self.shown.remove(i);
                     ctx.out.push(Request::Withdraw {
                         key: msg.key.clone(),
                     });
@@ -193,12 +197,12 @@ impl RelayModule {
         self.save();
     }
 
-    /// 確認框那一格空出來了就補上排最前面的那則。
+    /// 頭上還有空位就補上排最前面的。
     fn pump(&mut self, ctx: &mut Ctx) {
-        if self.shown.is_none() && !self.waiting.is_empty() {
+        while self.shown.len() < MAX_SHOWN && !self.waiting.is_empty() {
             let msg = self.waiting.remove(0);
             ctx.card(msg.key.clone(), msg.confirm_card(ctx.now));
-            self.shown = Some(msg);
+            self.shown.push(msg);
         }
     }
 
@@ -214,8 +218,8 @@ impl RelayModule {
 
     /// 傳話紀錄上按了「完成」：跳著的就收掉，還在排隊或稍後的就不用再跳了。
     fn done(&mut self, key: &str, ctx: &mut Ctx) {
-        if self.shown.as_ref().is_some_and(|m| m.key == key) {
-            self.shown = None;
+        if let Some(i) = self.shown.iter().position(|m| m.key == key) {
+            self.shown.remove(i);
             ctx.out.push(Request::Withdraw { key: key.into() });
         }
         self.waiting.retain(|m| m.key != key);
@@ -270,9 +274,9 @@ impl Module for RelayModule {
                 self.waiting.insert(i, m);
             }
         }
-        // 重開後排隊裡的確認框（核心沒存到跳著的那張時）也是在這裡補上。
-        let idle = self.shown.is_none() && !self.waiting.is_empty();
-        if any_due || idle {
+        // 重開後排隊裡的確認框（核心沒存到的那些）也是在這裡補上。
+        let room = self.shown.len() < MAX_SHOWN && !self.waiting.is_empty();
+        if any_due || room {
             self.pump(ctx);
             self.save();
         }
@@ -306,15 +310,15 @@ impl Module for RelayModule {
             ModuleEvent::Card { key, action } => {
                 if *key == NOTICE_KEY {
                     self.notice_slot.clear();
-                } else if self.shown.as_ref().is_some_and(|m| m.key == *key) {
+                } else if let Some(i) = self.shown.iter().position(|m| m.key == *key) {
                     match action {
                         CardAction::OpenSnooze => return,
                         CardAction::Snooze(minutes) => {
                             let until = ctx.now + Duration::minutes(i64::from(*minutes));
-                            self.snoozed.extend(self.shown.take().map(|m| (m, until)));
+                            self.snoozed.push((self.shown.remove(i), until));
                         }
                         CardAction::Done | CardAction::Dismiss => {
-                            self.shown = None;
+                            self.shown.remove(i);
                             self.log.mark_done(key);
                             self.save_log();
                         }
@@ -327,20 +331,24 @@ impl Module for RelayModule {
         }
     }
 
-    /// 重開時核心還回來的確認框：還在排隊就讓它當跳著的那則；換日時跳著的那則照今天重畫（時間加上日期）。
+    /// 重開時核心還回來的確認框：還在排隊、頭上也還有空位就放上去；換日時跳著的照今天重畫（時間加上日期）。
     /// 核心沒存到的，第一次 tick 會從排隊裡自己補上，所以這裡說不要也不會漏。
     fn restore_card(&mut self, key: &str, _card: Card, now: NaiveDateTime) -> Option<Card> {
-        if self.shown.as_ref().is_some_and(|m| m.key == key) {
-            return self.shown.as_ref().map(|m| m.confirm_card(now));
+        if let Some(m) = self.shown.iter().find(|m| m.key == key) {
+            return Some(m.confirm_card(now));
         }
-        if self.shown.is_some() {
+        if self.shown.len() >= MAX_SHOWN {
             return None;
         }
         let i = self.waiting.iter().position(|m| m.key == key)?;
         let msg = self.waiting.remove(i);
         let card = msg.confirm_card(now);
-        self.shown = Some(msg);
+        self.shown.push(msg);
         Some(card)
+    }
+
+    fn waiting(&self) -> usize {
+        self.waiting.len()
     }
 }
 
@@ -374,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn done_in_the_log_closes_the_card_and_shows_the_next() {
+    fn done_in_the_log_closes_the_card() {
         let path = state_path();
         let mut m = open(&path);
         send(
@@ -398,7 +406,6 @@ mod tests {
             m.on_event(&ModuleEvent::Command(&v), ctx)
         });
         assert!(out.contains(&Request::Withdraw { key: "#1".into() }));
-        assert_eq!(titles(&out), ["審 PR"]);
         let log = RelayLog::load(&path.with_file_name("relay-log.json")).unwrap();
         let done: Vec<bool> = log.entries.iter().map(|e| e.done).collect();
         assert_eq!(done, [true, false]);
@@ -497,10 +504,11 @@ mod tests {
     }
 
     #[test]
-    fn many_senders_take_at_most_one_confirm_and_one_notice_slot() {
+    fn a_flood_shows_up_to_max_confirms_and_one_notice_slot() {
         let mut m = open(&state_path());
         let mut shown = Vec::new();
-        for i in 0..50 {
+        let senders = 50;
+        for i in 0..senders {
             let from = format!("AI{i}");
             shown.extend(send(
                 &mut m,
@@ -520,20 +528,23 @@ mod tests {
             ));
         }
         let mut keys: Vec<String> = cards(&shown).into_iter().map(|(k, _)| k).collect();
+        keys.sort();
         keys.dedup();
-        assert_eq!(keys, ["#1", NOTICE_KEY]);
+        // 確認框各自一個（最多 MAX_SHOWN 個），提示框只佔一格；其餘在排隊，算進頭上的「+N」。
+        assert_eq!(keys.len(), MAX_SHOWN + 1);
+        assert_eq!(m.waiting(), senders - MAX_SHOWN);
         // 提示框那一格一直原地更新成提示清單：列 4 則，其餘「還有 N 則」。
         let Some((_, Card::NoticeList { rows, more })) = cards(&shown).pop() else {
             panic!("expected a notice list");
         };
-        assert_eq!((rows.len(), more), (LIST_MAX_ROWS, 50 - LIST_MAX_ROWS));
-        // 確認框按掉一張才補下一張。
+        assert_eq!((rows.len(), more), (LIST_MAX_ROWS, senders - LIST_MAX_ROWS));
+        // 確認框按掉一個補一個。
         let next = press(&mut m, dt(24, 9, 1), "#1", CardAction::Done);
         assert_eq!(
             cards(&next)[0].1,
             Card::Confirm {
                 title: "要看".into(),
-                time: "AI1 · 09:00".into(),
+                time: format!("AI{MAX_SHOWN} · 09:00"),
                 snooze_open: false,
                 icon: ICON,
             }
@@ -589,15 +600,7 @@ mod tests {
     #[test]
     fn same_sender_and_id_updates_instead_of_piling_up() {
         let mut m = open(&state_path());
-        send(
-            &mut m,
-            dt(24, 9, 0),
-            Style::Confirm,
-            "佔住確認框",
-            None,
-            None,
-        );
-        send(
+        let first = send(
             &mut m,
             dt(24, 9, 0),
             Style::Confirm,
@@ -605,7 +608,8 @@ mod tests {
             Some("Claude"),
             Some("build"),
         );
-        send(
+        let key = cards(&first)[0].0.clone();
+        let out = send(
             &mut m,
             dt(24, 9, 1),
             Style::Confirm,
@@ -613,8 +617,10 @@ mod tests {
             Some("Claude"),
             Some("build"),
         );
+        assert_eq!(cards(&out)[0].0, key);
+        assert_eq!(titles(&out), ["建置失敗"]);
         // 別的來源用同一個 id 是另一則。
-        send(
+        let other = send(
             &mut m,
             dt(24, 9, 2),
             Style::Confirm,
@@ -622,13 +628,7 @@ mod tests {
             Some("Codex"),
             Some("build"),
         );
-        let a = press(&mut m, dt(24, 9, 3), "#1", CardAction::Done);
-        let key = cards(&a)[0].0.clone();
-        assert_eq!(titles(&a), ["建置失敗"]);
-        assert_eq!(
-            titles(&press(&mut m, dt(24, 9, 3), &key, CardAction::Done)),
-            ["部署好了"]
-        );
+        assert_ne!(cards(&other)[0].0, key);
     }
 
     #[test]
@@ -683,8 +683,8 @@ mod tests {
     fn confirms_survive_a_restart_but_notices_do_not() {
         let path = state_path();
         let mut m = open(&path);
+        send(&mut m, dt(24, 9, 0), Style::Confirm, "按掉的", None, None);
         send(&mut m, dt(24, 9, 0), Style::Confirm, "跳著的", None, None);
-        send(&mut m, dt(24, 9, 0), Style::Confirm, "排隊的", None, None);
         send(&mut m, dt(24, 9, 0), Style::Notice, "提示", None, None);
         send(
             &mut m,
@@ -694,15 +694,11 @@ mod tests {
             Some("Claude"),
             Some("x"),
         );
-        press(&mut m, dt(24, 9, 1), "#1", CardAction::Done);
         let snoozed_key = serde_json::to_string(&(Some("Claude"), "x")).unwrap();
-        // 「排隊的」現在跳著；按「稍後的」之前先讓它輪到。
-        press(&mut m, dt(24, 9, 1), "#2", CardAction::Done);
+        press(&mut m, dt(24, 9, 1), "#1", CardAction::Done);
         press(&mut m, dt(24, 9, 1), &snoozed_key, CardAction::Snooze(60));
-        send(&mut m, dt(24, 9, 2), Style::Confirm, "跳著的2", None, None);
-        send(&mut m, dt(24, 9, 2), Style::Confirm, "排隊的2", None, None);
 
-        // 關掉再開：核心還回跳著的那張，排隊的、稍後的也都還在；提示框不會再跳。
+        // 關掉再開：核心還回跳著的那張（照今天重畫）；稍後的時間到了再跳；按掉的、提示框都不會再跳。
         let mut m = open(&path);
         let card = Card::Confirm {
             title: String::new(),
@@ -710,18 +706,15 @@ mod tests {
             snooze_open: false,
             icon: ICON,
         };
-        let back = m.restore_card("#4", card, dt(25, 8, 0)).unwrap();
+        let back = m.restore_card("#2", card, dt(25, 8, 0)).unwrap();
         assert!(
-            matches!(back, Card::Confirm { title, time, .. } if title == "跳著的2" && time == "11/24 09:02")
+            matches!(back, Card::Confirm { title, time, .. } if title == "跳著的" && time == "11/24 09:00")
         );
-        // 稍後的時間已經過了：排到最前面，等跳著的那張按掉。
-        assert!(cards(&run(&mut m, dt(25, 8, 0), |m, ctx| m.tick(ctx))).is_empty());
         assert_eq!(
-            titles(&press(&mut m, dt(25, 8, 1), "#4", CardAction::Done)),
+            titles(&run(&mut m, dt(25, 8, 0), |m, ctx| m.tick(ctx))),
             ["稍後的"]
         );
-        let next = press(&mut m, dt(25, 8, 1), &snoozed_key, CardAction::Done);
-        assert_eq!(titles(&next), ["排隊的2"]);
+        assert!(cards(&run(&mut m, dt(25, 8, 1), |m, ctx| m.tick(ctx))).is_empty());
     }
 
     #[test]
