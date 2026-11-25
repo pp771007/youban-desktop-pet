@@ -55,5 +55,5 @@ repo 公開在 GitHub 上，這份檔、其他文件、程式註解、commit 訊
 ## Git
 
 - GitHub 上是**公開** repo（私人 repo 的 Release 下載要權杖，自動更新用不了）；什麼不能寫見最上面那節。
-- 發版照 `docs/DEVELOPMENT.md` 的「發版」：改版號 → 推帶玩家說明的 annotated tag → GitHub Actions 自動測試、打包、發 Release。已發布的 tag 不要再動。
+- 發版照 `docs/DEVELOPMENT.md` 的「發版」：改版號、本機打帶玩家說明的 annotated tag → 先只推 main，等 `ci.yml` 綠 → 才推 tag → GitHub Actions 打包、發 Release。不用在本機跑測試。已發布的 tag 不要再動。
 - **推 tag 之前先把版號、玩家看的更新說明全文、會影響誰講給使用者聽，等他同意**。`.claude/hooks/release-guard.mjs` 會擋推 tag、`gh release create` 這類指令，擋下時的訊息會說怎麼放行。缺口：它只在「這個 repo 開的 session」裡生效，從別的資料夾開的 session 進來操作不會被擋；用變數拼出來的指令也認不出來。

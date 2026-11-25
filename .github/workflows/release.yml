@@ -1,5 +1,7 @@
-# 推 v* tag → 在 GitHub 的 Windows 機器上測試、打包、發 Release（附 zip）。
-# 手動執行（Actions 頁的 Run workflow）只測試和打包、把 zip 留在執行紀錄裡，不發 Release —— 用來先確認建置沒壞。
+# 推 v* tag → 在 GitHub 的 Windows 機器上打包、發 Release（附 zip）。
+# 測試在 ci.yml（推 main 時跑）：這裡先等同一個 commit 的 CI 結果，綠了才打包、紅了就停；
+# 那個 commit 沒有 CI 紀錄（例如沒經過 main 就打 tag）才在這裡自己測。
+# 手動執行（Actions 頁的 Run workflow）只打包、把 zip 留在執行紀錄裡，不發 Release —— 用來先確認建置沒壞。
 # Release 說明取自 tag 的訊息：`git tag -a v0.2.0 -m "給玩家看的更新說明"`。
 name: release
 
@@ -10,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: read # 查 ci.yml 的執行結果
 
 jobs:
   release:
@@ -30,7 +33,36 @@ jobs:
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           if ("v$version" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} 跟 Cargo.toml 的版號 $version 不一樣" }
 
-      - name: 測試
+      - name: 等這個 commit 的 CI 結果
+        id: ci
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # main 和 tag 一起推時，CI 要過一下子才查得到；等這麼久都查不到就當作這個 commit 沒跑過 CI
+          NO_RUN_GRACE_SECS: 120
+          POLL_SECS: 20
+        run: |
+          $deadline = (Get-Date).AddSeconds([int]$env:NO_RUN_GRACE_SECS)
+          while ($true) {
+            $json = gh run list --repo "${{ github.repository }}" --workflow ci.yml --commit "${{ github.sha }}" --json databaseId,status,conclusion --limit 1
+            $run = if ($LASTEXITCODE -eq 0 -and $json) { $json | ConvertFrom-Json | Select-Object -First 1 }
+            if ($run -and $run.status -eq 'completed') {
+              $url = "https://github.com/${{ github.repository }}/actions/runs/$($run.databaseId)"
+              if ($run.conclusion -eq 'success') { Write-Host "CI 綠了：$url"; exit 0 }
+              throw "這個 commit 的 CI 沒過（$($run.conclusion)），不打包：$url。修好再發；若是 GitHub 自己出狀況，在那頁重新執行 CI，綠了再重新執行這個工作。"
+            }
+            if ($run) {
+              Write-Host "CI 還在跑（$($run.status)），$($env:POLL_SECS) 秒後再看"
+            } elseif ((Get-Date) -gt $deadline) {
+              Write-Host '這個 commit 沒有 CI 紀錄，改在這裡跑測試'
+              Add-Content -Path $env:GITHUB_OUTPUT -Value 'need_test=true'
+              exit 0
+            }
+            Start-Sleep -Seconds ([int]$env:POLL_SECS)
+          }
+
+      - name: 測試（這個 commit 沒有 CI 紀錄時）
+        if: steps.ci.outputs.need_test == 'true'
         run: cargo test
 
       - name: 裝 Inno Setup（做安裝程式用；語言檔要 6.5 以上）

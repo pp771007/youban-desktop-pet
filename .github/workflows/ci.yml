@@ -1,0 +1,24 @@
+# 推 main、開 PR 時在 GitHub 的 Windows 機器上跑測試。
+# 發版（release.yml）用檔名 ci.yml 找這裡的結果：同一個 commit 綠了才打包，所以改檔名要一起改那邊。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 測試
+        run: cargo test

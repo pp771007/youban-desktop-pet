@@ -40,17 +40,18 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 
 ## 發版
 
-1. `Cargo.toml` 的版本號加一，commit、push
-2. 打 tag，訊息寫給玩家看的更新說明（會變成 Release 的說明），推上去：
+1. `Cargo.toml` 的版本號加一（`cargo update --workspace` 跟著更新 `Cargo.lock`），commit，在本機打 tag，訊息寫給玩家看的更新說明（會變成 Release 的說明）：
 
    ```
    git tag -a v0.2.0 -m "新增：……"
-   git push origin v0.2.0
    ```
 
-3. GitHub Actions（`.github/workflows/release.yml`）會在 Windows 機器上測試、打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼。tag 跟 `Cargo.toml` 版號對不上就直接失敗，不會發。
+2. **先只推 main**（`git push origin main`），等 GitHub Actions 的 `ci.yml` 跑完測試。不用在本機先跑：CI 是乾淨環境，只看得到 commit 進去的檔案。
+3. **CI 綠了才推 tag**（`git push origin v0.2.0`）。紅了就不推，修好再來；tag 還沒公開，本機刪掉重打就好。已經推出去的 tag 不要再動。
+4. `release.yml` 會在 Windows 機器上打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼。
+   它不重跑測試，而是先等同一個 commit 在 `ci.yml` 的結果：綠了才打包，紅了就停（main 和 tag 一起推也一樣，只是多等幾分鐘）；那個 commit 沒有 CI 紀錄才自己測。tag 跟 `Cargo.toml` 版號對不上也直接失敗，不會發。
 
-想先確認建置沒壞：Actions 頁手動 Run workflow，只測試和打包（zip 留在執行紀錄），不發 Release。
+想先確認建置沒壞：Actions 頁手動 Run workflow，只打包（zip 留在執行紀錄），不發 Release。
 本機打包：`powershell -File scripts\package.ps1`（產生 zip；有裝 Inno Setup 6.5 以上才會一起做安裝程式）。不想裝進系統的話，Inno Setup 的安裝檔可以 `/PORTABLE=1 /CURRENTUSER /DIR=<資料夾>` 解到任何地方，再把 `$env:ISCC` 指到裡面的 `ISCC.exe`。
 在 Git Bash 裡跑會叫到 GNU tar 而失敗，請從 PowerShell 跑。
 
