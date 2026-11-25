@@ -1434,6 +1434,7 @@ impl App {
                         color.d2d(),
                         self.dpi_scale(),
                         self.now(),
+                        v["blink"].as_bool().unwrap_or_default(),
                     )?);
                 }
             }
@@ -1738,6 +1739,10 @@ impl App {
             FPS_HIDDEN
         } else if self.effects.active()
             || self.transition.is_some()
+            || self
+                .area_preview
+                .as_ref()
+                .is_some_and(AreaPreview::blinking)
             || self.now() - self.last_ride_move < RIDE_SMOOTH_SECS
             || self
                 .toy
@@ -2060,6 +2065,9 @@ impl App {
             .is_some_and(|p| now - p.shown_at > AREA_PREVIEW_MAX_SECS)
         {
             self.area_preview = None;
+        }
+        if let Some(preview) = self.area_preview.as_mut() {
+            preview.tick(now)?;
         }
         if let Some(menu) = self.menu.as_mut() {
             menu.tick(now)?;

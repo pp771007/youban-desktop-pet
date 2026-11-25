@@ -697,7 +697,7 @@ button, input, select { font: inherit; color: inherit; }
 .setting-title .icon { color: var(--color-accent); }
 .setting-error { color: var(--color-danger); font-size: calc(var(--font-size-caption) * 1px); }
 /* 範圍那幾列：滑過時桌面上會框出那塊範圍，這裡用同一個顏色呼應（禁止＝紅、活動＝主題色）。 */
-.area-row { --area: var(--color-danger); transition: background calc(var(--motion-fast) * 1ms); }
+.area-row { --area: var(--color-danger); cursor: pointer; transition: background calc(var(--motion-fast) * 1ms); }
 .area-row.area-allowed { --area: var(--color-accent); }
 .area-row:hover { background: color-mix(in srgb, var(--area) 10%, transparent); }
 .area-swatch { width: 14px; height: 14px; flex: none; border: 2px solid var(--area); border-radius: 3px; background: color-mix(in srgb, var(--area) 22%, transparent); }

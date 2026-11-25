@@ -1175,23 +1175,24 @@ function promptPanel(s, example) {
 }
 
 /** 活動範圍選了「只在範圍內」或「避開這些地方」時，底下列出畫好的框。框由核心在螢幕上畫，畫好寫進設定檔。 */
-/** 叫核心在桌面上框出一個範圍；不帶範圍 = 收掉。核心沒在跑就算了。 */
-function previewArea(kind, area) {
-  invoke('send_core', { command: area ? { cmd: 'previewArea', kind, area } : { cmd: 'previewArea' } }).catch(() => {});
+/** 叫核心在桌面上框出一個範圍（`blink` = 先閃幾下）；不帶範圍 = 收掉。核心沒在跑就算了。 */
+function previewArea(kind, area, blink = false) {
+  invoke('send_core', { command: area ? { cmd: 'previewArea', kind, area, blink } : { cmd: 'previewArea' } }).catch(() => {});
 }
 
 function areaRows() {
   const draw = (kind) => invoke('send_core', { command: { cmd: 'drawArea', kind } });
   const size = (a) => h('span', { class: 'tag' }, `${a.right - a.left} × ${a.bottom - a.top}`);
   const drawButton = (kind, glyph, label) => h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => draw(kind) }, icon(glyph), label);
-  // 滑鼠移到某個範圍那一列：桌面上框出那塊範圍，移開就收掉。
+  // 滑鼠移到某個範圍那一列：桌面上框出那塊範圍、先閃幾下（一眼找得到在哪），移開就收掉；點那一列（按鈕以外）再閃一輪。
   // 標題前的小方塊長得跟桌面上的框一樣，滑過時整列染同一個顏色（`.area-row`）。
   const swatch = () => h('span', { class: 'area-swatch' });
   const preview = (row, kind, area) => {
     row.classList.add('area-row', `area-${kind}`);
     row.querySelector('.setting-title').prepend(swatch());
-    row.addEventListener('mouseenter', () => previewArea(kind, area));
+    row.addEventListener('mouseenter', () => previewArea(kind, area, true));
     row.addEventListener('mouseleave', () => previewArea());
+    row.addEventListener('click', (e) => { if (!e.target.closest('button')) previewArea(kind, area, true); });
     return row;
   };
   if (state.config.roam === 'inside') {

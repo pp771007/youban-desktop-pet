@@ -22,6 +22,10 @@ const DIM_ALPHA: f32 = 0.28;
 /// 範圍裡面的底色、邊框粗細（DIP）。
 const FILL_ALPHA: f32 = 0.22;
 const BORDER_DIP: f32 = 2.0;
+/// 在設定裡點了某個範圍：桌面上那個框閃幾下、一下多久、最淡淡到多少（不完全消失，看得出是同一個框）。
+const BLINK_TIMES: f64 = 3.0;
+const BLINK_SECS: f64 = 0.4;
+const BLINK_MIN_OPACITY: f32 = 0.15;
 const HINT: &str = "拖曳框出範圍　Esc 取消";
 /// 提示放在螢幕上緣往下多少（DIP），字的大小、膠囊的左右留白。
 const HINT_TOP_DIP: f32 = 48.0;
@@ -283,10 +287,14 @@ impl Drop for AreaEditor {
 
 /// 設定程式裡滑鼠移到某個範圍那一列時，桌面上框出那塊範圍（跟畫範圍時同一個樣子）。
 /// 滑鼠點擊穿過它，不擋後面的視窗；收掉（`drop`）時連視窗一起關。
+/// 帶 `blink` 開的會先閃幾下（每一格 `tick`），再停在完整顯示。
 pub struct AreaPreview {
     hwnd: HWND,
     /// 什麼時候開的：設定程式來不及叫收掉（例如當掉）時，過一陣子自己收。
     pub shown_at: f64,
+    canvas: Canvas,
+    origin: POINT,
+    blinking: bool,
 }
 
 impl AreaPreview {
@@ -297,6 +305,7 @@ impl AreaPreview {
         color: D2D1_COLOR_F,
         scale: f32,
         now: f64,
+        blink: bool,
     ) -> Result<Self> {
         let (w, h) = (area.width().max(1), area.height().max(1));
         let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None)? };
@@ -319,10 +328,6 @@ impl AreaPreview {
                 Some(instance.into()),
                 None,
             )?
-        };
-        let preview = Self {
-            hwnd,
-            shown_at: now,
         };
         let mut canvas = Canvas::new(gfx)?;
         canvas.ensure_size(w, h)?;
@@ -354,18 +359,42 @@ impl AreaPreview {
             rt.DrawRectangle(&rect, &b, border, None);
             rt.EndDraw(None, None)?;
         }
-        canvas.present(
-            hwnd,
-            POINT {
-                x: area.left,
-                y: area.top,
-            },
-            1.0,
-        )?;
+        let origin = POINT {
+            x: area.left,
+            y: area.top,
+        };
+        canvas.present(hwnd, origin, 1.0)?;
         unsafe {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
-        Ok(preview)
+        Ok(Self {
+            hwnd,
+            shown_at: now,
+            canvas,
+            origin,
+            blinking: blink,
+        })
+    }
+
+    /// 每一格呼叫：閃的時候照時間換透明度，閃完停在完整顯示。
+    pub fn tick(&mut self, now: f64) -> Result<()> {
+        if !self.blinking {
+            return Ok(());
+        }
+        let t = now - self.shown_at;
+        let opacity = if t >= BLINK_TIMES * BLINK_SECS {
+            self.blinking = false;
+            1.0
+        } else {
+            // 每一下從亮到淡再回到亮（餘弦，邊緣不會硬切）。
+            let wave = (t / BLINK_SECS * std::f64::consts::TAU).cos() as f32;
+            BLINK_MIN_OPACITY + (1.0 - BLINK_MIN_OPACITY) * (wave + 1.0) / 2.0
+        };
+        self.canvas.present(self.hwnd, self.origin, opacity)
+    }
+
+    pub fn blinking(&self) -> bool {
+        self.blinking
     }
 }
 

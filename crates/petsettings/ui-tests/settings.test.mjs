@@ -383,7 +383,11 @@ for (const scheme of ['light', 'dark']) {
     // 滑鼠移到那一列：請核心在桌面上框出來；移開就收掉
     await page.locator('.setting', { hasText: '禁止範圍 1' }).hover();
     if (shotDir) await page.locator('.setting', { hasText: '禁止範圍 1' }).screenshot({ path: path.join(shotDir, 'settings-area-hover-light.png') });
-    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'previewArea' && c.kind === 'forbidden' && c.area?.left === 100 && c.area?.bottom === 1040)), 'hovering a forbidden area previews it on the desktop');
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'previewArea' && c.kind === 'forbidden' && c.area?.left === 100 && c.area?.bottom === 1040 && c.blink)), 'hovering a forbidden area previews it blinking on the desktop');
+    check(await page.locator('.setting', { hasText: '禁止範圍 1' }).evaluate((el) => getComputedStyle(el).cursor) === 'pointer', 'an area row shows a pointing hand');
+    const before = await page.evaluate(() => window.__mock.calls.length);
+    await page.locator('.setting', { hasText: '禁止範圍 1' }).locator('.setting-title').click();
+    check(await page.evaluate((n) => window.__mock.calls.slice(n).some((c) => c.cmd === 'previewArea' && c.blink), before), 'clicking an area row blinks it again');
     await page.getByRole('heading', { name: '行為' }).hover();
     check(await page.evaluate(() => { const c = window.__mock.calls.at(-1); return c.cmd === 'previewArea' && !c.area; }), 'leaving the row hides the preview');
     await page.getByRole('button', { name: '刪除禁止範圍 1' }).click();
