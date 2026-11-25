@@ -23,7 +23,7 @@ const DIM_ALPHA: f32 = 0.28;
 const FILL_ALPHA: f32 = 0.22;
 const BORDER_DIP: f32 = 2.0;
 /// 在設定裡點了某個範圍：桌面上那個框閃幾下、一下多久、最淡淡到多少（不完全消失，看得出是同一個框）。
-const BLINK_TIMES: f64 = 3.0;
+const BLINK_TIMES: f64 = 2.0;
 const BLINK_SECS: f64 = 0.4;
 const BLINK_MIN_OPACITY: f32 = 0.15;
 const HINT: &str = "拖曳框出範圍　Esc 取消";
