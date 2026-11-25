@@ -55,8 +55,10 @@ const UPDATE_BUSY = ['checking', 'downloading'];
 const DEFAULT_PAGE = 'reminders';
 /** 功能開關：設定檔 features 的欄位 → 名稱與它的頁面（側邊欄「功能」那一組）。 */
 const FEATURES = [['reminders', '提醒', 'reminders'], ['windowRestore', '視窗歸位', 'windows'], ['focus', '專注', 'focus'], ['relay', '傳話', 'relay']];
-/** 傳話紀錄空著時給的例子（完整用法在 README）。 */
+/** 傳話紀錄空著時給的例子。 */
 const RELAY_EXAMPLE = 'Youban.exe --notice "要說的話"';
+/** 印出完整傳話用法的指令（核心的 `RELAY_HELP_FLAG`）。 */
+const RELAY_HELP_COMMAND = 'Youban.exe --relay-help';
 const RELAY_NO_SENDER = '沒有署名';
 
 const state = {
@@ -1365,6 +1367,7 @@ function renderRelay(page) {
   page.append(h('div', { class: 'page-head' },
     featureTitle('relay'),
     h('button', { class: 'btn btn-secondary', disabled: !state.coreRunning || entries.every(relayWaiting), onclick: () => relayCommand({ cmd: 'relayLogClear' }) }, icon('trash-2'), '全部清除')));
+  page.append(h('div', { class: 'page-hint' }, '完整用法：', h('code', {}, RELAY_HELP_COMMAND)));
   if (!entries.length) {
     page.append(h('div', { class: 'card empty' },
       h('img', { src: currentPetImage(), alt: '' }),

@@ -457,6 +457,7 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.section h2', { hasText: 'Claude' }).waitFor();
     check(JSON.stringify(await page.locator('.section h2').allInnerTexts()) === JSON.stringify(['Claude', '沒有署名']), 'relay log groups by sender, latest sender first');
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayLogSeen')), 'opening the relay log marks it seen');
+    check(await page.locator('.page-hint code').innerText() === 'Youban.exe --relay-help', 'relay page points to the full usage');
     check(await page.locator('.list-row', { hasText: '建置完成' }).getByRole('button', { name: '完成' }).count() === 0, 'notices have no done button');
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-relay-light.png') });
     await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).click();
