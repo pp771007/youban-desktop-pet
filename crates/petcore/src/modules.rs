@@ -97,6 +97,8 @@ pub struct Session {
     /// 這一段在什麼時候結束、第幾輪（寫進 `FocusStatus` 用）。
     pub until: NaiveDateTime,
     pub round: u32,
+    /// 這一輪專注從什麼時候開始（休息中、或從舊版的狀態檔接著跑時沒有）。
+    pub since: Option<NaiveDateTime>,
 }
 
 /// 右鍵選單上一個模組的那一組。

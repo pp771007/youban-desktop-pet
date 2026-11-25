@@ -136,6 +136,13 @@ const DIZZY_RESPIN_SECS: f32 = 1.6;
 const WAKE_INPUT_SECS: f32 = 1.0;
 /// 打瞌睡只在使用者有一陣子沒動電腦時才會出現。
 const DOZE_AFTER_IDLE_SECS: f32 = 60.0;
+/// 專注這一輪過了幾成之後開始想睡（打哈欠、打瞌睡變多）、睡著。照比例算，25 分鐘、50 分鐘的專注都適用。
+const FOCUS_DROWSY_FROM: f32 = 0.4;
+const FOCUS_ASLEEP_FROM: f32 = 0.7;
+/// 想睡的時候打哈欠、打瞌睡的機會乘幾倍。
+const FOCUS_DROWSY_MUL: f32 = 4.0;
+/// 專注中被點醒之後，過多久才會再睡回去。
+const FOCUS_REWAKE_SECS: f64 = 30.0;
 const DRAG_MAX_ANGLE: f32 = 28.0;
 const NOTIFY_CYCLE_SECS: f32 = 1.6;
 /// 拖曳時鐘擺：水平速度換算成目標角度的係數、彈簧與阻尼。
@@ -307,6 +314,8 @@ pub struct Env {
     pub wall_right: f32,
     pub ceiling: f32,
     pub item: Option<ItemView>,
+    /// 專注中（不含休息）這一輪過了幾成（0～1）：前段陪著、中段想睡、後段睡著。
+    pub focus_progress: Option<f32>,
 }
 
 impl Env {
@@ -595,6 +604,12 @@ pub struct Pet {
     grab: Option<Grab>,
     /// 硬跳沒跳到：掉過這個高度（對面的頂端）時冒汗。
     miss_y: Option<f32>,
+    /// 最近一次 `update` 的時間（判斷要不要睡時用）。
+    last_now: f64,
+    /// 專注中被點了：這個時間以前不因為專注睡著。
+    focus_awake_until: f64,
+    /// 現在這一覺是專注睡的（專注結束時伸懶腰醒來，不算使用者回來了）。
+    focus_slept: bool,
     rng: u64,
 }
 
@@ -636,6 +651,9 @@ impl Pet {
             bump: None,
             grab: None,
             miss_y: None,
+            last_now: 0.0,
+            focus_awake_until: f64::NEG_INFINITY,
+            focus_slept: false,
             rng: seed | 1,
         };
         pet.set_idle(now);
@@ -791,6 +809,7 @@ impl Pet {
     pub fn input(&mut self, input: Input, now: f64, env: &Env) -> bool {
         match input {
             Input::PointerDown { x, y } => {
+                self.focus_awake_until = now + FOCUS_REWAKE_SECS;
                 self.press = Some(Press {
                     start_x: x,
                     start_y: y,
@@ -895,6 +914,7 @@ impl Pet {
 
     /// 推進一格。回傳 `true` = 這一格剛落地。
     pub fn update(&mut self, now: f64, dt: f32, env: &Env) -> bool {
+        self.last_now = now;
         let mut landed = false;
         if self.notices_item(env, now) {
             self.emote(Emote::Alert);
@@ -1293,7 +1313,16 @@ impl Pet {
             }
             Mode::Sleep => {
                 self.stand(env, now);
-                if env.idle_input_secs < WAKE_INPUT_SECS {
+                if self.focus_sleepy(env) {
+                    // 專注後段：使用者在打字也照睡。
+                    self.focus_slept = true;
+                } else if self.focus_slept {
+                    self.focus_slept = false;
+                    if env.idle_input_secs < env.sleep_after_secs {
+                        // 專注結束（或被點醒）：伸個懶腰醒來，使用者一直都在，不算「回來了」。
+                        self.set_mode(Mode::Stretch, now);
+                    }
+                } else if env.idle_input_secs < WAKE_INPUT_SECS {
                     self.happen(Happening::Woke { slept_secs: t });
                     self.set_idle(now);
                 }
@@ -2145,7 +2174,13 @@ impl Pet {
     }
 
     fn should_sleep(&self, env: &Env) -> bool {
-        env.idle_input_secs >= env.sleep_after_secs
+        env.idle_input_secs >= env.sleep_after_secs || self.focus_sleepy(env)
+    }
+
+    /// 專注到後段，該睡著了（剛被點醒的那一陣子除外）。
+    fn focus_sleepy(&self, env: &Env) -> bool {
+        env.focus_progress.is_some_and(|p| p >= FOCUS_ASLEEP_FROM)
+            && self.last_now >= self.focus_awake_until
     }
 
     /// 站在地上或視窗頂端；腳下的東西不見了（走出視窗邊緣、視窗被移走、工作列收起）就掉下去。
@@ -2197,8 +2232,10 @@ impl Pet {
     }
 
     fn pick_next_activity(&mut self, now: f64, env: &Env) {
-        let doze = if env.idle_input_secs >= DOZE_AFTER_IDLE_SECS {
-            NEXT_DOZE
+        let drowsy = env.focus_progress.is_some_and(|p| p >= FOCUS_DROWSY_FROM);
+        let sleepy_mul = if drowsy { FOCUS_DROWSY_MUL } else { 1.0 };
+        let doze = if drowsy || env.idle_input_secs >= DOZE_AFTER_IDLE_SECS {
+            NEXT_DOZE * sleepy_mul
         } else {
             0.0
         };
@@ -2222,7 +2259,7 @@ impl Pet {
             NEXT_LOOK,
             NEXT_STRETCH,
             doze,
-            NEXT_YAWN,
+            NEXT_YAWN * sleepy_mul,
             sit,
             spin,
             roll,
@@ -2385,6 +2422,7 @@ mod tests {
             wall_right: 1864.0,
             ceiling: 0.0,
             item: None,
+            focus_progress: None,
         }
     }
 
@@ -2559,6 +2597,44 @@ mod tests {
         env.idle_input_secs = 0.2;
         run(&mut pet, &mut now, 0.1, &env);
         assert_eq!(pet.state(), states::IDLE);
+    }
+
+    #[test]
+    fn dozes_off_late_in_focus_and_stretches_awake_for_the_break() {
+        let mut env = env();
+        let mut now = 0.0;
+        let mut pet = Pet::new(500.0, 1000.0, now, 3);
+        // 使用者一直在打字。
+        env.idle_input_secs = 0.0;
+        env.focus_progress = Some(FOCUS_ASLEEP_FROM - 0.05);
+        run(&mut pet, &mut now, 0.1, &env);
+        assert_ne!(pet.state(), states::SLEEP);
+        env.focus_progress = Some(FOCUS_ASLEEP_FROM);
+        run(&mut pet, &mut now, 0.1, &env);
+        assert_eq!(pet.state(), states::SLEEP);
+        // 換休息：伸懶腰醒來，不是「你回來啦」。
+        env.focus_progress = None;
+        pet.drain_happenings();
+        run(&mut pet, &mut now, 0.1, &env);
+        assert_eq!(pet.state(), states::WAKE);
+        assert!(pet.drain_happenings().is_empty());
+    }
+
+    #[test]
+    fn a_click_wakes_it_during_focus_for_a_while() {
+        let mut env = env();
+        let mut now = 0.0;
+        let mut pet = Pet::new(500.0, 1000.0, now, 3);
+        env.idle_input_secs = 0.0;
+        env.focus_progress = Some(0.9);
+        run(&mut pet, &mut now, 0.1, &env);
+        assert_eq!(pet.state(), states::SLEEP);
+        pet.input(Input::PointerDown { x: 500.0, y: 950.0 }, now, &env);
+        pet.input(Input::PointerUp, now, &env);
+        run(&mut pet, &mut now, FOCUS_REWAKE_SECS as f32 - 1.0, &env);
+        assert_ne!(pet.state(), states::SLEEP);
+        run(&mut pet, &mut now, 10.0, &env);
+        assert_eq!(pet.state(), states::SLEEP);
     }
 
     #[test]

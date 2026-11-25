@@ -130,6 +130,7 @@ pub fn pet(out: &Path, dpi: u32) -> Result<()> {
         wall_right: 10_000.0,
         ceiling: 0.0,
         item: None,
+        focus_progress: None,
     };
     let mut sim = Sim {
         pet: Pet::new(5000.0, ground, 0.0, 12345),

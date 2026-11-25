@@ -58,10 +58,11 @@ fn line(lines: &[&str], now: NaiveDateTime, fill: &[(&str, u32)]) -> String {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Phase {
     Idle,
-    /// 第 `round` 輪專注到 `until`。
+    /// 第 `round` 輪專注，從 `since` 到 `until`。
     Focus {
         until: NaiveDateTime,
         round: u32,
+        since: Option<NaiveDateTime>,
     },
     Break {
         until: NaiveDateTime,
@@ -97,11 +98,17 @@ impl FocusModule {
                 focusing: true,
                 until,
                 round,
-            }) => Phase::Focus { until, round },
+                since,
+            }) => Phase::Focus {
+                until,
+                round,
+                since,
+            },
             Some(FocusStatus {
                 focusing: false,
                 until,
                 round,
+                ..
             }) => Phase::Break { until, round },
         };
         Self {
@@ -114,6 +121,7 @@ impl FocusModule {
         self.phase = Phase::Focus {
             until: ctx.now + minutes(ctx.config.focus_minutes),
             round: 1,
+            since: Some(ctx.now),
         };
         self.before = Phase::Idle;
         ctx.say(line(START, ctx.now, &[]));
@@ -130,15 +138,21 @@ impl FocusModule {
     fn status(&self) -> Option<FocusStatus> {
         match self.phase {
             Phase::Idle => None,
-            Phase::Focus { until, round } => Some(FocusStatus {
+            Phase::Focus {
+                until,
+                round,
+                since,
+            } => Some(FocusStatus {
                 focusing: true,
                 until,
                 round,
+                since,
             }),
             Phase::Break { until, round } => Some(FocusStatus {
                 focusing: false,
                 until,
                 round,
+                since: None,
             }),
         }
     }
@@ -179,7 +193,7 @@ impl Module for FocusModule {
     fn tick(&mut self, ctx: &mut Ctx) {
         let now = ctx.now;
         match self.phase {
-            Phase::Focus { until, round } if now >= until => {
+            Phase::Focus { until, round, .. } if now >= until => {
                 let long = is_long_break(round, ctx.config);
                 let rest = if long {
                     ctx.config.long_break_minutes
@@ -207,6 +221,7 @@ impl Module for FocusModule {
                     Phase::Focus {
                         until: now + minutes(ctx.config.focus_minutes),
                         round: round + 1,
+                        since: Some(now),
                     }
                 } else {
                     Phase::Idle
@@ -233,7 +248,11 @@ impl Module for FocusModule {
             } => {
                 let until = ctx.now + minutes(*m);
                 self.phase = match self.before {
-                    Phase::Focus { round, .. } => Phase::Focus { until, round },
+                    Phase::Focus { round, .. } => Phase::Focus {
+                        until,
+                        round,
+                        since: Some(ctx.now),
+                    },
                     Phase::Break { round, .. } => Phase::Break { until, round },
                     Phase::Idle => self.phase,
                 };
@@ -258,6 +277,7 @@ impl Module for FocusModule {
             minutes_left: s.minutes_left(now),
             until: s.until,
             round: s.round,
+            since: s.since,
         })
     }
 
@@ -390,6 +410,7 @@ mod tests {
         f.phase = Phase::Focus {
             until: at(9, 25),
             round: 4,
+            since: Some(at(9, 0)),
         };
         let mut f = FocusModule::resume(f.status());
         assert!(

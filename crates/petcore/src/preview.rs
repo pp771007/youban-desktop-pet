@@ -425,6 +425,7 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
         wall_right: stage_w as f32,
         ceiling: 0.0,
         item: None,
+        focus_progress: None,
     };
     let frame_dt = 1.0 / FPS;
     let anchor = anchor(size);

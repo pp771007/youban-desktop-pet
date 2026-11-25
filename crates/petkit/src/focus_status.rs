@@ -19,6 +19,9 @@ pub struct FocusStatus {
     /// 第幾輪：核心重開時從這裡接著算，長休息才不會跑掉。
     #[serde(default = "first_round")]
     pub round: u32,
+    /// 這一輪專注從什麼時候開始（算過了幾成用；休息中沒有。舊版寫的檔也沒有）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<NaiveDateTime>,
 }
 
 fn first_round() -> u32 {

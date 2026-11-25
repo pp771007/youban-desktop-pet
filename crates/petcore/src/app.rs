@@ -1257,6 +1257,7 @@ impl App {
             focusing: s.focusing,
             until: s.until,
             round: s.round,
+            since: s.since,
         });
         if self.focus_written == Some(status) {
             return;
@@ -1679,6 +1680,15 @@ impl App {
         }
     }
 
+    /// 專注中（不含休息）這一輪過了幾成；不知道從什麼時候開始的（舊版的狀態檔）就不算。
+    fn focus_progress(&self) -> Option<f32> {
+        let now = local_now();
+        let s = self.modules.session(now).filter(|s| s.focusing)?;
+        let since = s.since?;
+        let total = (s.until - since).num_seconds();
+        (total > 0).then(|| ((now - since).num_seconds() as f32 / total as f32).clamp(0.0, 1.0))
+    }
+
     /// 專注中（不含中間的休息）。
     fn focusing(&self) -> bool {
         self.modules
@@ -1874,6 +1884,7 @@ impl App {
             px_per_dip: self.dpi_scale(),
             idle_input_secs: idle_input_secs(),
             sleep_after_secs: self.config.sleep_after_secs as f32,
+            focus_progress: self.focus_progress(),
             walk_speed_dip: self.pack.states.get(states::WALK).and_then(|s| s.speed),
             cursor: Some(cursor()),
             pet_height: self.sprites.base_height,
