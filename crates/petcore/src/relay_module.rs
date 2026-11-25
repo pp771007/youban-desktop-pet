@@ -12,7 +12,9 @@ use std::path::PathBuf;
 
 use chrono::{Duration, NaiveDateTime};
 use petkit::config::{load_json, write_atomic};
-use petkit::ipc::{CMD_RELAY, CMD_RELAY_DONE, CMD_RELAY_LOG_CLEAR, CMD_RELAY_LOG_SEEN, Relay};
+use petkit::ipc::{
+    CMD_RELAY, CMD_RELAY_DONE, CMD_RELAY_LOG_CLEAR, CMD_RELAY_LOG_SEEN, Relay, relay_key,
+};
 use petkit::relay_log::{LogEntry, RelayLog};
 use petkit::reminders::Style;
 use serde::{Deserialize, Serialize};
@@ -139,7 +141,7 @@ impl RelayModule {
             return;
         }
         let key = match &relay.id {
-            Some(id) => serde_json::to_string(&(&relay.from, id)).expect("strings serialize"),
+            Some(id) => relay_key(relay.from.as_deref(), id),
             None => {
                 self.next_seq += 1;
                 format!("{SEQ_KEY_PREFIX}{}", self.next_seq)
@@ -216,11 +218,15 @@ impl RelayModule {
         }
     }
 
-    /// 傳話紀錄上按了「完成」：跳著的就收掉，還在排隊或稍後的就不用再跳了。
+    /// 傳話紀錄上按了「完成」、或送的那一方 `--done`：跳著的就收掉（提示框也是），還在排隊或稍後的就不用再跳了。
     fn done(&mut self, key: &str, ctx: &mut Ctx) {
         if let Some(i) = self.shown.iter().position(|m| m.key == key) {
             self.shown.remove(i);
             ctx.out.push(Request::Withdraw { key: key.into() });
+        }
+        if let Some(i) = self.notice_slot.iter().position(|m| m.key == key) {
+            self.notice_slot.remove(i);
+            self.refresh_notice_slot(ctx);
         }
         self.waiting.retain(|m| m.key != key);
         self.snoozed.retain(|(m, _)| m.key != key);
@@ -479,6 +485,27 @@ mod tests {
     }
 
     #[test]
+    fn done_from_the_sender_closes_a_notice_too() {
+        let mut m = open(&state_path());
+        send(
+            &mut m,
+            dt(24, 9, 0),
+            Style::Notice,
+            "等你回答",
+            Some("Claude"),
+            Some("ask"),
+        );
+        let v =
+            serde_json::json!({ "cmd": CMD_RELAY_DONE, "key": relay_key(Some("Claude"), "ask") });
+        let out = run(&mut m, dt(24, 9, 1), |m, ctx| {
+            m.on_event(&ModuleEvent::Command(&v), ctx)
+        });
+        assert!(out.contains(&Request::Withdraw {
+            key: NOTICE_KEY.into()
+        }));
+    }
+
+    #[test]
     fn shows_the_sender_and_time_on_the_card() {
         let mut m = open(&state_path());
         let out = send(
@@ -694,7 +721,7 @@ mod tests {
             Some("Claude"),
             Some("x"),
         );
-        let snoozed_key = serde_json::to_string(&(Some("Claude"), "x")).unwrap();
+        let snoozed_key = relay_key(Some("Claude"), "x");
         press(&mut m, dt(24, 9, 1), "#1", CardAction::Done);
         press(&mut m, dt(24, 9, 1), &snoozed_key, CardAction::Snooze(60));
 

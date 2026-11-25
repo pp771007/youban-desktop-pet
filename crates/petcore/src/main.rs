@@ -55,6 +55,8 @@ const QUIT_FLAG: &str = "--quit";
 /// 傳話（給 AI 和其他程式用，用詞見 `CONTEXT.md`）：`--confirm` 跳確認框、`--notice` 跳提示框。
 const CONFIRM_FLAG: &str = "--confirm";
 const NOTICE_FLAG: &str = "--notice";
+/// 收掉之前傳的那一則（同一組 `--from`、`--id`），例如使用者已經在別的地方處理掉了。
+const DONE_FLAG: &str = "--done";
 const RELAY_FROM_OPT: &str = "--from";
 const RELAY_ID_OPT: &str = "--id";
 const RELAY_DETAIL_OPT: &str = "--detail";
@@ -77,6 +79,9 @@ USAGE
   Youban.exe --notice  <message> [--from <name>] [--id <key>] [--detail <text>]
   Youban.exe --notice  <message> <message> ... [--from <name>]
     Several messages in one call, each its own box (no --id / --detail then).
+  Youban.exe --done [--from <name>] --id <key>
+    Close a message sent earlier with the same --from and --id (for example the
+    user already answered somewhere else). It is marked done in the relay log.
 
 WHICH ONE
   --confirm  A box with Done / Later buttons. Stays until the user presses Done,
@@ -110,6 +115,31 @@ POWERSHELL
   PowerShell does not wait for Youban.exe (and $LASTEXITCODE stays empty)
   unless the output is piped:
     Youban.exe --notice "Build passed" --from Claude | Out-String; $LASTEXITCODE
+
+CLAUDE CODE HOOKS
+  To tell the user when Claude Code finishes or needs a decision, add hooks to
+  ~/.claude/settings.json (every project) or <project>/.claude/settings.json
+  (that project only). Each hook gets JSON on stdin with session_id, cwd and
+  transcript_path (a JSONL file). A setup that works well:
+    Stop
+        --notice, e.g. "<session name> is done". If the user renamed the
+        session, the name is in the last {{"type":"custom-title"}} line of the
+        transcript.
+    Notification (matcher: permission_prompt|elicitation_dialog)
+        --confirm. Its message is only "Claude needs your permission": read
+        the last tool_use in the transcript to say what it wants to run.
+    PreToolUse (matcher: AskUserQuestion)
+        --confirm with tool_input.questions[0].question. A Notification
+        follows right after it; skip that one when the last tool_use is
+        AskUserQuestion.
+    PostToolUse (matcher: *), UserPromptSubmit, Stop
+        --done for the --confirm above: the user already answered in the
+        terminal. Keep a temp file saying one is open, so most tool calls
+        never start Youban.exe.
+  Use one --id per session (for example confirm-<first 8 of session_id>) so
+  repeats replace each other. Always exit 0: a closed pet must not block Claude.
+  Pass arguments to Youban.exe directly (Node spawn, Python subprocess,
+  PowerShell); going through Git Bash garbles non-ASCII text.
 "#,
         notice_secs = card_stack::NOTICE_SECS,
         sent = RELAY_EXIT_SENT,
@@ -190,6 +220,7 @@ fn main() {
         }
         Some(SEND_FLAG) => std::process::exit(if send(arg(2).unwrap_or("{}")) { 0 } else { 1 }),
         Some(flag @ (CONFIRM_FLAG | NOTICE_FLAG)) => std::process::exit(relay(flag, &args[2..])),
+        Some(DONE_FLAG) => std::process::exit(relay_done(&args[2..])),
         // 讀的那端先關掉（`| head`）不算錯，print! 會因此 panic。
         Some(RELAY_HELP_FLAG) => {
             let _ = std::io::Write::write_all(&mut std::io::stdout(), relay_help().as_bytes());
@@ -297,15 +328,50 @@ fn relay(flag: &str, rest: &[String]) -> i32 {
         );
         return RELAY_EXIT_USAGE;
     };
+    let commands = relays.into_iter().map(|r| {
+        let mut v = serde_json::to_value(r).expect("relay serializes");
+        v["cmd"] = petkit::ipc::CMD_RELAY.into();
+        v.to_string()
+    });
+    send_relay(commands)
+}
+
+/// `--done` 的參數：要有 `--id`，`--from` 可以不給（跟傳的時候一樣）；回傳那一則的代號，`None` = 參數不對。
+fn parse_done(rest: &[String]) -> Option<String> {
+    let (mut from, mut id) = (None, None);
+    let mut it = rest.iter();
+    while let Some(a) = it.next() {
+        let slot = match a.as_str() {
+            RELAY_FROM_OPT => &mut from,
+            RELAY_ID_OPT => &mut id,
+            _ => return None,
+        };
+        *slot = Some(it.next()?.as_str());
+    }
+    Some(petkit::ipc::relay_key(from, id?))
+}
+
+/// `--done`：收掉之前傳的那一則，回傳結束碼。
+fn relay_done(rest: &[String]) -> i32 {
+    let Some(key) = parse_done(rest) else {
+        eprintln!(
+            "usage: Youban.exe --done [--from <name>] --id <key>\nfull guide: Youban.exe {RELAY_HELP_FLAG}"
+        );
+        return RELAY_EXIT_USAGE;
+    };
+    let command = serde_json::json!({ "cmd": petkit::ipc::CMD_RELAY_DONE, "key": key });
+    send_relay(std::iter::once(command.to_string()))
+}
+
+/// 傳話關著就不送（使用者看不到），否則一個一個送；回傳結束碼。
+fn send_relay(commands: impl Iterator<Item = String>) -> i32 {
     let config = petkit::config::Config::load(&petkit::paths::config_file()).unwrap_or_default();
     if !config.features.relay {
         eprintln!("relay is turned off in Youban's settings; the user did not see this");
         return RELAY_EXIT_DISABLED;
     }
-    for r in relays {
-        let mut v = serde_json::to_value(r).expect("relay serializes");
-        v["cmd"] = petkit::ipc::CMD_RELAY.into();
-        if !send(&v.to_string()) {
+    for command in commands {
+        if !send(&command) {
             return RELAY_EXIT_NOT_RUNNING;
         }
     }
@@ -346,5 +412,21 @@ mod tests {
         );
         // 好幾則時 --id 不知道是給哪一則的。
         assert!(parse_relay(NOTICE_FLAG, &args(&["a", "b", "--id", "x"])).is_none());
+    }
+
+    #[test]
+    fn done_closes_the_message_sent_with_the_same_from_and_id() {
+        let sent = parse_relay(
+            CONFIRM_FLAG,
+            &args(&["要你允許", "--from", "Claude", "--id", "ask"]),
+        )
+        .unwrap();
+        let key = petkit::ipc::relay_key(sent[0].from.as_deref(), sent[0].id.as_deref().unwrap());
+        assert_eq!(
+            parse_done(&args(&["--id", "ask", "--from", "Claude"])),
+            Some(key)
+        );
+        // 沒有 --id 認不出是哪一則。
+        assert!(parse_done(&args(&["--from", "Claude"])).is_none());
     }
 }

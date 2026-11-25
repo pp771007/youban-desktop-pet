@@ -25,6 +25,11 @@ const WAIT_MAX: Duration = Duration::from_secs(3);
 #[derive(Debug)]
 pub struct NotRunning;
 
+/// 傳話的代號：同一個來源（`from`）＋ `id` 就是同一則（再送一次原地換掉，`--done` 收掉）。
+pub fn relay_key(from: Option<&str>, id: &str) -> String {
+    serde_json::to_string(&(from, id)).expect("strings serialize")
+}
+
 /// 送一個指令給核心，等它做完才回來（核心卡住最多等 `WAIT_MAX`，之後當作送到了）。
 pub fn send(json: &str) -> Result<(), NotRunning> {
     let hwnd = unsafe { FindWindowW(&HSTRING::from(PET_WINDOW_CLASS), PCWSTR::null()) }

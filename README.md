@@ -83,6 +83,8 @@ AI（或任何能跑指令的程式）可以讓柚伴跳兩種框給你：
 Youban.exe 在 %LOCALAPPDATA%\Programs\Youban Desktop Pet\（免安裝版在解壓縮的資料夾）。
 ```
 
+想要 Claude Code 做完事、或要你決定的時候都透過牠通知你：跟 Claude 說「照 `Youban.exe --relay-help` 裡的 CLAUDE CODE HOOKS 幫我接 hook」，要接哪些專案、框上寫什麼都可以跟它講。
+
 ## 🍃 輕、不吃資源
 
 - 閒置時記憶體約 6～12MB，一直開著也不會越用越大
