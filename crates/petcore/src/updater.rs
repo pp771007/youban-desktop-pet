@@ -12,12 +12,12 @@
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use petkit::config::write_atomic;
-use petkit::update_status::UpdateStatus;
+use petkit::update_status::{UpdateReport, UpdateStatus};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 
@@ -145,8 +145,20 @@ pub fn spawn(dir: PathBuf, install_dir: &Path, notify: HWND) {
     }
 }
 
+/// 最近一次「檢查更新」的編號：之後寫的進度都帶著它（定時檢查剛好在跑的話，它的結果也就是這次的答案）。
+static REQUEST: AtomicU64 = AtomicU64::new(0);
+
+/// 設定裡按了「檢查更新」（帶著設定程式給的編號）。
+pub fn requested(request: u64) {
+    REQUEST.store(request, Ordering::Release);
+}
+
 pub fn report(status: &UpdateStatus) {
-    if let Err(e) = status.save(&paths::update_status_file()) {
+    let report = UpdateReport {
+        request: REQUEST.load(Ordering::Acquire),
+        status: status.clone(),
+    };
+    if let Err(e) = report.save(&paths::update_status_file()) {
         log!("update status not saved: {e}");
     }
 }

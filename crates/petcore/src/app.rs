@@ -1456,7 +1456,10 @@ impl App {
                 });
             }
             ipc::CMD_QUIT => self.quit(),
-            ipc::CMD_CHECK_UPDATE => self.check_update_now(),
+            ipc::CMD_CHECK_UPDATE => {
+                updater::requested(v["request"].as_u64().unwrap_or_default());
+                self.check_update_now();
+            }
             ipc::CMD_APPLY_UPDATE => self.update_now(),
             _ => self.broadcast(&ModuleEvent::Command(&v)),
         }

@@ -17,7 +17,7 @@ use petkit::holidays::{self, DayKind};
 use petkit::paths;
 use petkit::relay_log::RelayLog;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
-use petkit::update_status::UpdateStatus;
+use petkit::update_status::UpdateReport;
 use petkit::{anniversary, ipc, pack, pack_edit, states};
 use serde::Serialize;
 use tauri::State;
@@ -588,8 +588,8 @@ fn focus_stop_label() -> Option<String> {
 }
 
 #[tauri::command]
-fn update_status() -> Option<UpdateStatus> {
-    UpdateStatus::load(&paths::update_status_file())
+fn update_status() -> Option<UpdateReport> {
+    UpdateReport::load(&paths::update_status_file())
 }
 
 /// 換新版時設定程式也會被換掉：送出指令後自己先關，不要開著舊版的畫面。

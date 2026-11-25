@@ -1464,16 +1464,23 @@ function updateRow() {
 }
 
 async function checkUpdate() {
-  await invoke('send_core', { command: { cmd: 'checkUpdate' } });
-  await pollUpdate();
+  // 這次的編號：核心下一圈才處理指令，送完馬上讀到的是上一次的結果，要等到檔案裡的編號是這次的才算數。
+  const request = Date.now();
+  state.update = { state: 'checking' };
+  render();
+  await invoke('send_core', { command: { cmd: 'checkUpdate', request } });
+  await pollUpdate(request);
 }
 
-/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。 */
-async function pollUpdate() {
+/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。`request`：在等哪一次「檢查更新」的結果（沒給 = 接著顯示現在的進度）。 */
+async function pollUpdate(request) {
   clearTimeout(pollUpdate.timer);
-  state.update = await invoke('update_status');
+  const u = await invoke('update_status');
+  const answered = request === undefined || u?.request === request;
+  if (answered) state.update = u;
   if (state.page === 'general') render();
-  if (UPDATE_BUSY.includes(state.update?.state)) pollUpdate.timer = setTimeout(pollUpdate, UPDATE_POLL_MS);
+  const waiting = !answered || UPDATE_BUSY.includes(u?.state);
+  if (waiting && state.coreRunning) pollUpdate.timer = setTimeout(() => pollUpdate(request), UPDATE_POLL_MS);
 }
 
 // ---------- 骨架 ----------

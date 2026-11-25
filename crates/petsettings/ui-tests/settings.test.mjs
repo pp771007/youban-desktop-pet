@@ -57,7 +57,8 @@ function mockBackend(tokens) {
     },
     calls: [],
     running: true,
-    updateSteps: [],
+    // 上一次（很久以前）查的結果還留在檔案裡。
+    updateSteps: [{ state: 'upToDate' }],
   };
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
   db.pets = [{ id: 'capybara', name: '水豚', image: png, editable: false, days: 12 }, { id: 'capybara-side', name: '水豚（側面）', image: png, editable: false, days: 0 }];
@@ -110,8 +111,14 @@ function mockBackend(tokens) {
     core_running: () => db.running,
     send_core: ({ command }) => {
       db.calls.push(command);
-      // 核心查新版：每讀一次進度往前走一步，停在最後一個。
-      if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
+      // 核心查新版：跟真的一樣下一圈才開始（送完馬上讀，讀到的還是上一次的結果）；
+      // 之後每讀一次進度往前走一步，停在最後一個，每一步都帶著這次的 request。
+      if (command.cmd === 'checkUpdate') {
+        const { request } = command;
+        setTimeout(() => {
+          db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }].map((s) => ({ ...s, request }));
+        }, 300);
+      }
       if (command.cmd === 'focusStart') db.focusStopLabel = '停止專注（還剩 25 分）';
       if (command.cmd === 'focusStop') db.focusStopLabel = null;
       // 傳話紀錄：跟 petkit::relay_log 一樣（清除留著還沒按完成的確認框）。
