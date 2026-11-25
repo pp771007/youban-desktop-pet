@@ -1354,16 +1354,29 @@ impl App {
         };
         log!("command: {text}");
         match v["cmd"].as_str().unwrap_or_default() {
-            ipc::CMD_TEST_REMINDER => self.enqueue(
-                "core",
-                "test".into(),
-                Card::Confirm {
-                    title: v["title"].as_str().unwrap_or("測試提醒").to_owned(),
-                    time: local_now().format("%H:%M").to_string(),
-                    snooze_open: false,
-                    icon: Icon::BellRing,
-                },
-            ),
+            ipc::CMD_TEST_REMINDER => {
+                // 設定裡的「看看樣子」：`style` 跟提醒檔同一組代號，沒給就是確認框。
+                let title = v["title"].as_str().unwrap_or("測試提醒").to_owned();
+                let time = local_now().format("%H:%M").to_string();
+                let icon = Icon::BellRing;
+                match serde_json::from_value::<Style>(v["style"].clone()).unwrap_or_default() {
+                    Style::Confirm => self.enqueue(
+                        "core",
+                        "test".into(),
+                        Card::Confirm {
+                            title,
+                            time,
+                            snooze_open: false,
+                            icon,
+                        },
+                    ),
+                    Style::Notice => self.enqueue(
+                        "core",
+                        "test-notice".into(),
+                        Card::Notice { title, time, icon },
+                    ),
+                }
+            }
             ipc::CMD_CARD_ACTION => {
                 let action = match v["action"].as_str().unwrap_or_default() {
                     "done" => Some(CardAction::Done),

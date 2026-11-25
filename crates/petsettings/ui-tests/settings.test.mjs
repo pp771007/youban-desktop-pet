@@ -177,6 +177,8 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.config.restReminder) === false && !(await page.getByText('連續用多久').isVisible()), 'turning the rest reminder off hides its options');
     await page.getByRole('checkbox', { name: '全螢幕時照樣跳出來' }).click({ force: true });
     check(await page.evaluate(() => window.__mock.config.remindInFullscreen) === true, 'remind-in-fullscreen switch writes config');
+    await page.locator('#reminder-style .setting', { hasText: '提示框' }).getByRole('button', { name: '看看樣子' }).click();
+    check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'testReminder' && c.style === 'notice')), 'notice preview shows a notice on the pet');
 
     // 新增：沒填內容不能存；工作日沒有「遇到假日」；存檔寫出正確的 JSON
     await page.getByRole('button', { name: '新增提醒' }).first().click();

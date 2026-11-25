@@ -245,6 +245,11 @@ async function saveConfig() {
   await invoke('save_config', { config: state.config });
 }
 
+/** 「看看樣子」：叫核心在桌寵頭上跳一個那種框（`style` 同提醒檔的代號）。 */
+function previewButton(style, title) {
+  return h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', style, title } }) }, icon('play'), '看看樣子');
+}
+
 /** 設定列：左邊標題（可帶圖示與一行小字），右邊控制項。 */
 function settingRow(title, control, desc) {
   return h('div', { class: 'setting' },
@@ -370,7 +375,8 @@ function renderReminderList(page) {
     h('div', { class: 'card' },
       settingRow('提醒音', configSwitch('reminderSound', '提醒音')),
       settingRow('全螢幕時照樣跳出來', configSwitch('remindInFullscreen', '全螢幕時照樣跳出來')),
-      settingRow('確認框', h('button', { class: 'btn btn-secondary btn-small', disabled: !state.coreRunning, onclick: () => invoke('send_core', { command: { cmd: 'testReminder', title: '這是確認框的樣子' } }) }, icon('play'), '看看樣子')))));
+      settingRow('確認框', previewButton('confirm', '這是確認框的樣子')),
+      settingRow('提示框', previewButton('notice', '這是提示框的樣子')))));
   const setRest = async (key, value) => { state.config[key] = value; await saveConfig(); render(); };
   page.append(h('section', { class: 'section' },
     h('h2', {}, '休息提醒'),
