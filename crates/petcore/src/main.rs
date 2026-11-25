@@ -77,6 +77,8 @@ fn relay_help() -> String {
 USAGE
   Youban.exe --confirm <message> [--from <name>] [--id <key>] [--detail <text>]
   Youban.exe --notice  <message> [--from <name>] [--id <key>] [--detail <text>]
+  Youban.exe --notice  <message> <message> ... [--from <name>]
+    Several messages in one call, each its own box (no --id / --detail then).
 
 WHICH ONE
   --confirm  A box with Done / Later buttons. Stays until the user presses Done,
@@ -246,59 +248,70 @@ fn run_app(soak_secs: Option<u64>, after_update: bool) {
     }
 }
 
-/// `--confirm` / `--notice` 的參數組成一則傳話送給桌寵，回傳結束碼。
-fn relay(flag: &str, rest: &[String]) -> i32 {
-    let usage = || {
-        eprintln!(
-            "usage: Youban.exe --confirm|--notice <message> [--from <name>] [--id <key>] [--detail <text>]\nfull guide: Youban.exe {RELAY_HELP_FLAG}"
-        );
-        RELAY_EXIT_USAGE
-    };
-    let (mut title, mut from, mut id, mut detail) = (None, None, None, None);
+/// `--confirm` / `--notice` 的參數拆成要送的傳話：沒帶選項的參數各是一則；`None` = 參數不對。
+/// 一次好幾則時不收 `--id`、`--detail`（看不出是給哪一則的）。
+fn parse_relay(flag: &str, rest: &[String]) -> Option<Vec<petkit::ipc::Relay>> {
+    let (mut titles, mut from, mut id, mut detail) = (Vec::new(), None, None, None);
     let mut it = rest.iter();
     while let Some(a) = it.next() {
         let slot = match a.as_str() {
             RELAY_FROM_OPT => &mut from,
             RELAY_ID_OPT => &mut id,
             RELAY_DETAIL_OPT => &mut detail,
-            _ if title.is_none() => {
-                title = Some(a.clone());
+            _ => {
+                titles.push(a.clone());
                 continue;
             }
-            _ => return usage(),
         };
-        let Some(value) = it.next() else {
-            return usage();
-        };
-        *slot = Some(value.clone());
+        *slot = Some(it.next()?.clone());
     }
-    let Some(title) = title.filter(|t| !t.trim().is_empty()) else {
-        return usage();
-    };
-    let config = petkit::config::Config::load(&petkit::paths::config_file()).unwrap_or_default();
-    if !config.features.relay {
-        eprintln!("relay is turned off in Youban's settings; the user did not see this");
-        return RELAY_EXIT_DISABLED;
+    let several = titles.len() > 1;
+    if titles.is_empty()
+        || titles.iter().any(|t| t.trim().is_empty())
+        || several && (id.is_some() || detail.is_some())
+    {
+        return None;
     }
     let style = if flag == CONFIRM_FLAG {
         Style::Confirm
     } else {
         Style::Notice
     };
-    let mut v = serde_json::to_value(petkit::ipc::Relay {
-        style,
-        title,
-        from,
-        id,
-        detail,
-    })
-    .expect("relay serializes");
-    v["cmd"] = petkit::ipc::CMD_RELAY.into();
-    if send(&v.to_string()) {
-        RELAY_EXIT_SENT
-    } else {
-        RELAY_EXIT_NOT_RUNNING
+    Some(
+        titles
+            .into_iter()
+            .map(|title| petkit::ipc::Relay {
+                style,
+                title,
+                from: from.clone(),
+                id: id.clone(),
+                detail: detail.clone(),
+            })
+            .collect(),
+    )
+}
+
+/// `--confirm` / `--notice` 的參數組成傳話送給桌寵，回傳結束碼。
+fn relay(flag: &str, rest: &[String]) -> i32 {
+    let Some(relays) = parse_relay(flag, rest) else {
+        eprintln!(
+            "usage: Youban.exe --confirm|--notice <message>... [--from <name>] [--id <key>] [--detail <text>]\nfull guide: Youban.exe {RELAY_HELP_FLAG}"
+        );
+        return RELAY_EXIT_USAGE;
+    };
+    let config = petkit::config::Config::load(&petkit::paths::config_file()).unwrap_or_default();
+    if !config.features.relay {
+        eprintln!("relay is turned off in Youban's settings; the user did not see this");
+        return RELAY_EXIT_DISABLED;
     }
+    for r in relays {
+        let mut v = serde_json::to_value(r).expect("relay serializes");
+        v["cmd"] = petkit::ipc::CMD_RELAY.into();
+        if !send(&v.to_string()) {
+            return RELAY_EXIT_NOT_RUNNING;
+        }
+    }
+    RELAY_EXIT_SENT
 }
 
 /// 把一段 JSON 指令送給正在跑的桌寵（設定程式與自動測試用）。
@@ -320,5 +333,33 @@ fn send(json: &str) -> bool {
             Some(LPARAM(&data as *const _ as isize)),
         );
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn several_messages_in_one_call_become_separate_relays() {
+        let relays = parse_relay(
+            NOTICE_FLAG,
+            &args(&["建置好了", "測試通過", "--from", "Claude"]),
+        )
+        .unwrap();
+        let got: Vec<_> = relays
+            .iter()
+            .map(|r| (r.title.as_str(), r.from.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [("建置好了", Some("Claude")), ("測試通過", Some("Claude"))]
+        );
+        // 好幾則時 --id 不知道是給哪一則的。
+        assert!(parse_relay(NOTICE_FLAG, &args(&["a", "b", "--id", "x"])).is_none());
     }
 }
