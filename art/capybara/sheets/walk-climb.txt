@@ -1,0 +1,50 @@
+Please draw one image for my desktop-pet app: a sprite sheet of my capybara character.
+
+The attached image is the character reference — draw this exact character.
+
+The reference shows the character: a chubby chibi capybara, warm tan fur, thick dark-brown outline, soft two-tone cel shading with a few fur-texture strokes, dark-brown rounded snout patch, black bean eyes with a tiny white highlight, small round ears with pink inner, soft pink blush on cheeks, dark-brown paws, tiny tail nub, and a mandarin orange with two green leaves sitting on top of the head. Left figure = front view, right figure = side view facing right. Match this character exactly: same proportions, palette, line weight, shading style, and orange.
+
+=== THE IMAGE TO GENERATE ===
+
+Wide (landscape) image.
+
+Transparent background. No white background, no painted checkerboard, no floor, no ground shadow, no glow or halo around the character.
+
+Layout: a grid of 4 columns x 3 rows = 12 poses, read left-to-right, top-to-bottom. Each pose sits in its own cell with a wide empty gap around it (no pose touches another). All 12 poses are the SAME character at the SAME scale (body size identical in every cell). No text, numbers, labels, grid lines, borders, speed lines, dust, or effects of any kind.
+
+Leg naming used below (side view, character faces RIGHT):
+- NF = near front leg, NH = near hind leg (the legs on the viewer's side, drawn fully in front of the body, normal tan color with dark-brown paws)
+- FF = far front leg, FH = far hind leg (the legs on the other side, drawn partially hidden BEHIND the body, in a noticeably DARKER, shaded brown so near and far legs are easy to tell apart)
+
+----- ROWS 1 AND 2: WALK CYCLE (8 frames, cells 1-8) -----
+
+Strict side profile facing right, exactly like the right figure in the reference. A slow, relaxed, waddling diagonal walk, drawn "in place" like on a treadmill: in every frame the body stays at the same horizontal position in its cell, and the paws that are on the ground all sit on the same ground line (the same height within the row). Head, ears, and the orange stay steady; only a gentle body bob.
+
+Phase A (frames 1-4):
+1. Contact A: NF reaching forward ahead of the chest, FH reaching forward under the belly. FF stretched backward, NH stretched clearly BACKWARD behind the rump. Widest stride.
+2. Down A: NF and FH planted on the ground taking weight, body slightly lowest and a touch squashed. FF and NH just lifting off the ground behind.
+3. Passing A: NF and FH straight under the body; FF and NH lifted, swinging forward and passing under the body (paws off the ground, bent at the wrist/ankle). Body at its highest point.
+4. Up A: FF and NH swinging forward ahead of the other legs, about to land. Body still high.
+
+Phase B (frames 5-8) is EXACTLY phase A with near and far legs swapped:
+5. Contact B: FF reaching forward ahead of the chest, NH reaching clearly FORWARD under the belly. NF stretched backward, FH stretched backward. Widest stride.
+6. Down B: FF and NH planted, body lowest. NF and FH lifting off behind.
+7. Passing B: FF and NH straight under the body; NF and FH lifted and passing forward. Body highest.
+8. Up B: NF and FH swinging forward, about to land.
+
+Critical check: the NEAR hind leg (light tan, in front of the body) points BACKWARD in frame 1 and FORWARD in frame 5. If frames 1 and 5 look the same, the animation is broken. Frames 3 and 7 must also differ (different legs lifted).
+
+----- ROW 3: CLIMBING A WALL (4 frames, cells 9-12) -----
+
+In each of these 4 cells, draw a thin, perfectly straight, vertical pure blue (#0000FF) line on the RIGHT side of the character, spanning the full height of the cell. This line is the wall. (It will be removed later; keep it a single solid color, no glow.)
+
+The capybara climbs UP this wall: body upright and vertical, head at the top, BELLY facing and pressed close to the wall, back and rump facing left (away from the wall). The head tilts up so the snout points upward along the wall, eyes looking up. The orange stays on the crown of the head. We see the near side of the body.
+
+ALL FOUR paws press their soles flat against the blue line - including both hind paws. The hind legs are bent like a climbing frog: knees bent up toward the chest, hind paws planted ON the wall line below the belly, the rump a little away from the wall. Nothing crosses to the right of the blue line, not even the snout or the orange: the line is the rightmost edge of the drawing.
+
+9. Reach A: NF stretched high up on the wall above the head; FH pulled high, knee bent up near the belly, paw on the wall. FF lower at chest height on the wall; NH lower and extended downward, paw pushing on the wall near the bottom.
+10. Gather A: all four paws on the wall close together near the middle of the body, body compact and slightly pulled up, hind legs deeply bent.
+11. Reach B (near and far swapped from 9): FF stretched high up on the wall above the head; NH pulled high, knee bent up near the belly, paw on the wall. NF lower at chest height; FH lower and extended downward, pushing on the wall near the bottom.
+12. Gather B: like 10 but with the opposite paws slightly higher.
+
+The body size and the horizontal distance between the body and the blue line are identical in cells 9-12; only the limbs and a small vertical body shift change.

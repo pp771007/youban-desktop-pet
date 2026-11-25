@@ -1,0 +1,33 @@
+Please draw one image for my desktop-pet app: a sprite sheet of my capybara character.
+
+The attached image is the character reference — draw this exact character.
+
+The reference shows the character: a chubby chibi capybara, warm tan fur, thick dark-brown outline, soft two-tone cel shading with a few fur-texture strokes, dark-brown rounded snout patch, black bean eyes with a tiny white highlight, small round ears with pink inner, soft pink blush on cheeks, dark-brown paws, tiny tail nub, and a mandarin orange with two green leaves sitting on top of the head. Left figure = front view, right figure = side view facing right. Match this character exactly: same proportions, palette, line weight, shading style, and orange.
+
+=== THE IMAGE TO GENERATE ===
+
+Wide (landscape) image.
+
+Transparent background. No white background, no painted checkerboard, no floor, no ground shadow, no glow or halo around the character.
+
+Layout: a grid of 4 columns x 3 rows = 12 poses, read left-to-right, top-to-bottom. Each pose sits in its own cell with a wide empty gap around it (no pose touches another). All 12 poses are the SAME character at the SAME scale. No text, numbers, labels, grid lines, borders, motion lines, sweat drops, stars, spirals floating in the air, hearts, Zzz, dust, hands, or any other object or effect - ONLY the capybara and its orange. (Symbols are drawn by the app separately.)
+
+Front view = facing the viewer like the left figure in the reference. Side view = strict profile facing RIGHT like the right figure.
+
+----- ROW 1 -----
+1. Hop - crouch (front view): anticipation before a little jump. Body squashed lower and wider, all four legs bent, paws flat on the ground, eyes squeezed shut in a happy "> <" way, small smile.
+2. Hop - in the air (front view): the jump itself. Body slightly stretched taller, front legs raised up and out in joy, hind legs tucked up under the belly (paws off the ground), mouth open happily, the orange lifted a little above the head (a small gap between orange and head).
+3. Dizzy A (front view): standing wobbly, whole body tilted about 10 degrees to the LEFT, legs unsteady with knees slightly buckled, eyes drawn as small dark-brown swirls (spiral eyes inside the face, not floating), mouth a wavy line, the orange slipped to the right side of the head.
+4. Dizzy B (front view): same as 3 but tilted about 10 degrees to the RIGHT, the orange slipped to the left side of the head.
+
+----- ROW 2 -----
+5. Picked up A (front view): being lifted by the scruff of the neck by an invisible hand (do NOT draw a hand): the skin at the top of the back/neck is slightly pinched upward, the body hangs limp and a bit longer, all four legs dangle straight down with paws relaxed and pointing down, nothing touches the ground, face calm and unbothered with half-closed eyes.
+6. Picked up B (front view): same hanging pose, but the legs are paddling in the air: one front paw and the opposite hind paw raised and bent, the other two hanging, eyes open, slightly puzzled little mouth.
+7. Scratching A (front view, sitting): sitting on its bottom like the reference front view but lower; one hind leg raised to the side, its paw scratching behind the ear on that side; eyes closed blissfully, head tilted toward the scratching foot.
+8. Scratching B: same as 7 but the scratching paw is a little higher/lower (a second position of the same scratching motion) and the head tilted slightly more.
+
+----- ROW 3 -----
+9. Stretch A (side view facing RIGHT): front stretch like a dog's "downward dog": front legs stretched far forward flat on the ground, chest low near the ground, rump raised high, hind legs straight, eyes closed, mouth slightly open in a contented sigh.
+10. Stretch B (side view facing RIGHT): back stretch: standing on the front legs with the body leaning forward, ONE hind leg stretched straight out backward and lifted off the ground, eyes closed, relaxed face.
+11. Chewing A (front view): standing like the reference front view, eyes half-closed and content, mouth closed, cheeks slightly puffed as if chewing grass.
+12. Chewing B (front view): identical to 11 except the jaw is shifted slightly to one side and the mouth shows a tiny chewing motion; everything else (body, legs, orange, size, position) exactly the same as 11 so the two frames can alternate smoothly.
