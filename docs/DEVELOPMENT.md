@@ -35,7 +35,7 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 | `--snapshot <out.png> [dpi]` | 不開視窗，輸出各狀態的桌寵截圖 |
 | `--snapshot-cards <out.png> [dpi]` | 不開視窗，輸出確認框、提示框等各種框（淺色＋深色）、講話泡泡、點心與球 |
 | `--frames <資料夾> [dpi]` | 不開視窗，每個動作輸出 25fps 的 PNG 序列（檢查動態用） |
-| `--slice <多格圖.png> <桌寵> <名稱…>` | 把 AI 一次畫的多個姿勢自動切成單張，放進桌寵包（名稱寫 `-` 的那格不要） |
+| `--slice <多格圖.png> <桌寵> <名稱…>` | 把 AI 一次畫的多個姿勢自動切成單張，放進桌寵包（名稱寫 `-` 的那格不要）；切完還要調色、削外框，流程見 `art-prompts.md` 的「拿到圖之後」 |
 | `--soak <秒>` | 記憶體壓力測試，結果寫到 `%LOCALAPPDATA%\youban-desktop-pet\soak-result.json` |
 
 ## 發版
