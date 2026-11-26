@@ -126,18 +126,21 @@ CLAUDE CODE HOOKS
   To tell the user when Claude Code finishes or needs a decision, add hooks to
   ~/.claude/settings.json (every project) or <project>/.claude/settings.json
   (that project only). Each hook gets JSON on stdin with session_id, cwd and
-  transcript_path (a JSONL file). A setup that works well:
+  transcript_path (a JSONL file). Start every <message> with the session name:
+  the user often has several sessions open and needs to know which terminal to
+  go to. The name is the one the user gave with /rename (the last
+  {{"type":"custom-title"}} line of the transcript), else the project folder.
+  A setup that works well:
     Stop
-        --notice, e.g. "<session name> is done". If the user renamed the
-        session, the name is in the last {{"type":"custom-title"}} line of the
-        transcript.
+        --notice, e.g. "<session name> is done".
     Notification (matcher: permission_prompt|elicitation_dialog)
-        --confirm. Its message is only "Claude needs your permission": read
-        the last tool_use in the transcript to say what it wants to run.
+        --confirm, e.g. "<session name> wants to run <command>". Its message
+        is only "Claude needs your permission": read the last tool_use in the
+        transcript to say what it wants to run.
     PreToolUse (matcher: AskUserQuestion)
-        --confirm with tool_input.questions[0].question. A Notification
-        follows right after it; skip that one when the last tool_use is
-        AskUserQuestion.
+        --confirm, e.g. "<session name>: <tool_input.questions[0].question>".
+        A Notification follows right after it; skip that one when the last
+        tool_use is AskUserQuestion.
     PostToolUse (matcher: *), UserPromptSubmit, Stop
         --done for the --confirm above: the user already answered in the
         terminal. Keep a temp file saying one is open, so most tool calls
