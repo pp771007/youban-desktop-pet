@@ -124,7 +124,8 @@ CLAUDE CODE HOOKS
     Stop
         --notice, e.g. "<session name> is done". If the user renamed the
         session, the name is in the last {{"type":"custom-title"}} line of the
-        transcript.
+        transcript. No --detail: the reply is already in the terminal, and
+        copying it fills the relay log with long text.
     Notification (matcher: permission_prompt|elicitation_dialog)
         --confirm. Its message is only "Claude needs your permission": read
         the last tool_use in the transcript to say what it wants to run.
