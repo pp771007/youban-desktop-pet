@@ -97,12 +97,18 @@ OPTIONS
                    the relay log groups messages by it.
   --id <key>       A message with the same --from and --id replaces the earlier one
                    instead of piling up. Use it for progress of one task (--id build).
-  --detail <text>  Longer explanation. Not shown on the box, only in the relay log
-                   (right-click the pet > relay log).
+  --detail <text>  Not shown on the box, only in the relay log (right-click the
+                   pet > relay log), where the user looks after the box is gone.
+                   Put what they need to act on the message: the question and
+                   its options, the command waiting for permission, why a job
+                   failed and where to look. Leave it out when <message> says
+                   it all, and do not copy text the user already has elsewhere
+                   (the terminal, the PR page).
 
 WRITING THE MESSAGE
   The box shows at most two short lines, about 20 Chinese characters. Keep
-  <message> short and put the rest in --detail. Write in the user's language.
+  <message> short; anything else the user needs to act goes in --detail.
+  Write in the user's language.
 
 EXIT CODES
   {sent}  delivered
@@ -124,8 +130,7 @@ CLAUDE CODE HOOKS
     Stop
         --notice, e.g. "<session name> is done". If the user renamed the
         session, the name is in the last {{"type":"custom-title"}} line of the
-        transcript. No --detail: the reply is already in the terminal, and
-        copying it fills the relay log with long text.
+        transcript.
     Notification (matcher: permission_prompt|elicitation_dialog)
         --confirm. Its message is only "Claude needs your permission": read
         the last tool_use in the transcript to say what it wants to run.
