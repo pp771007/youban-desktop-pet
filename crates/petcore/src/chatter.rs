@@ -77,6 +77,17 @@ const THROWN: &[&str] = &["哇啊啊——", "飛起來了！", "呀——"];
 const DIZZY: &[&str] = &["頭好暈…", "不要再丟了啦…", "世界在轉圈圈…"];
 const ATE: &[&str] = &["好好吃！", "謝謝招待～", "還有嗎？", "嗯～好香"];
 const KICKED: &[&str] = &["看我的！", "接球～", "好好玩！"];
+/// 搆不到放棄了：順便講使用者可以怎麼幫（拿起來丟近一點）。
+const GAVE_UP_FOOD: &[&str] = &[
+    "點心好遠喔，丟近一點給我嘛～",
+    "搆不到啦…可以幫我拿過來嗎？",
+    "嗚，那個點心我過不去耶～",
+];
+const GAVE_UP_BALL: &[&str] = &[
+    "球跑太遠了啦，丟回來給我～",
+    "搆不到球球…幫我拿一下嘛",
+    "那邊我過不去耶，球丟近一點啦～",
+];
 const RIDING: &[&str] = &[
     "哇～坐車車！",
     "要載我去哪裡？",
@@ -354,6 +365,9 @@ impl Chatter {
             // 點心是使用者特地給的，一定道謝。
             Happening::Ate => self.react(ATE, None, ctx, true),
             Happening::Kicked { .. } => self.react(KICKED, None, ctx, false),
+            // 跟道謝一樣是回應使用者給的東西，一定講（頭上的 ❓ 由 behavior 冒）。
+            Happening::GaveUp { food: true } => self.react(GAVE_UP_FOOD, None, ctx, true),
+            Happening::GaveUp { food: false } => self.react(GAVE_UP_BALL, None, ctx, true),
             // 今天還沒打招呼的話，接下來的 `tick` 會打招呼，這裡不搶。
             Happening::Woke { slept_secs }
                 if slept_secs >= WELCOME_BACK_SECS

@@ -407,6 +407,8 @@ pub enum Happening {
     Ate,
     /// 踢了球一腳，往 `dir`（-1 左、1 右）。
     Kicked { dir: f32 },
+    /// 點心／球搆不到，放棄了。
+    GaveUp { food: bool },
 }
 
 /// 動畫預覽工具可以直接觸發的動作。
@@ -2149,6 +2151,7 @@ impl Pet {
             }
         }
         if item.grounded && now - since >= FETCH_PATIENCE_SECS {
+            self.happen(Happening::GaveUp { food: item.food });
             self.emote(Emote::Question);
             self.ignore_item_until = now + FETCH_IGNORE_SECS;
             self.set_idle(now);
@@ -3390,6 +3393,11 @@ mod tests {
             "gave up"
         );
         assert!(pet.ignore_item_until > now, "and stops trying for a while");
+        assert!(
+            pet.drain_happenings()
+                .contains(&Happening::GaveUp { food: true }),
+            "and says so"
+        );
         // 有人把它拿起來丟到牠旁邊：馬上又去拿。
         pet.item_tossed();
         env.item = Some(ItemView {
