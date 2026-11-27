@@ -19,7 +19,7 @@ use petkit::paths;
 use petkit::relay_log::RelayLog;
 use petkit::reminders::{PreviewItem, Reminder, ReminderFile};
 use petkit::update_status::UpdateStatus;
-use petkit::{anniversary, ipc, pack, pack_edit, states};
+use petkit::{anniversary, ipc, pack, pack_edit, pet_download, states};
 use serde::Serialize;
 use tauri::State;
 use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
@@ -55,6 +55,8 @@ struct PetInfo {
     editable: bool,
     /// 陪伴天數（核心寫的 `companion.json`，這裡只讀）。
     days: u32,
+    /// 動作圖還沒下載，選它之前要先 `download_pet`。
+    download: bool,
 }
 
 /// 動作編輯畫面的一組圖：某個動作的某一組（待機可以有好幾組），依播放順序。
@@ -214,21 +216,42 @@ fn list_pets() -> Vec<PetInfo> {
         .flatten()
         .filter_map(|e| {
             let id = e.file_name().to_str()?.to_owned();
-            let p = pack::load(&e.path()).ok()?;
-            let image = pet_file_url(&dir, &p.states[states::IDLE].variants[0].frames[0])?;
-            let days = companions.days(&id);
+            let path = e.path();
+            let download = pet_download::must_download_first(&path);
+            // 壞掉的桌寵包不列出來；還沒下載的只有名字和預覽圖，本來就讀不進來。
+            if !download {
+                pack::load(&path).ok()?;
+            }
+            let manifest = pack::read_manifest(&path).ok()?;
+            let species = manifest.name.unwrap_or_else(|| id.clone());
+            let image = pet_file_url(&dir, &pack::picture(&path)?)?;
             Some(PetInfo {
-                name: config.pet_name(&id, &p.name).to_owned(),
-                species: p.name,
+                name: config.pet_name(&id, &species).to_owned(),
+                species,
+                days: companions.days(&id),
                 id,
                 image,
-                editable: p.editable,
-                days,
+                editable: manifest.editable,
+                download,
             })
         })
         .collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
+}
+
+/// 下載內建桌寵的動作圖（安裝包裡只帶預覽圖）。在背景等，畫面不會卡。
+#[tauri::command]
+async fn download_pet(id: String) -> CmdResult<()> {
+    let root = pets_root()?;
+    let dir = root.join(&id);
+    if dir.parent() != Some(root.as_path()) || !pet_download::needs_download(&dir) {
+        return Err("這隻桌寵不用下載".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || pet_download::download(&dir))
+        .await
+        .map_err(err)?
+        .map_err(|e| e.to_string())
 }
 
 /// 桌寵資料夾裡的圖給畫面用的網址：畫面直接讀檔（`serve_pet_file`），不用轉成 base64 從指令傳過去 ——
@@ -694,6 +717,7 @@ fn main() {
             official_days,
             anniversary_info,
             list_pets,
+            download_pet,
             window_layout,
             core_running,
             send_core,

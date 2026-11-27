@@ -538,6 +538,15 @@ button, input, select { font: inherit; color: inherit; }
   box-shadow: 0 2px 0 var(--color-accent-pressed);
 }
 .pet-card .badge .icon { width: 14px; height: 14px; }
+/* 還沒下載：跟「使用中」分得出來，不搶眼。 */
+.pet-card .badge-download {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  box-shadow: inset 0 0 0 2px var(--color-border);
+}
+.pet-card[aria-busy="true"] { cursor: progress; }
+.pet-card[aria-busy="true"] .stage { animation: pulse calc(var(--motion-slow) * 2ms) ease-in-out infinite alternate; }
+@keyframes pulse { to { opacity: 0.45; } }
 .pet-card.add { border-style: dashed; box-shadow: none; background: transparent; justify-content: center; color: var(--color-text-muted); min-height: 210px; }
 .pet-card.add:hover { color: var(--color-text); background: var(--color-surface-raised); }
 .pet-card.add .icon { width: 32px; height: 32px; }

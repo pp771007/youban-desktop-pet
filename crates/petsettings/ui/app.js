@@ -71,6 +71,8 @@ const state = {
   officialDays: [],
   nextTimes: {},
   pets: [],
+  /** 正在下載動作圖的那隻（id）。 */
+  downloading: null,
   sizes: [],
   version: '',
   coreRunning: false,
@@ -892,8 +894,23 @@ function renderPets(page) {
   page.append(h('div', { class: 'pet-grid' },
     state.pets.map((p) => {
       const current = p.id === state.config.pet;
-      return h('button', { class: 'pet-card', 'aria-pressed': String(current), onclick: async () => {
-        if (current) return;
+      const busy = state.downloading === p.id;
+      return h('button', { class: 'pet-card', 'aria-pressed': String(current), 'aria-busy': String(busy), onclick: async () => {
+        if (current || state.downloading) return;
+        if (p.download) {
+          state.downloading = p.id;
+          render();
+          try {
+            await invoke('download_pet', { id: p.id });
+            await reloadPets();
+          } catch {
+            toast('下載失敗，請確認網路後再試');
+            return;
+          } finally {
+            state.downloading = null;
+            render();
+          }
+        }
         state.config.pet = p.id;
         await saveConfig();
         updateBrand();
@@ -901,6 +918,7 @@ function renderPets(page) {
         render();
       } },
       current ? h('span', { class: 'badge' }, icon('check'), '使用中') : null,
+      p.download ? h('span', { class: 'badge badge-download' }, icon('download'), busy ? '下載中' : '下載') : null,
       h('span', { class: 'stage' }, h('img', { src: p.image, alt: '' })),
       h('span', { class: 'pet-name' }, p.name),
       p.days ? h('span', { class: 'days' }, icon('heart'), `陪你 ${p.days} 天`) : null);
@@ -1077,7 +1095,7 @@ function renderPetEdit(page) {
         toast(`刪不掉：${err}`);
         return;
       }
-      if (state.config.pet === pet.id) state.config.pet = state.pets.find((p) => p.id !== pet.id)?.id || state.config.pet;
+      if (state.config.pet === pet.id) state.config.pet = state.pets.find((p) => p.id !== pet.id && !p.download)?.id || state.config.pet;
       if (state.config.petNames) delete state.config.petNames[pet.id];
       await saveConfig();
       await reloadPets();

@@ -18,6 +18,7 @@ mod logger;
 mod memwatch;
 mod modules;
 mod paths;
+mod pet_fetch;
 mod platforms;
 mod popup_menu;
 mod preview;

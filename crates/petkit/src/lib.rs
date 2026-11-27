@@ -15,6 +15,7 @@ pub mod manifest;
 pub mod pack;
 pub mod pack_edit;
 pub mod paths;
+pub mod pet_download;
 pub mod relay_log;
 pub mod reminders;
 pub mod sheet;

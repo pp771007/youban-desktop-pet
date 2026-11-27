@@ -61,7 +61,7 @@ function mockBackend(tokens) {
     updateSteps: [{ state: 'upToDate' }],
   };
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
-  db.pets = [{ id: 'capybara', name: '水豚', image: png, editable: false, days: 12 }, { id: 'capybara-side', name: '水豚（側面）', image: png, editable: false, days: 0 }];
+  db.pets = [{ id: 'capybara', name: '水豚', image: png, editable: false, days: 12 }, { id: 'capybara-side', name: '水豚（側面）', image: png, editable: false, days: 0 }, { id: 'dolphin', name: '海豚', image: png, editable: false, days: 0, download: true }];
   const allStates = ['idle', 'walk', 'drag', 'fall', 'sleep', 'notify', 'blink', 'happy', 'sit', 'land', 'yawn', 'wake', 'talk', 'hop', 'look', 'doze', 'climb', 'dizzy'];
   db.actions = { groups: [{ state: 'idle', variant: 'default', frames: [png] }], fps: Object.fromEntries(allStates.map((s) => [s, 8])), defaultFps: Object.fromEntries(allStates.map((s) => [s, 8])) };
   // `src/watch.rs` 看到檔案變了發的通知；跟真的一樣晚一點才到，連續變幾次就發幾次。
@@ -115,6 +115,15 @@ function mockBackend(tokens) {
     example_frames: () => [png, png],
     save_example: ({ state }) => { db.calls.push({ cmd: 'save_example', state }); },
     delete_pet: ({ id }) => { db.pets = db.pets.filter((p) => p.id !== id); },
+    // 測試自己決定下載什麼時候結束、成不成功（`finishDownload(true / false)`）。
+    download_pet: ({ id }) => new Promise((resolve, reject) => {
+      db.finishDownload = (ok) => {
+        db.finishDownload = null;
+        if (!ok) { reject(new Error('offline')); return; }
+        db.pets.find((p) => p.id === id).download = false;
+        resolve();
+      };
+    }),
     window_layout: () => [{ id: 4242, title: '記事本', exe: 'notepad.exe', left: 100, top: 50, width: 800, height: 600 }],
     core_running: () => db.running,
     send_core: ({ command }) => {
@@ -368,6 +377,22 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.nav-item[data-page="pets"]').click();
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).click();
     check(await page.evaluate(() => window.__mock.config.pet) === 'capybara-side', 'switching pet writes config');
+    // 動作圖還沒下載的桌寵：點了先下載，失敗就留在原本那隻，成功才換過去
+    const dolphin = page.locator('.pet-card', { hasText: '海豚' });
+    check((await dolphin.innerText()).includes('下載'), 'a pet not downloaded yet says so');
+    await dolphin.click();
+    await page.waitForFunction(() => window.__mock.finishDownload);
+    check(await dolphin.getAttribute('aria-busy') === 'true' && (await dolphin.innerText()).includes('下載中'), 'the card shows it is downloading');
+    if (shotDir) await page.locator('.pet-grid').screenshot({ path: path.join(shotDir, 'pets-downloading-light.png') });
+    await page.evaluate(() => window.__mock.finishDownload(false));
+    await page.waitForFunction(() => document.getElementById('toast').textContent.includes('下載失敗'));
+    check(await page.evaluate(() => window.__mock.config.pet) === 'capybara-side' && await dolphin.getAttribute('aria-busy') === 'false', 'a failed download keeps the current pet');
+    await dolphin.click();
+    await page.waitForFunction(() => window.__mock.finishDownload);
+    await page.evaluate(() => window.__mock.finishDownload(true));
+    await page.waitForFunction(() => window.__mock.config.pet === 'dolphin');
+    check(!(await dolphin.innerText()).includes('下載'), 'a downloaded pet is switched to and loses the download badge');
+    await page.locator('.pet-card', { hasText: '水豚（側面）' }).click();
     check((await page.locator('.pet-card', { hasText: '水豚' }).first().innerText()).includes('陪你 12 天'), 'pet card shows days together');
     // 取名字：寫進設定，卡片與側欄跟著換；清空就回到桌寵包自己的名字
     const nameBox = () => page.getByRole('textbox', { name: '名字' });
@@ -377,6 +402,7 @@ for (const scheme of ['light', 'dark']) {
     await page.locator('.pet-card', { hasText: '圓圓' }).waitFor();
     check(await page.evaluate(() => window.__mock.config.petNames?.['capybara-side']) === '圓圓' && await page.locator('#brand-name').innerText() === '圓圓', 'naming the pet writes config and shows the name');
     if (shotDir) await page.locator('.section', { hasText: '活潑程度' }).screenshot({ path: path.join(shotDir, `settings-pet-name-${scheme}.png`) });
+    if (shotDir) await page.locator('.pet-grid').screenshot({ path: path.join(shotDir, `pets-grid-${scheme}.png`) });
     await nameBox().fill('');
     await nameBox().press('Enter');
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).waitFor();
@@ -453,10 +479,10 @@ for (const scheme of ['light', 'dark']) {
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'add_frames' && c.state === 'idle' && c.variant === '2')), 'another idle group can be added');
 
     await page.getByRole('button', { name: '刪除這隻' }).click();
-    check(await page.evaluate(() => window.__mock.pets.length) === 3 && await page.getByRole('alertdialog').getByText('救不回來').isVisible(), 'deleting a pet asks first');
+    check(await page.evaluate(() => window.__mock.pets.length) === 4 && await page.getByRole('alertdialog').getByText('救不回來').isVisible(), 'deleting a pet asks first');
     await page.getByRole('alertdialog').getByRole('button', { name: '刪除' }).click();
     await page.waitForSelector('.pet-grid');
-    check(await page.evaluate(() => window.__mock.pets.length === 2 && window.__mock.config.pet !== 'my-1'), 'deleting the current custom pet switches to another one');
+    check(await page.evaluate(() => window.__mock.pets.length === 3 && window.__mock.config.pet !== 'my-1'), 'deleting the current custom pet switches to another one');
     check(await page.locator('.pet-cell', { hasText: '水豚（側面）' }).getByRole('button', { name: '編輯動作' }).count() === 0, 'built-in pets have no edit button');
 
     // 視窗歸位：送指令給核心

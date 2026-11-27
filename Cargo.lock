@@ -2478,7 +2478,9 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "ureq",
  "windows",
+ "zip",
 ]
 
 [[package]]

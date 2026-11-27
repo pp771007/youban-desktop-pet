@@ -7,6 +7,8 @@ edition.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+ureq.workspace = true
+zip.workspace = true
 # 農曆換算（1901～2100 年，含閏月與大小月）。
 chinese-lunisolar-calendar = { version = "0.2.5", default-features = false }
 

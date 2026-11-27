@@ -80,6 +80,7 @@ jobs:
             dist/*.zip
             dist/*.exe
             dist/*.sha256
+            dist/pets/*.zip
 
       - name: 發 Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -95,4 +96,6 @@ jobs:
           $notes += "`n`n### 下載哪一個`n`n- **``$($setup.Name)``**：安裝版（建議），會建開始選單捷徑，也能從「設定 → 應用程式」移除`n- **``$($zip.Name)``**：免安裝版，解開執行 ``Youban.exe```n"
           $notes += "`n### 檔案驗證（SHA-256）`n`n| 檔案 | SHA-256 |`n|---|---|`n| ``$($setup.Name)`` | ``$(& $hashOf $setup)`` |`n| ``$($zip.Name)`` | ``$(& $hashOf $zip)`` |`n`n下載後在 PowerShell 執行 ``Get-FileHash <檔名>``，算出來的值跟上面一樣就是完整、沒被改過的檔案。`n"
           [System.IO.File]::WriteAllText("$PWD/notes.md", $notes)
-          gh release create "${{ github.ref_name }}" $setup.FullName "$($setup.FullName).sha256" $zip.FullName "$($zip.FullName).sha256" --title "柚伴 ${{ github.ref_name }}" --notes-file notes.md
+          # 預設以外的桌寵：程式第一次用到時從這一版的附件下載（pet-<id>.zip）
+          $pets = (Get-ChildItem dist/pets/*.zip).FullName
+          gh release create "${{ github.ref_name }}" $setup.FullName "$($setup.FullName).sha256" $zip.FullName "$($zip.FullName).sha256" @pets --title "柚伴 ${{ github.ref_name }}" --notes-file notes.md

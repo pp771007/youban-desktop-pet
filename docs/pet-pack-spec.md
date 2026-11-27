@@ -95,7 +95,7 @@ pets/<id>/
 ```
 pets/<id>/
   pet.json                  # 選用；沒有就全部用預設值，名字用資料夾名
-  thumb.png                 # 選用；沒有就用 idle 第一張縮小
+  thumb.png                 # 選用；沒有就用 idle 第一張。跟著程式發的桌寵一定要有（選的時候動作圖可能還沒下載）
   frames/<state>[-<variant>]_<nn>.png
 ```
 

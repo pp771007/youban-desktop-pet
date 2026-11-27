@@ -76,6 +76,22 @@ Filename: "{app}\{#AppExe}"; Description: "啟動柚伴"; Flags: nowait postinst
 ; 柚伴自動更新時帶 /relaunch=1 安靜地跑安裝程式（crates/petcore/src/updater.rs 的 SETUP_ARGS）：裝完把牠開回來。
 Filename: "{app}\{#AppExe}"; Parameters: "--after-update"; Flags: nowait; Check: IsUpdateRelaunch
 
+[UninstallDelete]
+; 預設以外的內建桌寵，動作圖是裝好之後才下載的（crates/petkit/src/pet_download.rs），安裝程式不認得，要點名刪。
+; 使用者自己做的桌寵沒有 frames.sha256，不會被刪。
+#define FindHandle
+#define FindResult
+#sub AddDownloadedFrames
+  #define PetName FindGetFileName(FindHandle)
+  #if PetName != "." && PetName != ".." && FileExists(SourceDir + "\pets\" + PetName + "\frames.sha256")
+Type: filesandordirs; Name: "{app}\pets\{#PetName}\frames"
+  #endif
+#endsub
+#for {FindHandle = FindResult = FindFirst(SourceDir + "\pets\*", faDirectory); FindResult; FindResult = FindNext(FindHandle)} AddDownloadedFrames
+#if FindHandle
+  #expr FindClose(FindHandle)
+#endif
+
 [UninstallRun]
 ; 先請執行中的柚伴自己結束，檔案才刪得掉。
 Filename: "{app}\{#AppExe}"; Parameters: "--quit"; Flags: runhidden waituntilterminated; RunOnceId: "QuitYouban"

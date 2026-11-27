@@ -13,7 +13,7 @@
 | `crates/petsettings` | 設定程式（Tauri，用到才開） |
 | `crates/petkit` | 兩支共用：桌寵包、提醒排程、辦公日曆、設定檔、檔案位置 |
 | `design/tokens.json` | 設計參數唯一來源（顏色、間距、圓角、字級、動畫） |
-| `pets/` | 桌寵包，放進一個資料夾就多一隻 |
+| `pets/` | 桌寵包，放進一個資料夾就多一隻；每隻都要有 `thumb.png`（`python scripts/art/thumb.py pets/<桌寵>`，見下面「內建桌寵怎麼發」） |
 | `crates/petcore/assets/` | 點心、球、表情符號的圖與程式圖示（編進執行檔） |
 | `data/holidays/` | 內建的人事總處辦公日曆（執行時每週自動下載更新） |
 
@@ -48,7 +48,7 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 
 2. **先只推 main**（`git push origin main`），等 GitHub Actions 的 `ci.yml` 跑完測試。不用在本機先跑：CI 是乾淨環境，只看得到 commit 進去的檔案。
 3. **CI 綠了才推 tag**（`git push origin v0.2.0`）。紅了就不推，修好再來；tag 還沒公開，本機刪掉重打就好。已經推出去的 tag 不要再動。
-4. `release.yml` 會在 Windows 機器上打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼。
+4. `release.yml` 會在 Windows 機器上打包、發 Release，掛上安裝版 `youban-desktop-pet-setup-<版本>.exe`（`installer/youban.iss`，Inno Setup）、免安裝版 `youban-desktop-pet-<版本>.zip`，各附一個 `.sha256`，說明最後自動附上驗證碼；另外每隻內建桌寵（預設那隻以外）各掛一個 `pet-<id>.zip`。
    它不重跑測試，而是先等同一個 commit 在 `ci.yml` 的結果：綠了才打包，紅了就停（main 和 tag 一起推也一樣，只是多等幾分鐘）；那個 commit 沒有 CI 紀錄才自己測。tag 跟 `Cargo.toml` 版號對不上也直接失敗，不會發。
 
 想先確認建置沒壞：Actions 頁手動 Run workflow，只打包（zip 留在執行紀錄），不發 Release。
@@ -56,6 +56,13 @@ target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也�
 在 Git Bash 裡跑會叫到 GNU tar 而失敗，請從 PowerShell 跑。
 
 柚伴每次啟動和之後每天看一次最新的 Release，有新版就自動下載、找空檔換上（設定 →「一般」可以關）。安裝版下載安裝程式在背景安靜地裝，免安裝版下載 zip 直接換檔。
+### 內建桌寵怎麼發
+
+安裝包裡只有預設那隻（`petkit::config::DEFAULT_PET`）帶動作圖。其他隻只帶 `pet.json`、`thumb.png` 和 `frames.sha256`（這一版動作圖的雜湊），動作圖打包成同一個 Release 的 `pet-<id>.zip`，使用者在設定裡第一次選它時才下載（`petkit::pet_download`）。新版改了某隻的圖，雜湊就會變，下載過的人會在背景重抓，舊圖先照用。
+repo 的 `pets/` 一律放完整的桌寵包，開發時跑的就是完整版，不會下載。
+
+在本機試下載：`scripts\package.ps1` 打包後，在 `dist\pets` 跑 `python -m http.server`，`YOUBAN_DESKTOP_PET_PETS_URL` 指過去（例 `http://127.0.0.1:8000`），再從解開的 zip 啟動。
+
 設定 →「一般」的「檢查更新」不等每天的定時，馬上查（自動更新關著也能按）；進度由核心寫在 `%LOCALAPPDATA%\youban-desktop-pet\update\status.json`。
 從 `target\` 底下跑的開發版不會自動更新，按「檢查更新」會說「開發中的版本不會更新」。
 

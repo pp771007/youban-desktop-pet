@@ -11,6 +11,8 @@ use crate::states::{self, Fallback};
 
 pub const MANIFEST_FILE: &str = "pet.json";
 pub const FRAMES_DIR: &str = "frames";
+/// 選桌寵時看的那張圖（站姿裁好、縮小）。動作圖還沒下載的桌寵只有它。
+pub const THUMB_FILE: &str = "thumb.png";
 const FRAME_EXT: &str = "png";
 pub const DEFAULT_VARIANT: &str = "default";
 const DEFAULT_WEIGHT: u32 = 1;
@@ -186,7 +188,24 @@ pub fn load(dir: &Path) -> Result<PetPack, PackError> {
     })
 }
 
-fn read_manifest(dir: &Path) -> Result<Manifest, PackError> {
+/// 選桌寵時顯示的圖：有 `thumb.png` 用它，沒有就用站姿（一般款）的第一張。
+pub fn picture(dir: &Path) -> Option<PathBuf> {
+    let thumb = dir.join(THUMB_FILE);
+    if thumb.is_file() {
+        return Some(thumb);
+    }
+    fs::read_dir(dir.join(FRAMES_DIR))
+        .ok()?
+        .flatten()
+        .filter_map(|e| {
+            let (state, variant, index) = e.file_name().to_str().and_then(parse_frame_name)?;
+            (state == states::IDLE).then(|| ((variant != DEFAULT_VARIANT, index), e.path()))
+        })
+        .min_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, p)| p)
+}
+
+pub fn read_manifest(dir: &Path) -> Result<Manifest, PackError> {
     let path = dir.join(MANIFEST_FILE);
     match fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text).map_err(|e| PackError::Manifest(path, e)),
@@ -275,6 +294,12 @@ mod tests {
             assert!(
                 !pack.name.is_empty() && pack.resolve(crate::states::IDLE).is_some_and(|r| r.own),
                 "{}",
+                dir.display()
+            );
+            // 安裝包裡只有預設那隻帶動作圖，其他隻選的時候只看得到這張（`scripts/package.ps1` 少了它會停）。
+            assert!(
+                dir.join(THUMB_FILE).is_file(),
+                "{} 沒有 {THUMB_FILE}",
                 dir.display()
             );
             count += 1;

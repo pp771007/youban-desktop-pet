@@ -15,11 +15,11 @@ embed-resource = "3"
 [dependencies]
 petkit = { path = "../petkit" }
 chrono.workspace = true
-ureq = { version = "3", features = ["platform-verifier"] }
+ureq.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 windows-numerics = "0.3"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip.workspace = true
 
 [dependencies.windows]
 version = "0.62"

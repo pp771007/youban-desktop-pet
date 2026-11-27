@@ -13,6 +13,7 @@ use petkit::config::{
 use petkit::focus_status::FocusStatus;
 use petkit::ipc;
 use petkit::pack::{self, PetPack};
+use petkit::pet_download;
 use petkit::reminders::Style;
 use petkit::states;
 use petkit::update_status::UpdateStatus;
@@ -55,6 +56,7 @@ use crate::log;
 use crate::memwatch::{self, MemWatch};
 use crate::modules::{ModuleEvent, ModuleHost, Request};
 use crate::paths;
+use crate::pet_fetch::{self, WM_PET_DOWNLOADED};
 use crate::platforms;
 use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
 use crate::relay_module::{self, RelayModule};
@@ -195,6 +197,8 @@ enum Event {
     HolidaysUpdated,
     /// 新版下載解好了，等空檔換上。
     UpdateReady,
+    /// 背景下載的桌寵動作圖好了。
+    PetDownloaded,
     /// 送來的指令與它的號碼（做完要記到 `COMMANDS_DONE`，送的一方在等）。
     Command(u64, String),
     Card(Pointer, f32, f32),
@@ -353,6 +357,8 @@ struct App {
     last_tick: f64,
     last_module_tick: f64,
     last_holiday_check: f64,
+    /// 已經看過要不要下載動作圖的那隻（換桌寵、剛啟動時再看一次）。
+    pet_download_checked: String,
     last_update_check: f64,
     /// 新版解好了，還沒問過使用者。
     update_ready: bool,
@@ -503,6 +509,7 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         last_tick: 0.0,
         last_module_tick: f64::NEG_INFINITY,
         last_holiday_check: f64::NEG_INFINITY,
+        pet_download_checked: String::new(),
         last_update_check: f64::NEG_INFINITY,
         update_ready: false,
         update_offered: false,
@@ -948,6 +955,10 @@ extern "system" fn pet_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM
                 push(Event::UpdateReady);
                 LRESULT(0)
             }
+            WM_PET_DOWNLOADED => {
+                push(Event::PetDownloaded);
+                LRESULT(0)
+            }
             // 回這個指令的號碼；送的一方再用 WM_COMMANDS_DONE 問到做完為止。
             WM_COPYDATA => {
                 let data = &*(lparam.0 as *const COPYDATASTRUCT);
@@ -1183,6 +1194,13 @@ impl App {
                     self.broadcast(&ModuleEvent::HolidaysUpdated);
                 }
                 Event::UpdateReady => self.update_ready = true,
+                // 還沒下載的那隻換上去；用著舊圖的那隻換成新圖（同一隻也重新載入）。
+                Event::PetDownloaded => {
+                    let id = self.config.pet.clone();
+                    if !pet_download::needs_download(&self.pets_dir.join(&id)) {
+                        self.begin_switch(id, false);
+                    }
+                }
                 Event::SettingChanged => self.refresh_palette(),
                 Event::Command(seq, text) => {
                     let result = self.command(&text);
@@ -2362,6 +2380,14 @@ impl App {
             self.config_changed(load_config(&config_path), now);
         }
 
+        if self.pet_download_checked != self.config.pet {
+            self.pet_download_checked = self.config.pet.clone();
+            let dir = self.pets_dir.join(&self.config.pet);
+            if pet_download::needs_download(&dir) {
+                pet_fetch::spawn(dir, self.hwnd);
+            }
+        }
+
         if self.config.features.reminders && now - self.last_holiday_check >= HOLIDAY_CHECK_SECS {
             self.last_holiday_check = now;
             let cache = paths::holiday_cache_dir();
@@ -2557,7 +2583,10 @@ impl App {
             self.refresh_palette();
         }
         if old.pet != self.config.pet {
-            self.begin_switch(self.config.pet.clone(), false);
+            // 動作圖還沒下載的話，等背景下載好（`Event::PetDownloaded`）再換。
+            if !pet_download::must_download_first(&self.pets_dir.join(&self.config.pet)) {
+                self.begin_switch(self.config.pet.clone(), false);
+            }
         } else if old.size_dip != self.config.size_dip {
             // 尺寸變了：用新尺寸重新縮圖（借用換桌寵的過場）。
             self.begin_switch(self.pack.id.clone(), false);
