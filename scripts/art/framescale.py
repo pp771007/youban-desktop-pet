@@ -7,6 +7,11 @@ usage: python framescale.py [--box L,T,R,B] [--apply] [--overlay out.png] <frame
   --box      the part to compare, as fractions of the first frame (default 0.5,0,1,0.62 = top right,
              the head of a pet facing right). Pick something rigid - head, the orange on top - not the
              whole body: legs and tails move between frames and make the size look different.
+             The box is a share of the first frame, so when one frame is taller (a raised tail) a
+             loose box catches empty space - narrow it to the head. Frames that turn the head
+             (a climb that bends) cannot be matched against frame 1; compare same-pose frames
+             with each other. A result at the edge of the search (0.80 or 1.25) with a high error
+             means it found nothing.
   --apply    shrink every frame to the size of the smallest one (shrinking keeps the art sharp)
   --overlay  blend the first frame's box with the frame that differs most, at scale 1 and at the
              measured scale; the measured one should line up. Check it before --apply: frames that
@@ -25,9 +30,14 @@ import argparse
 import numpy as np
 from PIL import Image
 
-SCALES = np.arange(0.85, 1.20, 0.005)
-SHIFT = 24  # px the box may move between frames
+SCALES = np.arange(0.80, 1.25, 0.005)
+# Measure on copies shrunk so the first frame is this tall: fast, and 1px is still 0.5%.
+WORK_H = 200
+# How far the box may move between frames, as a share of the height (a raised tail makes one frame taller).
+SHIFT_FRAC = 0.15
 TOLERANCE = 0.01  # sizes closer than this are left alone
+# Shown as the overlay, enlarged so the doubled lines are easy to see.
+OVERLAY_ZOOM = 3
 
 
 def error(a, b):
@@ -39,13 +49,14 @@ def match(tpl, from_right, top, im, scales):
     """Best (error, scale, x, y) over `scales`: where `im`, scaled, lines up with the template.
     The search starts where the box sat in the first frame, measured from the right edge (pets face right)."""
     th, tw = tpl.shape[:2]
+    shift = round(WORK_H * SHIFT_FRAC)
     best = None
     for s in scales:
         r = np.asarray(im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS)).astype(float)
         h, w = r.shape[:2]
         x0 = w - from_right - tw
-        for y in range(max(0, top - SHIFT), min(h - th, top + SHIFT) + 1):
-            for x in range(max(0, x0 - SHIFT), min(w - tw, x0 + SHIFT) + 1):
+        for y in range(max(0, top - shift), min(h - th, top + shift) + 1):
+            for x in range(max(0, x0 - shift), min(w - tw, x0 + shift) + 1):
                 e = error(r[y:y + th, x:x + tw], tpl)
                 if best is None or e < best[0]:
                     best = (e, s, x, y)
@@ -59,7 +70,8 @@ def on_white(im):
 def overlay_tile(ref_box, im, scale, x, y):
     crop = im.resize((round(im.width * scale), round(im.height * scale)), Image.LANCZOS)
     crop = crop.crop((x, y, x + ref_box.width, y + ref_box.height))
-    return Image.blend(on_white(ref_box), on_white(crop), 0.5)
+    tile = Image.blend(on_white(ref_box), on_white(crop), 0.5)
+    return tile.resize((tile.width * OVERLAY_ZOOM, tile.height * OVERLAY_ZOOM), Image.LANCZOS)
 
 
 def main():
@@ -70,7 +82,9 @@ def main():
     ap.add_argument('--overlay')
     a = ap.parse_args()
 
-    ims = [Image.open(f).convert('RGBA') for f in a.frames]
+    originals = [Image.open(f).convert('RGBA') for f in a.frames]
+    k = WORK_H / originals[0].height
+    ims = [im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS) for im in originals]
     ref = ims[0]
     l, t, r, b = (float(v) for v in a.box.split(','))
     box = (round(ref.width * l), round(ref.height * t), round(ref.width * r), round(ref.height * b))
@@ -98,7 +112,7 @@ def main():
 
     if a.apply:
         target = min(drawn)
-        for f, im, d in zip(a.frames, ims, drawn):
+        for f, im, d in zip(a.frames, originals, drawn):
             k = target / d
             if abs(k - 1) > TOLERANCE:
                 im = im.convert('RGBa').resize((round(im.width * k), round(im.height * k)), Image.LANCZOS).convert('RGBA')
