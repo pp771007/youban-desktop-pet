@@ -1,0 +1,5 @@
+Qwen-Image 2.1 (ComfyUI), 2048x1024, seed 262
+References: the dolphin frames idle_01, walk_01, talk_01, notify_01
+Background keyed out with key_chroma.py; left half = frame 01, right half = frame 02.
+
+Two frames of the same animation side by side on one wide image, left half and right half, the character the same size in both halves, fully inside each half with empty space around it. Cute chibi baby dolphin, exactly the same character design and proportions as the reference images: pastel sky-blue body, cream-white belly, small dorsal fin, two small pectoral fins, exactly one tail fluke, big round black eyes, rounded snout. Side view facing right. Left frame: crouching to get ready for a little jump, body squashed a little lower and wider, tail bent down, eyes squeezed happily. Right frame: in the air mid-hop, body arched upward diagonally with the head up, happy open mouth. Flat cel-shaded sticker style with soft gradient shading, crisp uniform dark brown outline of even medium thickness, same outline as the reference. Plain solid magenta #FF00FF background, no water, no splash, no shadow, no text, no aura, no halo, no glow.
