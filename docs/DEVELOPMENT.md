@@ -25,6 +25,8 @@ target\debug\Youban.exe           # 桌寵（crate 名稱是 petcore）
 target\debug\YoubanSettings.exe   # 設定（crate 名稱是 petsettings；也可以從桌寵右鍵選單開）
 ```
 
+開發版也不開主控台視窗。即時 log：`Get-Content -Wait -Encoding UTF8 $env:LOCALAPPDATA\youban-desktop-pet\logs\petcore.log`（超過 1MB 換成 `.log.old`，只留一份）。
+
 `Youban.exe` 的其他用法：
 
 | 指令 | 用途 |

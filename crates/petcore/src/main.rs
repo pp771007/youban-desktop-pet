@@ -1,5 +1,6 @@
-// 正式版不要跳出黑色主控台視窗；開發版留著看 log。
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// 不開黑色主控台視窗（開發版也一樣：平常就拿它當桌寵跑，黑窗只會擋畫面）。
+// log 都在 logs\petcore.log；命令列指令的輸出接管線時照樣拿得到。
+#![windows_subsystem = "windows"]
 
 mod app;
 mod area_editor;

@@ -1,7 +1,8 @@
 //! 桌寵設定程式：用到才開、關掉就整個結束（瀏覽器核心只在這時候佔記憶體）。
 //! 跟核心溝通只有兩條路：寫設定檔（核心每秒看一次有沒有變），以及 WM_COPYDATA 送指令。
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// 跟核心一樣不開主控台：核心沒有主控台時，開出來的設定程式會自己跳一個新的黑窗。
+#![windows_subsystem = "windows"]
 
 mod importer;
 mod watch;
