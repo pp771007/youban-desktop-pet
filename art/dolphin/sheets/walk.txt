@@ -1,0 +1,5 @@
+Qwen-Image 2.1 (ComfyUI), 2048x640, seed 622
+References: the dolphin frames walk_01, walk_02, idle_01, talk_01
+Background keyed out with key_chroma.py; four equal columns = frames 01-04 (05-08 repeat them).
+
+Four frames of one swimming animation cycle in a single row on one wide image, evenly spaced from left to right, the same cute chibi baby dolphin in every frame with the same size, the same body length, the same expression and at the same height. Side view facing right, body horizontal, gliding forward; only the tail and body curve change: frame 1 tail fluke raised up, frame 2 tail level, frame 3 tail fluke lowered down, frame 4 tail level again. The dolphin is exactly the character in the reference images: pastel sky-blue body, cream-white belly, small dorsal fin, two small pectoral fins, exactly one tail fluke, big round black eyes, rounded snout, gentle smile. Flat cel-shaded sticker style with soft gradient shading, crisp uniform dark brown outline. Plain solid magenta #FF00FF background, no water, no bubbles, no shadow, no text, no aura, no halo, no glow.
