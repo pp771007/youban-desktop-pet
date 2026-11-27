@@ -35,7 +35,7 @@
       "heightRatio": 0.91
     },
     "sleep": {
-      "heightRatio": 1.09
+      "heightRatio": 1.06
     },
     "sit": {
       "heightRatio": 1.56
@@ -66,7 +66,7 @@
       ]
     },
     "dizzy": {
-      "heightRatio": 1.18,
+      "heightRatio": 1.02,
       "fps": 4
     },
     "happy": {
