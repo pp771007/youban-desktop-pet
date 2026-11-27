@@ -1632,13 +1632,19 @@ impl App {
             checked: false,
             children: choices,
         }));
-        // 藏起來時選單是從托盤打開的：先給「顯示」，點心和球沒有桌寵接就不放。
-        if self.user_hidden {
-            entries.insert(1, Item::entry(MENU_SHOW_PET, "顯示桌寵", Icon::Eye));
-        } else {
+        // 隱藏／顯示是同一個開關，兩種狀態都在標題下第一格（藏著時選單從托盤打開，要一眼找到）。
+        // 藏著時點心和球沒有桌寵接，不放。
+        entries.insert(
+            1,
+            if self.user_hidden {
+                Item::entry(MENU_SHOW_PET, "顯示桌寵", Icon::Eye)
+            } else {
+                Item::entry(MENU_HIDE_PET, "隱藏桌寵", Icon::EyeOff)
+            },
+        );
+        if !self.user_hidden {
             entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
             entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
-            entries.push(Item::entry(MENU_HIDE_PET, "隱藏桌寵", Icon::EyeOff));
         }
         for group in self.modules.menu(local_now(), &self.config) {
             let mut items: Vec<Entry> = group

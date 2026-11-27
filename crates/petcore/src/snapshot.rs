@@ -401,11 +401,11 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     };
     let main = vec![
         Entry::Header("桌寵".into()),
+        Item::entry(20, "隱藏桌寵", Icon::EyeOff),
         Item::entry(1, "陪你第 12 天", Icon::Heart),
         Entry::Item(switch.clone()),
         Item::entry(3, "餵點心", Icon::Cookie),
         Item::entry(4, "丟球", Icon::Ball),
-        Item::entry(20, "隱藏桌寵", Icon::EyeOff),
         Entry::Header("提醒".into()),
         Item::entry(5, "新增提醒…", Icon::Bell),
         Entry::Header("視窗歸位".into()),
@@ -442,7 +442,7 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     menus.load_pictures(&wic, &children, s);
     for palette in [&theme::LIGHT, &theme::DARK] {
         for (entries, hover) in [
-            (main.clone(), Some(2)),
+            (main.clone(), Some(3)),
             (children.clone(), Some(3)),
             (hidden.clone(), Some(1)),
         ] {
