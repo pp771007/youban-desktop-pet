@@ -2,6 +2,7 @@
   "spec": 1,
   "name": "海豚",
   "accent": "#5FA8E8",
+  "mouth": [0.82, 0.5],
   "states": {
     "idle": {
       "variants": [

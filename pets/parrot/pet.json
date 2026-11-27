@@ -2,6 +2,7 @@
   "spec": 1,
   "name": "鸚鵡",
   "accent": "#6BA368",
+  "mouth": [0.72, 0.37],
   "states": {
     "idle": { "frames": 1, "fps": 1, "procedural": true },
     "walk": { "frames": 2, "fps": 4, "speed": 32, "procedural": true },

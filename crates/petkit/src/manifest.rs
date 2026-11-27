@@ -17,6 +17,9 @@ pub struct Manifest {
     /// 使用者在設定程式裡自己做的桌寵：可以補動作、可以刪。內建的不行（更新時會被蓋回去）。
     #[serde(default)]
     pub editable: bool,
+    /// 嘴巴在站姿圖（裁掉透明邊之後）的哪裡：`[x, y]`，從左、從上算的比例（0～1），照圖面向右的樣子量。
+    /// 吃點心時點心叼在這裡；沒寫的話點心留在地上吃。
+    pub mouth: Option<[f32; 2]>,
     #[serde(default)]
     pub states: BTreeMap<String, StateSpec>,
 }

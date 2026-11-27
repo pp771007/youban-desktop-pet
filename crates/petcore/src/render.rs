@@ -321,6 +321,29 @@ fn climb_transform(
     face_up * onto_wall * Matrix3x2::translation(away, -width / 2.0)
 }
 
+/// 嘴巴在螢幕上的位置。`mouth` 是站姿圖上的比例（`pet.json`，照面向右量），`feet` 是腳底（桌寵的 x、y）。
+/// 跟 `pose_transform` 一樣跟著左右翻轉、伸縮、往上抬；不算旋轉（吃東西時不轉）。
+/// 用站姿圖量就好：其他動作的圖照規範跟站姿同一個身高、同一個構圖。
+pub fn mouth_point(
+    feet: (f32, f32),
+    pose: &Pose,
+    procedural: bool,
+    idle: &Frame,
+    base_height: f32,
+    (mx, my): (f32, f32),
+) -> (f32, f32) {
+    let flip = if pose.flip { -1.0 } else { 1.0 };
+    let (scale_x, scale_y, lift) = if procedural {
+        (pose.scale_x, pose.scale_y, pose.lift)
+    } else {
+        (1.0, 1.0, 0.0)
+    };
+    (
+        feet.0 + (mx * idle.width - idle.center_x) * scale_x * flip,
+        feet.1 - (1.0 - my) * idle.height * scale_y + lift * base_height,
+    )
+}
+
 fn pose_transform(
     pose: &Pose,
     procedural: bool,

@@ -61,7 +61,7 @@ use crate::platforms;
 use crate::popup_menu::{Entry, Item, MenuInput, Outcome as MenuOutcome, PopupMenu};
 use crate::relay_module::{self, RelayModule};
 use crate::reminder_module::{self, ReminderModule};
-use crate::render::{Gfx, PetRenderer, Scene};
+use crate::render::{self, Gfx, PetRenderer, Scene};
 use crate::soak::{Action, Soak};
 use crate::sprites::{SpriteSet, Wic};
 use crate::theme::{self, Palette};
@@ -228,6 +228,10 @@ struct ToySlot {
     fading: Option<f64>,
     /// 玩夠了、停穩的時間（過一陣子淡出）。
     done_at: Option<f64>,
+    /// 搆不到放棄時講過話了：同一份之後再放棄只冒 ❓。
+    complained: bool,
+    /// 正被叼著吃：叼起來那一刻的底部中心與直徑（從那裡飛到嘴邊、照它一口一口變小）。
+    carried_from: Option<toy::CarryStart>,
 }
 
 thread_local! {
@@ -1874,10 +1878,17 @@ impl App {
         self.last_topmost = now;
         // 後設的在上面：選單開著的話要蓋過桌寵。
         let menu = self.menu.as_ref().map(PopupMenu::hwnds).unwrap_or_default();
+        // 叼在嘴邊吃的點心蓋在桌寵上面，平常墊在下面（桌寵走過去會擋住它）。
+        let carried = self.toy.as_ref().is_some_and(|t| t.carried_from.is_some());
+        let (below, above) = if carried {
+            (self.hwnd, self.toy_hwnd)
+        } else {
+            (self.toy_hwnd, self.hwnd)
+        };
         for hwnd in [
             self.glow_hwnd,
-            self.toy_hwnd,
-            self.hwnd,
+            below,
+            above,
             self.countdown.hwnd(),
             self.card_hwnd,
         ]
@@ -2179,8 +2190,17 @@ impl App {
             .update(self.glow_hwnd, self.hwnd, &glows, dt, &style)?;
         self.update_countdown(dt)?;
         for happening in self.pet.drain_happenings() {
+            // 同一份點心／球搆不到只講一次，之後再放棄只冒 ❓。
+            let repeated = matches!(happening, Happening::GaveUp { .. })
+                && self
+                    .toy
+                    .as_mut()
+                    .is_some_and(|t| std::mem::replace(&mut t.complained, true));
             let ctx = self.talk_ctx(now);
-            if let Some(say) = self.chatter.on(happening, &ctx) {
+            if let Some(say) = (!repeated)
+                .then(|| self.chatter.on(happening, &ctx))
+                .flatten()
+            {
                 self.say(say, now);
             }
             match happening {
@@ -2275,7 +2295,23 @@ impl App {
             touched: self.now(),
             fading: None,
             done_at: None,
+            complained: false,
+            carried_from: None,
         });
+    }
+
+    /// 嘴巴現在在螢幕上的哪裡；桌寵包沒寫 `mouth` 就是 `None`。
+    fn mouth_point(&self, now: f64) -> Option<(f32, f32)> {
+        let mouth = self.pack.mouth?;
+        let variant = &self.sprites.states[&self.anim.source].variants[self.anim.variant];
+        Some(render::mouth_point(
+            (self.pet.x, self.pet.y),
+            &self.pet.pose(now),
+            !self.anim.own || variant.procedural,
+            &self.sprites.states[states::IDLE].variants[0].frames[0],
+            self.sprites.base_height,
+            mouth,
+        ))
     }
 
     fn remove_toy(&mut self) {
@@ -2291,6 +2327,10 @@ impl App {
         let blocks = self.forbidden_rects();
         let s = self.dpi_scale();
         let press = self.toy_press;
+        let eating = self
+            .pet
+            .eating(now)
+            .and_then(|p| Some((p, self.mouth_point(now)?)));
         let Some(slot) = self.toy.as_mut() else {
             return Ok(());
         };
@@ -2306,6 +2346,27 @@ impl App {
                 slot.toy.drag_to(cx, cy, dt);
                 slot.touched = now;
             }
+        }
+        match eating.filter(|_| slot.toy.kind.is_food() && !slot.toy.is_held()) {
+            Some((progress, (mx, my))) => {
+                if slot.carried_from.is_none() {
+                    slot.carried_from = Some((slot.toy.x, slot.toy.y, slot.toy.size));
+                    // 叼起來的點心要畫在桌寵前面：馬上重排視窗上下順序。
+                    self.last_topmost = f64::NEG_INFINITY;
+                }
+                let from = slot.carried_from.expect("just set");
+                let (x, y, size) = toy::carried(from, (mx, my), progress);
+                slot.toy.carry_to(x, y, size);
+                slot.touched = now;
+            }
+            None => {
+                if slot.carried_from.take().is_some() {
+                    self.last_topmost = f64::NEG_INFINITY;
+                }
+            }
+        }
+        if slot.carried_from.is_some() {
+            return self.draw_toy(1.0);
         }
         let rect = work_area(monitor_at(slot.toy.x, slot.toy.y - 1.0));
         let mut platforms = if self.config.stand_on_windows {
@@ -2346,6 +2407,13 @@ impl App {
             self.remove_toy();
             return Ok(());
         }
+        self.draw_toy(opacity)
+    }
+
+    fn draw_toy(&mut self, opacity: f32) -> Result<()> {
+        let Some(slot) = self.toy.as_ref() else {
+            return Ok(());
+        };
         let (_, origin) = slot.toy.window();
         self.toy_painter.draw(&slot.toy)?;
         self.toy_painter.present(self.toy_hwnd, origin, opacity)?;

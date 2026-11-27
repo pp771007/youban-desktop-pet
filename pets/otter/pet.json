@@ -2,6 +2,7 @@
   "spec": 1,
   "name": "水獺",
   "accent": "#A96C49",
+  "mouth": [0.64, 0.27],
   "states": {
     "idle": { "frames": 1, "fps": 1, "procedural": true },
     "walk": { "frames": 2, "fps": 4, "speed": 32, "procedural": true },

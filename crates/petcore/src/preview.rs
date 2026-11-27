@@ -11,13 +11,14 @@ use windows::Win32::Foundation::E_FAIL;
 use windows::core::{Error, Result};
 
 use crate::app::{anchor, window_size};
-use crate::behavior::{self, Demo, Env, Input, Pet, Platform, Rect};
+use crate::behavior::{self, Demo, Env, Happening, Input, ItemView, Pet, Platform, Rect};
 use crate::effects::Effects;
 use crate::glow::{GlowPainter, GlowStyle};
 use crate::paths;
-use crate::render::{Gfx, PetRenderer, Scene};
+use crate::render::{Gfx, PetRenderer, Scene, mouth_point};
 use crate::sprites::Wic;
 use crate::theme;
+use crate::toy::{self, CarryStart, Toy, ToyKind, ToyPainter};
 
 const BASE_DPI: f32 = 96.0;
 const FPS: f32 = 25.0;
@@ -121,6 +122,16 @@ struct Script {
 
 /// 這個劇本的舞台中間放一塊看不見的禁止範圍（碰到時亮紅光）。
 const WALL_SCRIPT: &str = "20-wall";
+/// 點心從桌寵旁邊掉下來：走過去、叼起來一口一口吃掉。
+const EAT_SCRIPT: &str = "28-eat";
+/// 點心掉在右邊高高的視窗頂上：牠搆不到，冒問號放棄。
+const FOOD_OUT_OF_REACH_SCRIPT: &str = "29-food-out-of-reach";
+/// 點心從桌寵右邊幾個身高、地面往上幾個身高的地方掉下來。
+const FOOD_DROP_SIDE_HEIGHTS: f32 = 1.4;
+const FOOD_DROP_HEIGHTS: f32 = 2.0;
+/// 搆不到的那個視窗：從桌寵右邊幾個身高開始、頂端離地幾個身高。
+const HIGH_WINDOW_SIDE_HEIGHTS: f32 = 0.9;
+const HIGH_WINDOW_TOP_HEIGHTS: f32 = 1.5;
 
 fn nothing(_: &mut Pet, _: f64, _: &Env, _: f32) {}
 fn nothing_each(_: &mut Pet, _: f64, _: &Env, _: f32, _: f32) {}
@@ -337,6 +348,20 @@ fn scripts() -> Vec<Script> {
             setup: |p, n, e, _| demo(Demo::Walk { secs: 4.0 })(p, n, e),
             each: nothing_each,
         },
+        Script {
+            name: EAT_SCRIPT,
+            secs: 6.0,
+            start_x: 0.25,
+            setup: nothing,
+            each: nothing_each,
+        },
+        Script {
+            name: FOOD_OUT_OF_REACH_SCRIPT,
+            secs: 4.0,
+            start_x: 0.25,
+            setup: nothing,
+            each: nothing_each,
+        },
     ];
     out.extend(leaps);
     out
@@ -464,6 +489,36 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                 seed,
             );
         }
+        // 點心劇本：桌面上那一個點心、被叼起來那一刻的位置與大小。
+        let mut food: Option<(Toy, Option<CarryStart>)> = None;
+        if script.name == EAT_SCRIPT || script.name == FOOD_OUT_OF_REACH_SCRIPT {
+            if script.name == FOOD_OUT_OF_REACH_SCRIPT {
+                let left = pet.x + h * HIGH_WINDOW_SIDE_HEIGHTS;
+                windows = vec![Platform {
+                    left,
+                    right: stage_w as f32,
+                    y: env.ground_y - h * HIGH_WINDOW_TOP_HEIGHTS,
+                    window: 1,
+                    window_left: left,
+                    sides: (Some(env.ground_y), None),
+                    bottom: env.ground_y,
+                }];
+                env.platforms = windows.clone();
+            }
+            let size = h * toy::SIZE_PER_HEIGHT;
+            food = Some((
+                Toy::new(
+                    ToyKind::Food(0),
+                    pet.x + h * FOOD_DROP_SIDE_HEIGHTS,
+                    env.ground_y - h * FOOD_DROP_HEIGHTS,
+                    0.0,
+                    0.0,
+                    size,
+                ),
+                None,
+            ));
+        }
+        let mut toy_painter = ToyPainter::new(&gfx)?;
         let mut effects = Effects::default();
         let mut now = 0.0f64;
         (script.setup)(&mut pet, now, &env, h);
@@ -476,7 +531,27 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                 let dt = frame_dt / SUBSTEPS as f32;
                 (script.each)(&mut pet, now, &env, h, now as f32);
                 now += dt as f64;
+                env.item = food.as_ref().map(|(t, _)| ItemView {
+                    x: t.x,
+                    y: t.y,
+                    food: true,
+                    grounded: t.grounded(),
+                    wanted: true,
+                });
                 pet.update(now, dt, &env);
+                if pet.drain_happenings().contains(&Happening::Ate) {
+                    food = None;
+                }
+                if let Some((t, None)) = food.as_mut() {
+                    let world = toy::World {
+                        ground_y: env.ground_y,
+                        wall_left: 0.0,
+                        wall_right: stage_w as f32,
+                        platforms: &env.platforms,
+                        px_per_dip,
+                    };
+                    t.update(dt, &world);
+                }
                 lit = glow.advance(&pet.glows(&env, now), dt);
                 for e in pet.drain_emotes() {
                     effects.spawn(e, now);
@@ -500,10 +575,25 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                     anim_frame = (anim_frame + 1) % variant.durations_ms.len();
                 }
             }
+            let procedural = !res.own || variant.procedural;
+            // 跟實機一樣（`App::update_toy`）：吃的時候點心叼在嘴邊，吃到一半停了就照物理掉下去。
+            if let Some((t, from)) = food.as_mut() {
+                match pet.eating(now).zip(pack.mouth) {
+                    Some((progress, mouth)) => {
+                        let start = *from.get_or_insert((t.x, t.y, t.size));
+                        let idle = &sprites.states[states::IDLE].variants[0].frames[0];
+                        let m = mouth_point((pet.x, pet.y), &pose, procedural, idle, h, mouth);
+                        let (x, y, size) = toy::carried(start, m, progress);
+                        t.carry_to(x, y, size);
+                    }
+                    None => *from = None,
+                }
+            }
+            let carried = food.as_ref().is_some_and(|(_, from)| from.is_some());
             let scene = Scene {
                 frame: &variant.frames[anim_frame.min(variant.frames.len() - 1)],
                 pose,
-                procedural: !res.own || variant.procedural,
+                procedural,
                 base_height: h,
                 appear: 1.0,
                 effects: &effects,
@@ -532,6 +622,28 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                 (pet.x - anchor.X).round() as i32,
                 (pet.y - anchor.Y).round() as i32,
             );
+            // 點心平常墊在桌寵下面，叼在嘴邊時蓋在上面（同實機的視窗順序）。
+            let mut blit_food = |stage: &mut [u8]| -> Result<()> {
+                if let Some((t, _)) = &food {
+                    toy_painter.draw(t)?;
+                    let (side, origin) = t.window();
+                    blit(
+                        stage,
+                        stage_w,
+                        stage_h,
+                        toy_painter.canvas.pixels(),
+                        side as usize,
+                        side as usize,
+                        origin.x,
+                        origin.y,
+                        1.0,
+                    );
+                }
+                Ok(())
+            };
+            if !carried {
+                blit_food(&mut stage)?;
+            }
             blit(
                 &mut stage,
                 stage_w,
@@ -543,6 +655,9 @@ pub fn frames(out_dir: &Path, dpi: u32, pet: Option<&str>) -> Result<()> {
                 oy,
                 1.0,
             );
+            if carried {
+                blit_food(&mut stage)?;
+            }
             wic.save_png(
                 &dir.join(format!("{i:03}.png")),
                 stage_w as u32,

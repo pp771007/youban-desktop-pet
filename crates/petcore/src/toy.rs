@@ -38,6 +38,31 @@ const MAX_THROW_DIP: f32 = 2600.0;
 /// 拿著移動時，速度往實際移動速度靠的快慢（每秒）：放手時用平滑過的速度，手一抖才不會亂飛。
 const DRAG_VELOCITY_SMOOTHING: f32 = 12.0;
 
+/// 叼著吃：點心中心在嘴巴下面多少（以點心直徑計；嘴巴露在點心上緣）、
+/// 從地上飛到嘴邊佔吃的時間多少、飛的弧線多高（以點心直徑計）。
+const FOOD_HOLD_BELOW_MOUTH: f32 = 0.35;
+const FOOD_LIFT_SHARE: f32 = 0.15;
+const FOOD_LIFT_ARC: f32 = 0.6;
+/// 一口一口變小：吃的時間均分成這幾段，每段的大小（相對叼起來時）。
+const FOOD_BITE_SCALES: [f32; 4] = [1.0, 0.78, 0.56, 0.34];
+
+/// 被叼起來那一刻的底部中心（x、y）與直徑。
+pub type CarryStart = (f32, f32, f32);
+
+/// 叼著吃的點心這一格在哪、多大：`mouth` 是嘴巴，`progress` 是吃到哪裡（0～1）。
+/// 先沿弧線飛到嘴邊，接著一口一口變小。回傳底部中心與直徑。
+pub fn carried(from: CarryStart, mouth: (f32, f32), progress: f32) -> (f32, f32, f32) {
+    let (fx, fy, full) = from;
+    let bites = FOOD_BITE_SCALES.len();
+    let bite = ((progress * bites as f32) as usize).min(bites - 1);
+    let size = full * FOOD_BITE_SCALES[bite];
+    let (tx, ty) = (mouth.0, mouth.1 + size * (FOOD_HOLD_BELOW_MOUTH + 0.5));
+    let u = (progress / FOOD_LIFT_SHARE).clamp(0.0, 1.0);
+    let ease = u * u * (3.0 - 2.0 * u);
+    let arc = (std::f32::consts::PI * u).sin() * FOOD_LIFT_ARC * full;
+    (fx + (tx - fx) * ease, fy + (ty - fy) * ease - arc, size)
+}
+
 /// 點心與球的圖（數字是陣列裡的第幾張）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToyKind {
@@ -125,6 +150,9 @@ pub struct Toy {
     pub kicks: u32,
     /// 被使用者拿著：抓住的點離底部中心多遠。
     held: Option<(f32, f32)>,
+    /// 貼在地面或視窗頂上（停著或在滾）。不能拿「垂直速度是 0」代替：剛丟出來、在最高點、
+    /// 水平甩出去的那一格速度也是 0，桌寵會以為它落在半空中的某一層、搆不到就放棄。
+    on_surface: bool,
 }
 
 impl Toy {
@@ -140,6 +168,7 @@ impl Toy {
             resting: false,
             kicks: 0,
             held: None,
+            on_surface: false,
         }
     }
 
@@ -149,6 +178,7 @@ impl Toy {
         self.kicks = 0;
         self.held = Some((self.x - cx, self.y - cy));
         self.resting = false;
+        self.on_surface = false;
         self.vx = 0.0;
         self.vy = 0.0;
     }
@@ -177,6 +207,19 @@ impl Toy {
         self.held.is_some()
     }
 
+    /// 被桌寵叼著吃：底部中心放到 `(x, y)`、直徑 `size`，不跑物理、不畫地上的影子。
+    /// 停止呼叫（吃到一半被拎走）時它不在地上，下一格就照物理掉下去。
+    pub fn carry_to(&mut self, x: f32, y: f32, size: f32) {
+        self.x = x;
+        self.y = y;
+        self.size = size;
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.spin_deg = 0.0;
+        self.resting = false;
+        self.on_surface = false;
+    }
+
     /// 推進一格；回傳 `true` = 這一格剛落地（呼叫端可以趁機出聲音或灰塵）。
     pub fn update(&mut self, dt: f32, w: &World) -> bool {
         if self.held.is_some() {
@@ -195,6 +238,7 @@ impl Toy {
             }
             self.resting = false;
         }
+        self.on_surface = false;
         let prev_y = self.y;
         self.vy += GRAVITY_DIP * s * dt;
         self.x += self.vx * dt;
@@ -230,7 +274,8 @@ impl Toy {
             } else {
                 0.0
             };
-            if self.vy == 0.0 {
+            self.on_surface = self.vy == 0.0;
+            if self.on_surface {
                 // 在地上滾：摩擦減速。
                 let slow = ROLL_FRICTION_DIP * s * dt;
                 self.vx = if self.vx.abs() <= slow {
@@ -252,13 +297,14 @@ impl Toy {
 
     /// 在地上或視窗頂（滾動中也算），不在空中、沒被拿著。
     pub fn grounded(&self) -> bool {
-        self.held.is_none() && (self.resting || self.vy == 0.0)
+        self.held.is_none() && (self.resting || self.on_surface)
     }
 
     /// 桌寵踢球：往 `dir` 飛出去。
     pub fn kick(&mut self, dir: f32, px_per_dip: f32) {
         self.kicks += 1;
         self.resting = false;
+        self.on_surface = false;
         self.vx = dir * KICK_X_DIP * px_per_dip;
         self.vy = -KICK_UP_DIP * px_per_dip;
     }
@@ -266,6 +312,7 @@ impl Toy {
     /// 使用者點了一下：往上彈，水平方向 `jitter` -1～1。
     pub fn poke(&mut self, jitter: f32, px_per_dip: f32) {
         self.resting = false;
+        self.on_surface = false;
         self.vx += jitter * POKE_X_DIP * px_per_dip;
         self.vy = -POKE_UP_DIP * px_per_dip;
     }
@@ -401,6 +448,35 @@ mod tests {
         for _ in 0..(secs / DT) as usize {
             t.update(DT, w);
         }
+    }
+
+    #[test]
+    fn eaten_food_moves_from_the_floor_to_the_mouth_and_gets_smaller() {
+        let (from, mouth) = ((600.0, 1000.0, 40.0), (500.0, 900.0));
+        assert_eq!(carried(from, mouth, 0.0), from);
+        let (x, y, size) = carried(from, mouth, 0.99);
+        assert_eq!(x, mouth.0);
+        // 叼著：點心上緣在嘴巴附近（嘴巴露在點心上面一點）。
+        let top = y - size;
+        assert!((top - mouth.1).abs() < size, "top {top} near mouth");
+        assert!(size < from.2 / 2.0, "mostly eaten");
+    }
+
+    #[test]
+    fn only_counts_as_grounded_once_it_touches_down() {
+        let w = world(&[]);
+        // 剛丟出來還沒開始掉、拿著水平甩出去：垂直速度都是 0，但人在半空中。
+        let mut t = Toy::new(ToyKind::Food(0), 500.0, 400.0, 0.0, 0.0, 40.0);
+        assert!(!t.grounded(), "just dropped");
+        t.update(DT, &w);
+        assert!(!t.grounded(), "falling");
+        settle(&mut t, &w, 2.0);
+        assert!(t.grounded(), "landed");
+        t.grab(500.0, 990.0);
+        t.drag_to(600.0, 500.0, DT);
+        t.drag_to(700.0, 500.0, DT);
+        t.release(1.0);
+        assert!(!t.grounded(), "flung sideways in mid-air");
     }
 
     #[test]

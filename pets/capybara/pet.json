@@ -1,6 +1,7 @@
 {
   "spec": 1,
   "name": "水豚",
+  "mouth": [0.5, 0.5],
   "states": {
     "idle": {
       "variants": [
@@ -19,6 +20,7 @@
     "wake": { "heightRatio": 0.87, "durations": [550, 550], "procedural": false },
     "climb": { "heightRatio": 1.1, "fps": 6 },
     "hop": { "heightRatio": 1.11, "durations": [150, 400] },
-    "dizzy": { "heightRatio": 1.04, "fps": 4 }
+    "dizzy": { "heightRatio": 1.04, "fps": 4 },
+    "eat": { "fps": 3 }
   }
 }

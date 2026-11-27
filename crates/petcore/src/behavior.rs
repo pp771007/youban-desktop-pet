@@ -118,8 +118,7 @@ const FETCH_REACH_HEIGHTS: f32 = 0.45;
 const FETCH_SPEED_MUL: f32 = 2.0;
 /// 東西跟牠差這麼多個身高以內算「同一層」（地面或同一個視窗頂）。
 const FETCH_SAME_LEVEL_HEIGHTS: f32 = 0.6;
-/// 東西落在搆不到的地方：等這麼久就放棄，放棄後這段時間不再理它。
-const FETCH_PATIENCE_SECS: f64 = 6.0;
+/// 東西落在搆不到的地方：放棄後這段時間不再理它。
 const FETCH_IGNORE_SECS: f64 = 20.0;
 const EAT_SECS: f32 = 2.2;
 const EAT_BITES_PER_SEC: f32 = 3.0;
@@ -499,9 +498,9 @@ enum Mode {
     Dizzy {
         respun: bool,
     },
-    /// 去拿桌面上的點心或球。
+    /// 去拿桌面上的點心或球；`stepping` = 正在走過去（`false` = 東西還在空中，站在底下等）。
     Fetch {
-        since: f64,
+        stepping: bool,
     },
     Eat,
     /// 站在視窗邊緣蹲低，接著跳出去（`Leap` 決定跳到哪）。
@@ -688,7 +687,8 @@ impl Pet {
             Mode::Roll { .. } => states::ROLL,
             Mode::Chase { .. } => states::WALK,
             Mode::Pounce { .. } => states::HOP,
-            Mode::Fetch { .. } => states::WALK,
+            Mode::Fetch { stepping: true } => states::WALK,
+            Mode::Fetch { stepping: false } => states::IDLE,
             Mode::Eat => states::EAT,
             Mode::Dizzy { .. } => states::DIZZY,
             Mode::Crouch { .. } => states::LAND,
@@ -920,7 +920,7 @@ impl Pet {
         let mut landed = false;
         if self.notices_item(env, now) {
             self.emote(Emote::Alert);
-            self.set_mode(Mode::Fetch { since: now }, now);
+            self.set_mode(Mode::Fetch { stepping: true }, now);
         } else if self.teased(env, now) {
             self.emote(Emote::Alert);
             self.set_mode(
@@ -1260,10 +1260,10 @@ impl Pet {
                     self.set_idle(now);
                 }
             }
-            Mode::Fetch { since } => {
+            Mode::Fetch { .. } => {
                 self.stand(env, now);
                 if matches!(self.mode, Mode::Fetch { .. }) {
-                    self.fetch(since, dt, env, now);
+                    self.fetch(dt, env, now);
                 }
             }
             Mode::Eat => {
@@ -1442,7 +1442,7 @@ impl Pet {
             climb: None,
         };
         match self.mode {
-            Mode::Idle { .. } => {
+            Mode::Idle { .. } | Mode::Fetch { stepping: false } => {
                 let b = (tau * t / 3.0).sin();
                 pose.scale_y = 1.0 + 0.015 * b;
                 pose.scale_x = 1.0 - 0.008 * b;
@@ -1491,15 +1491,14 @@ impl Pet {
                         .abs()
                     * settle;
             }
-            Mode::Fetch { .. } => {
+            Mode::Fetch { stepping: true } => {
                 let step = STEPS_PER_SEC * FETCH_SPEED_MUL;
                 pose.lift = -0.07 * (pi * t * step).sin().abs();
                 pose.rotation_deg = 3.5 * (pi * t * step).sin();
             }
             Mode::Eat => {
-                // 低頭一口一口咬：往前傾、身體一壓一壓。
+                // 一口一口咬：身體一壓一壓。不往前傾 —— 點心叼在嘴邊（`Pet::eating`），傾斜會讓嘴離開點心。
                 let bite = (pi * t * EAT_BITES_PER_SEC).sin().abs();
-                pose.rotation_deg = if pose.flip { -6.0 } else { 6.0 } * (0.5 + 0.5 * bite);
                 pose.scale_y = 1.0 - 0.05 * bite;
                 pose.scale_x = 1.0 + 0.03 * bite;
             }
@@ -2107,8 +2106,8 @@ impl Pet {
     }
 
     /// 跑去拿東西：同一層就跑過去（東西還在空中就跑到它底下等）；搆到了點心就吃、球就踢；
-    /// 東西落在搆不到的地方，等一下就放棄。
-    fn fetch(&mut self, since: f64, dt: f32, env: &Env, now: f64) {
+    /// 東西落在別層、或中間過不去（禁止範圍、這一層走到底），馬上放棄 —— 等也等不到，只會原地踏步。
+    fn fetch(&mut self, dt: f32, env: &Env, now: f64) {
         let Some(item) = env.item.filter(|i| i.wanted) else {
             self.set_idle(now);
             return;
@@ -2137,25 +2136,34 @@ impl Pet {
             }
             return;
         }
+        let mut stepping = false;
         if (same_level || !item.grounded) && dx.abs() > reach * 0.5 {
             let speed = env.walk_speed_dip.unwrap_or(DEFAULT_WALK_SPEED_DIP)
                 * env.px_per_dip
                 * FETCH_SPEED_MUL;
             let (lo, hi) = walk_bounds(env);
-            // 隔著禁止範圍就過不去，跟搆不到一樣等一下就放棄。
-            if self.slide_to(
-                (self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi),
-                env,
-            ) {
-                return;
-            }
+            let at_edge = if dx < 0.0 { self.x <= lo } else { self.x >= hi };
+            stepping = !at_edge
+                && self.slide_to(
+                    (self.x + dx.signum() * (speed * dt).min(dx.abs())).clamp(lo, hi),
+                    env,
+                );
         }
-        if item.grounded && now - since >= FETCH_PATIENCE_SECS {
+        if !stepping && item.grounded {
             self.happen(Happening::GaveUp { food: item.food });
             self.emote(Emote::Question);
             self.ignore_item_until = now + FETCH_IGNORE_SECS;
             self.set_idle(now);
+            return;
         }
+        // 只換走路／站著等的樣子，不重算這個模式開始的時間。
+        self.mode = Mode::Fetch { stepping };
+    }
+
+    /// 正在吃點心：吃到哪裡（0～1）。點心這段時間叼在嘴邊、一口一口變小。
+    pub fn eating(&self, now: f64) -> Option<f32> {
+        matches!(self.mode, Mode::Eat)
+            .then(|| ((now - self.mode_start) as f32 / EAT_SECS).clamp(0.0, 1.0))
     }
 
     /// 滑鼠在牠搆得到的地方：在地面（或牠站的視窗頂）附近、不在頭頂老高的地方，水平距離在 `max_dx` 以內。
@@ -3387,10 +3395,11 @@ mod tests {
             wanted: true,
         });
         let (mut now, mut pet) = (0.0, Pet::new(500.0, 1000.0, 0.0, 4));
-        run(&mut pet, &mut now, FETCH_PATIENCE_SECS as f32 + 1.0, &env);
+        // 一看到就放棄，不在原地踏步好幾秒。
+        run(&mut pet, &mut now, 0.2, &env);
         assert!(
             !matches!(pet.mode, Mode::Fetch { .. } | Mode::Eat),
-            "gave up"
+            "gave up right away"
         );
         assert!(pet.ignore_item_until > now, "and stops trying for a while");
         assert!(

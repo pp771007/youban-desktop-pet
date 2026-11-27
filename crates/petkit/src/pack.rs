@@ -84,6 +84,8 @@ pub struct PetPack {
     pub editable: bool,
     pub dir: PathBuf,
     pub states: BTreeMap<String, StateAnim>,
+    /// `pet.json` 的 `mouth`（夾在 0～1 之間）。
+    pub mouth: Option<(f32, f32)>,
 }
 
 /// `resolve` 的結果：要播哪個狀態的圖。
@@ -185,6 +187,9 @@ pub fn load(dir: &Path) -> Result<PetPack, PackError> {
         editable: manifest.editable,
         dir: dir.to_owned(),
         states: anims,
+        mouth: manifest
+            .mouth
+            .map(|[x, y]| (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))),
     })
 }
 
