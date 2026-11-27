@@ -677,6 +677,12 @@ fn load_config(path: &Path) -> Config {
     }
 }
 
+/// 泡泡的尾巴離腳底多高。說話、提醒時會立起來的桌寵（海豚）比站姿高很多，照站姿算會蓋住臉；
+/// 比站姿矮的動作（睡覺、坐下）維持站姿高度，泡泡不跟著上下跳。
+fn bubble_head_height(base_height: f32, state_height_ratio: f32) -> f32 {
+    base_height * state_height_ratio.max(1.0)
+}
+
 /// 設定裡的那隻讀不進來，就退回預設那隻（不讓一個壞掉的桌寵包害整個程式開不起來）。
 fn load_pack_or_default(pets_dir: &Path, id: &str) -> Result<PetPack> {
     pack::load(&pets_dir.join(id))
@@ -2746,9 +2752,14 @@ impl App {
                 Y: work.bottom as f32 - inset,
             }
         } else {
+            let ratio = self
+                .pack
+                .states
+                .get(&self.anim.source)
+                .map_or(1.0, |s| s.height_ratio);
             Vector2 {
                 X: self.pet.x,
-                Y: self.pet.y - self.sprites.base_height,
+                Y: self.pet.y - bubble_head_height(self.sprites.base_height, ratio),
             }
         };
         self.bubble
@@ -3038,6 +3049,12 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bubble_rises_with_poses_taller_than_standing() {
+        assert_eq!(bubble_head_height(100.0, 1.82), 182.0, "海豚立起來說話");
+        assert_eq!(bubble_head_height(100.0, 0.55), 100.0, "睡覺時泡泡不往下掉");
+    }
 
     #[test]
     fn saved_files_with_old_style_names_still_load() {
