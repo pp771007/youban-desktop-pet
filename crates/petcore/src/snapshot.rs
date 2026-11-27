@@ -243,7 +243,8 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         (Card::Notice { title: "已經連續用電腦 50 分鐘了，起來走走吧".into(), time: "15:20".into(), icon: Icon::Cup }, None),
         (Card::Confirm { title: "再 3 天就是媽媽生日囉～".into(), time: "5/21（四） · 農曆四月初五 · 滿 60 年".into(), snooze_open: false, icon: Icon::Cake }, None),
         (Card::Confirm { title: "繳信用卡費：這個月記得用網銀轉帳，順便確認自動扣款有沒有設定成功".into(), time: "10:30".into(), snooze_open: true, icon: Icon::BellRing }, None),
-        (Card::Confirm { title: "PR 有 2 則新留言，要你看一下".into(), time: "Claude・柚伴 · 14:02".into(), snooze_open: false, icon: Icon::MessageDots }, None),
+        // 滑過框本身（完成、稍後之後的第三顆）：外框變深。
+        (Card::Confirm { title: "PR 有 2 則新留言，要你看一下".into(), time: "Claude・柚伴 · 14:02".into(), snooze_open: false, icon: Icon::MessageDots }, Some(2)),
         (Card::Notice { title: "測試全部通過了".into(), time: "Codex・網站 · 14:05".into(), icon: Icon::MessageDots }, None),
         (
             Card::NoticeList {
@@ -276,7 +277,18 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         .into_iter()
         .map(|(card, hover)| {
             let transient = card_stack::linger_secs(&card).is_some();
-            let shown = Some(Shown { id: 1, card });
+            // 傳話的框（圖示是對話框的那些）點了會打開傳話紀錄。
+            let opens = matches!(
+                &card,
+                Card::Confirm {
+                    icon: Icon::MessageDots,
+                    ..
+                } | Card::Notice {
+                    icon: Icon::MessageDots,
+                    ..
+                } | Card::NoticeList { .. }
+            );
+            let shown = Some(Shown { id: 1, card, opens });
             let scene = if transient {
                 CardScene {
                     top: shown,
@@ -316,6 +328,7 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
             time: "Claude · 14:07".into(),
             icon: Icon::MessageDots,
         },
+        opens: true,
     };
     // 兩區都有、後面疊著三則（滑過「+3」）；同一個畫面攤開（滑過清單第一列的 ✓）。
     let stacked = CardScene {
@@ -324,18 +337,20 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         front: Some(Shown {
             id: 1,
             card: reminder,
+            opens: false,
         }),
         behind,
         waiting: 0,
         expanded: false,
     };
-    scenes.push((stacked.clone(), Some(1)));
+    // 上面那則提示框是傳話的，✕ 後面多一顆蓋住整個框的，所以都往後一格。
+    scenes.push((stacked.clone(), Some(2)));
     scenes.push((
         CardScene {
             expanded: true,
             ..stacked
         },
-        Some(2),
+        Some(3),
     ));
     let mut sheet = Sheet { tiles: Vec::new() };
     for palette in [&theme::LIGHT, &theme::DARK] {

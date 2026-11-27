@@ -185,6 +185,11 @@ const SETTINGS_PAGE_REMINDERS: &str = "reminders";
 const SETTINGS_PAGE_PETS: &str = "pets";
 const SETTINGS_PAGE_RELAY: &str = "relay";
 
+/// 點框本身會打開設定的哪一頁（`Shown::opens`）：傳話的框打開傳話紀錄，其他的點了沒反應。
+fn card_page(owner: &str) -> Option<&'static str> {
+    (owner == relay_module::ID).then_some(SETTINGS_PAGE_RELAY)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Event {
     PointerDown,
@@ -1363,6 +1368,16 @@ impl App {
             }
             Press::More(More::RelayLog) => self.open_settings(Some(SETTINGS_PAGE_RELAY)),
             Press::More(More::Reminders) => self.open_settings(Some(SETTINGS_PAGE_REMINDERS)),
+            Press::Open { top } => {
+                let item = if top {
+                    self.cards.top()
+                } else {
+                    self.cards.front()
+                };
+                if let Some(page) = item.and_then(|q| card_page(q.owner)) {
+                    self.open_settings(Some(page));
+                }
+            }
         }
     }
 
@@ -2762,6 +2777,7 @@ impl App {
         let shown = |q: &card_stack::Item| Shown {
             id: q.seq,
             card: q.card.clone(),
+            opens: card_page(q.owner).is_some(),
         };
         let top = self.cards.top().map(shown);
         let front = self.cards.front().map(shown);
@@ -2784,6 +2800,7 @@ impl App {
                             card: Card::Speech {
                                 text: s.text.clone(),
                             },
+                            opens: false,
                         }),
                         ..CardScene::default()
                     };

@@ -189,6 +189,8 @@ pub enum Pointer {
 pub struct Shown {
     pub id: u64,
     pub card: Card,
+    /// 點框本身（按鈕以外的地方）會打開設定看全部：送 `Press::Open`。
+    pub opens: bool,
 }
 
 /// 頭上要畫的東西。
@@ -253,6 +255,8 @@ pub enum Press {
     Done(usize),
     /// 「還有 N 則」：打開設定看全部。
     More(More),
+    /// 點了框本身（`Shown::opens` 的才有）：上面那區或下面那區那則。
+    Open { top: bool },
 }
 
 /// 「還有 N 則」要打開哪裡。
@@ -281,10 +285,13 @@ impl Zone {
 impl Press {
     fn zone(self) -> Zone {
         match self {
-            Press::Top(_) => Zone::Top,
+            Press::Top(_) | Press::Open { top: true } => Zone::Top,
             Press::More(More::RelayLog) => Zone::Top,
             Press::Pick(_) | Press::Done(_) => Zone::Rows,
-            Press::Front(_) | Press::Toggle | Press::More(More::Reminders) => Zone::Front,
+            Press::Front(_)
+            | Press::Toggle
+            | Press::More(More::Reminders)
+            | Press::Open { top: false } => Zone::Front,
         }
     }
 }
@@ -303,6 +310,8 @@ enum Look {
     Link,
     /// 「+N」。
     Badge,
+    /// 整個框（`Shown::opens`）：滑過時框的外框變深。
+    Card,
 }
 
 struct Button {
@@ -352,6 +361,16 @@ struct Layout {
     card_w: f32,
     /// 找按鈕時從前面找起：小按鈕（✕、✓、+N）排在蓋住它的大區塊前面。
     buttons: Vec<Button>,
+}
+
+/// 蓋住整個框的那顆：排在框上其他按鈕的後面，按鈕以外的地方才輪到它。
+fn card_button(rect: D2D_RECT_F, press: Press) -> Button {
+    Button {
+        rect,
+        label: String::new(),
+        press,
+        look: Look::Card,
+    }
 }
 
 impl Layout {
@@ -496,6 +515,9 @@ impl CardPainter {
                 look: Look::Close,
             });
             buttons.extend(own);
+            if top.opens {
+                buttons.push(card_button(block.rect, Press::Open { top: true }));
+            }
             y = block.rect.bottom + gap;
             blocks.push(block);
         }
@@ -546,6 +568,9 @@ impl CardPainter {
                 });
             }
             buttons.extend(own);
+            if front.opens {
+                buttons.push(card_button(block.rect, Press::Open { top: false }));
+            }
             blocks.push(block);
         }
 
@@ -1116,14 +1141,24 @@ impl CardPainter {
                     radiusX: radius,
                     radiusY: radius,
                 };
+                // 點得下去的框：滑過時外框變深，按下時變主題色。
+                let outline = l
+                    .buttons
+                    .iter()
+                    .position(|b| b.look == Look::Card && b.press.zone() == block.zone)
+                    .map_or(palette.border, |i| match state(i) {
+                        (true, _) => palette.accent,
+                        (false, true) => palette.border_strong,
+                        _ => palette.border,
+                    });
                 brush.SetColor(&palette.surface_raised.d2d());
                 rt.FillRoundedRectangle(&card, &*brush);
-                brush.SetColor(&palette.border.d2d());
+                brush.SetColor(&outline.d2d());
                 rt.DrawRoundedRectangle(&card, &*brush, s, None);
                 if bi == last {
                     brush.SetColor(&palette.surface_raised.d2d());
                     rt.FillGeometry(&tail_path, &*brush, None);
-                    brush.SetColor(&palette.border.d2d());
+                    brush.SetColor(&outline.d2d());
                     rt.DrawGeometry(&tail_path, &*brush, s, None);
                     // 蓋掉尾巴與卡片接縫處的那段邊框。
                     brush.SetColor(&palette.surface_raised.d2d());
@@ -1347,7 +1382,7 @@ impl CardPainter {
                             icons.draw(&doc, &(at * transform));
                         }
                     }
-                    Look::Row => {}
+                    Look::Row | Look::Card => {}
                 }
             }
             rt.SetTransform(&Matrix3x2::identity());
