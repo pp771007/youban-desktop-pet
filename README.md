@@ -89,6 +89,7 @@ Youban.exe 在 %LOCALAPPDATA%\Programs\Youban Desktop Pet\（免安裝版在解�
 ## 🍃 輕、不吃資源
 
 - 閒置時記憶體約 6～12MB，一直開著也不會越用越大
+- 安裝檔約 12MB；其他桌寵第一次選的時候才下載，每隻 2～6MB
 - 全螢幕看影片、簡報、玩遊戲時自動躲起來，提醒等你回來再跳出來
 
 ## ❓ 常見問題
@@ -98,6 +99,9 @@ Youban.exe 在 %LOCALAPPDATA%\Programs\Youban Desktop Pet\（免安裝版在解�
 
 **怎麼確定下載的檔案沒被改過？**
 每個版本的說明裡都有 SHA-256 驗證碼。在下載資料夾開 PowerShell 執行 `Get-FileHash youban-desktop-pet-<版本>.zip`，算出來的值一樣就沒問題。
+
+**選其他桌寵時說「下載失敗」？**
+水豚以外的桌寵第一次選時，要從 GitHub 下載牠的圖。確認電腦連得上網路再選一次；公司網路擋 GitHub 的話下載不了，只能先用水豚。
 
 **怎麼關掉？** 對牠按右鍵 →「結束」。
 
