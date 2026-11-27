@@ -214,6 +214,12 @@ mod tests {
         assert!(must_download_first(&dir));
         assert!(dir.join(pack::MANIFEST_FILE).is_file(), "名字留著");
 
+        // 從整包都帶動作圖的舊版更新上來：舊圖還在、沒有下載紀錄，但新版放了 frames.sha256。
+        let upgraded = stub("remove-upgraded", Some("v1"));
+        fs::create_dir_all(upgraded.join(FRAMES_DIR)).unwrap();
+        fs::write(upgraded.join(FRAMES_DIR).join("idle_01.png"), b"png").unwrap();
+        assert!(removable(&upgraded), "舊使用者也刪得掉");
+
         let bundled = stub("remove-bundled", None);
         fs::create_dir_all(bundled.join(FRAMES_DIR)).unwrap();
         assert!(!removable(&bundled) && remove(&bundled).is_err());
