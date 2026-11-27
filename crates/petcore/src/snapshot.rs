@@ -405,11 +405,22 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
         Entry::Item(switch.clone()),
         Item::entry(3, "餵點心", Icon::Cookie),
         Item::entry(4, "丟球", Icon::Ball),
+        Item::entry(20, "隱藏桌寵", Icon::EyeOff),
         Entry::Header("提醒".into()),
         Item::entry(5, "新增提醒…", Icon::Bell),
         Entry::Header("視窗歸位".into()),
         Item::entry(6, "記住目前位置", Icon::Save),
         Item::entry(7, "恢復位置", Icon::RotateCcw),
+        Entry::Separator,
+        Item::entry(8, "設定…", Icon::Settings),
+        Item::entry(9, "結束", Icon::Power),
+    ];
+    // 藏起來時從托盤打開的選單：第一項是「顯示桌寵」，沒有點心和球。
+    let hidden = vec![
+        Entry::Header("桌寵".into()),
+        Item::entry(21, "顯示桌寵", Icon::Eye),
+        Item::entry(1, "陪你第 12 天", Icon::Heart),
+        Entry::Item(switch.clone()),
         Entry::Separator,
         Item::entry(8, "設定…", Icon::Settings),
         Item::entry(9, "結束", Icon::Power),
@@ -430,7 +441,11 @@ pub fn cards(out: &Path, dpi: u32) -> Result<()> {
     let mut menus = MenuPainter::new(&gfx)?;
     menus.load_pictures(&wic, &children, s);
     for palette in [&theme::LIGHT, &theme::DARK] {
-        for (entries, hover) in [(main.clone(), Some(2)), (children.clone(), Some(3))] {
+        for (entries, hover) in [
+            (main.clone(), Some(2)),
+            (children.clone(), Some(3)),
+            (hidden.clone(), Some(1)),
+        ] {
             let (w, h) = menus.render(entries, palette, s, hover)?;
             sheet.push(w, h, menus.canvas.pixels());
         }

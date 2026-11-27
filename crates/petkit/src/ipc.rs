@@ -78,6 +78,8 @@ pub const CMD_DROP: &str = "drop";
 pub const CMD_TEST_MEMORY_ALERT: &str = "testMemoryAlert";
 /// 讓桌寵講一句 `{"text", "secs"}`（測試講話泡泡用）。
 pub const CMD_SAY: &str = "say";
+/// 隱藏／顯示桌寵 `{"hidden": true | false}`（跟右鍵選單一樣）。
+pub const CMD_PET_HIDDEN: &str = "petHidden";
 /// 丟一個點心或球 `{"kind": "food" | "ball"}`（跟右鍵選單一樣）。
 pub const CMD_TOY: &str = "toy";
 /// 在螢幕上畫一個範圍 `{"kind": "allowed" | "forbidden"}`：畫好由核心寫進設定檔。

@@ -43,6 +43,8 @@ pub enum Icon {
     Cake,
     MessageDots,
     Close,
+    Eye,
+    EyeOff,
 }
 
 impl Icon {
@@ -54,6 +56,8 @@ impl Icon {
             Icon::CircleCheck => include_str!("../../petsettings/ui/icons/circle-check.svg"),
             Icon::Alert => include_str!("../../petsettings/ui/icons/triangle-alert.svg"),
             Icon::Download => include_str!("../../petsettings/ui/icons/download.svg"),
+            Icon::Eye => include_str!("../../petsettings/ui/icons/eye.svg"),
+            Icon::EyeOff => include_str!("../../petsettings/ui/icons/eye-off.svg"),
             Icon::Heart => include_str!("../../petsettings/ui/icons/heart.svg"),
             Icon::PawPrint => include_str!("../../petsettings/ui/icons/paw-print.svg"),
             Icon::Cookie => include_str!("../../petsettings/ui/icons/cookie.svg"),

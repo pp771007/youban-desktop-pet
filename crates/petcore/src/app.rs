@@ -178,6 +178,8 @@ const MENU_BALL: u32 = 14;
 /// 打開桌寵清單那一層（本身不會被選到）。
 const MENU_SWITCH_PET: u32 = 15;
 const MENU_RELAY_LOG: u32 = 16;
+const MENU_HIDE_PET: u32 = 17;
+const MENU_SHOW_PET: u32 = 18;
 const MENU_PET_BASE: u32 = 100;
 const SETTINGS_PAGE_REMINDERS: &str = "reminders";
 const SETTINGS_PAGE_PETS: &str = "pets";
@@ -273,6 +275,8 @@ struct RuntimeState {
     cards: Vec<SavedCard>,
     /// 休息提醒卡是幾點跳的（卡上的時間放到隔天要補日期）。
     rest_at: Option<chrono::NaiveDateTime>,
+    /// 使用者從選單把桌寵藏起來了：自動更新重開之後也要維持，不然一更新就跑出來。
+    pet_hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -385,7 +389,12 @@ struct App {
     platforms: Vec<Platform>,
     last_platform_scan: f64,
     /// 有全螢幕程式在前面，桌寵躲起來了。
+    /// 桌寵現在沒顯示（全螢幕程式在前面，或使用者藏起來了）。
     hidden: bool,
+    /// 使用者從選單藏起來的（跟全螢幕無關）。
+    user_hidden: bool,
+    /// 全螢幕程式在前面。
+    fullscreen: bool,
     last_busy_check: f64,
     last_topmost: f64,
     card_hwnd: HWND,
@@ -529,6 +538,8 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         platforms: Vec::new(),
         last_platform_scan: f64::NEG_INFINITY,
         hidden: false,
+        user_hidden: runtime.pet_hidden,
+        fullscreen: false,
         last_busy_check: f64::NEG_INFINITY,
         last_topmost: f64::NEG_INFINITY,
         card_hwnd,
@@ -570,8 +581,11 @@ pub fn run(soak_secs: Option<u64>, after_update: bool) -> Result<()> {
         );
     }
     app.tick()?;
-    unsafe {
-        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+    // 上次是藏起來關掉的（或一開就是全螢幕）：第一格已經決定要躲，不要又把它顯示出來。
+    if !app.hidden {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        }
     }
     let result = app.run_loop();
     app.save_state();
@@ -1470,6 +1484,7 @@ impl App {
                 };
                 self.open_area_editor(kind)?;
             }
+            ipc::CMD_PET_HIDDEN => self.set_user_hidden(v["hidden"].as_bool().unwrap_or(true)),
             ipc::CMD_SAY => {
                 let text = v["text"].as_str().unwrap_or("測試講話").to_owned();
                 let secs = v["secs"].as_f64().unwrap_or(4.0) as f32;
@@ -1571,6 +1586,7 @@ impl App {
             "queued": self.cards.len(),
             "platforms": self.platforms.iter().map(|p| [p.left, p.right, p.y]).collect::<Vec<_>>(),
             "hidden": self.hidden,
+            "userHidden": self.user_hidden,
             "focus": self.modules.session(local_now()).map(|s| serde_json::json!({ "focusing": s.focusing, "secsLeft": s.secs_left })),
             "modules": self.modules.ids(),
             "privateBytes": mem.private_bytes,
@@ -1616,8 +1632,14 @@ impl App {
             checked: false,
             children: choices,
         }));
-        entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
-        entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
+        // 藏起來時選單是從托盤打開的：先給「顯示」，點心和球沒有桌寵接就不放。
+        if self.user_hidden {
+            entries.insert(1, Item::entry(MENU_SHOW_PET, "顯示桌寵", Icon::Eye));
+        } else {
+            entries.push(Item::entry(MENU_FEED, "餵點心", Icon::Cookie));
+            entries.push(Item::entry(MENU_BALL, "丟球", Icon::Ball));
+            entries.push(Item::entry(MENU_HIDE_PET, "隱藏桌寵", Icon::EyeOff));
+        }
         for group in self.modules.menu(local_now(), &self.config) {
             let mut items: Vec<Entry> = group
                 .items
@@ -1691,6 +1713,8 @@ impl App {
             MENU_DAYS => self.open_settings(Some(SETTINGS_PAGE_PETS)),
             MENU_FEED => self.spawn_toy(false),
             MENU_BALL => self.spawn_toy(true),
+            MENU_HIDE_PET => self.set_user_hidden(true),
+            MENU_SHOW_PET => self.set_user_hidden(false),
             id if (MENU_PET_BASE..crate::modules::MENU_BASE).contains(&id) => {
                 if let Some(pet) = pets.get((id - MENU_PET_BASE) as usize) {
                     self.begin_switch(pet.id.clone(), true);
@@ -1780,31 +1804,34 @@ impl App {
     }
 
     /// 全螢幕程式（影片、簡報、遊戲）在前面時躲起來；提醒卡留在佇列裡，離開全螢幕才出現（除非設定成照樣跳）。
+    /// 使用者從選單藏起來時也躲，但卡片照樣跳（在螢幕右下角）。
     /// 回傳 `true` = 現在是躲起來的狀態，這一格不用畫。
     fn update_hidden(&mut self, now: f64) -> bool {
         if now - self.last_busy_check >= BUSY_CHECK_SECS {
             self.last_busy_check = now;
             // 自己的畫範圍畫面也是蓋滿螢幕的最上層視窗，會被系統當成全螢幕程式：畫的時候不躲。
-            let busy = self.config.hide_in_fullscreen
+            self.fullscreen = self.config.hide_in_fullscreen
                 && self.area_editor.is_none()
                 && platforms::user_is_busy();
-            if busy != self.hidden {
-                self.hidden = busy;
+            let hide = self.fullscreen || self.user_hidden;
+            if hide != self.hidden {
+                self.hidden = hide;
                 log!(
-                    "fullscreen app {}; pet {}",
-                    if busy { "detected" } else { "gone" },
-                    if busy { "hidden" } else { "shown" }
+                    "pet {} (fullscreen {}, user {})",
+                    if hide { "hidden" } else { "shown" },
+                    self.fullscreen,
+                    self.user_hidden
                 );
                 unsafe {
-                    let _ = ShowWindow(self.hwnd, if busy { SW_HIDE } else { SW_SHOWNOACTIVATE });
+                    let _ = ShowWindow(self.hwnd, if hide { SW_HIDE } else { SW_SHOWNOACTIVATE });
                     if self.toy.is_some() {
                         let _ = ShowWindow(
                             self.toy_hwnd,
-                            if busy { SW_HIDE } else { SW_SHOWNOACTIVATE },
+                            if hide { SW_HIDE } else { SW_SHOWNOACTIVATE },
                         );
                     }
                 }
-                if busy {
+                if hide {
                     self.glow.hide(self.glow_hwnd);
                     self.bubble.hide();
                 } else {
@@ -2105,7 +2132,7 @@ impl App {
         if self.update_hidden(now) {
             self.countdown
                 .update(None, dt, self.dpi_scale(), &self.palette)?;
-            if self.config.remind_in_fullscreen {
+            if self.config.remind_in_fullscreen || !self.fullscreen {
                 // 全螢幕程式自己也可能是最上層：卡片要定時放回它上面，不然跳了也看不到。
                 self.keep_topmost(now);
                 self.update_cards(now)?;
@@ -2971,6 +2998,16 @@ impl App {
         self.renderer.canvas.ensure_size(w, h)
     }
 
+    /// 從選單（或測試指令）藏起來／叫出來：下一格就生效，並馬上存檔。
+    fn set_user_hidden(&mut self, hidden: bool) {
+        if self.user_hidden == hidden {
+            return;
+        }
+        self.user_hidden = hidden;
+        self.last_busy_check = f64::NEG_INFINITY;
+        self.save_state();
+    }
+
     fn save_state(&mut self) {
         let now = self.now();
         let state = RuntimeState {
@@ -2979,6 +3016,7 @@ impl App {
             milestone: self.pending_milestone,
             cards: self.saved_cards(),
             rest_at: self.rest_at,
+            pet_hidden: self.user_hidden,
         };
         let result = serde_json::to_vec_pretty(&state)
             .map_err(std::io::Error::other)
@@ -3094,6 +3132,19 @@ mod tests {
         assert!(matches!(&state.cards[0].card, Card::Confirm { title, .. } if title == "休息一下"));
         let styles: Vec<Style> = serde_json::from_str(r#"["card", "auto"]"#).unwrap();
         assert_eq!(styles, [Style::Confirm, Style::Notice]);
+    }
+
+    #[test]
+    fn hidden_pet_stays_hidden_after_restart() {
+        let old: RuntimeState = serde_json::from_str(r#"{ "position": [1, 2] }"#).unwrap();
+        assert!(!old.pet_hidden, "舊版的狀態檔：照常顯示");
+        let hidden = RuntimeState {
+            pet_hidden: true,
+            ..old
+        };
+        let back: RuntimeState =
+            serde_json::from_str(&serde_json::to_string(&hidden).unwrap()).unwrap();
+        assert!(back.pet_hidden);
     }
 
     #[test]
