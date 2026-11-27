@@ -1437,10 +1437,10 @@ function renderRelay(page) {
 
 function relayRow(e) {
   const waiting = relayWaiting(e);
-  return h('div', { class: 'list-row' },
+  return h('div', { class: 'list-row wrap' },
     h('span', { class: `row-dot${waiting ? '' : ' muted'}`, title: styleLabel(e.style) }, icon(e.style === 'notice' ? 'message-dots' : 'bell')),
     h('div', { class: 'row-main' },
-      h('div', { class: 'row-title', title: e.title }, e.title),
+      h('div', { class: 'row-title' }, e.title),
       h('div', { class: 'row-meta' }, h('span', {}, friendlyWhen(e.at)), e.detail ? h('span', {}, e.detail) : null)),
     waiting ? h('button', { class: 'btn btn-primary btn-small', disabled: !state.coreRunning, onclick: () => relayCommand({ cmd: 'relayDone', key: e.key }) }, icon('check'), '完成') : null);
 }

@@ -53,6 +53,7 @@ function mockBackend(tokens) {
         { key: '#1', title: '備份跑完了', detail: null, from: null, at: '2026-11-24T08:30:00', style: 'notice', done: false },
         { key: '#2', title: 'PR 等你審', detail: '有 2 則新留言', from: 'Claude', at: '2026-11-24T09:00:00', style: 'confirm', done: false },
         { key: '#3', title: '建置完成', detail: null, from: 'Claude', at: '2026-11-24T09:05:00', style: 'notice', done: false },
+        { key: '#4', title: '部署到測試站失敗：資料庫連線逾時，重試三次都一樣，請檢查 C:\\deploy\\config\\production.settings.json 裡的連線字串', detail: null, from: 'Claude', at: '2026-11-24T09:06:00', style: 'notice', done: false },
       ],
     },
     calls: [],
@@ -531,6 +532,7 @@ for (const scheme of ['light', 'dark']) {
     check(await page.locator('.list-row', { hasText: '建置完成' }).getByRole('button', { name: '完成' }).count() === 0, 'notices have no done button');
     await page.locator('.list-row', { hasText: 'PR 等你審' }).locator('.row-meta').getByText('有 2 則新留言').dblclick();
     check((await page.evaluate(() => window.getSelection().toString())).length > 0, 'relay log text can be selected to copy');
+    check(await page.locator('.list-row', { hasText: '部署到測試站失敗' }).locator('.row-title').evaluate((el) => el.scrollWidth <= el.clientWidth && el.getClientRects().length > 0 && el.offsetHeight > parseFloat(getComputedStyle(el).lineHeight) * 1.5), 'long relay titles wrap instead of being cut off');
     await page.evaluate(() => window.getSelection().removeAllRanges());
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-relay-light.png') });
     await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).click();
