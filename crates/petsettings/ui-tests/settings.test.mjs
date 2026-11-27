@@ -529,6 +529,9 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('button', { name: '複製給 AI 的說明' }).click();
     check(await page.evaluate(() => window.__copied?.includes('"C:\\Pets\\Youban.exe" --relay-help') && window.__copied.includes('CLAUDE CODE HOOKS')), 'copy for AI gives the real path and points to the hook guide');
     check(await page.locator('.list-row', { hasText: '建置完成' }).getByRole('button', { name: '完成' }).count() === 0, 'notices have no done button');
+    await page.locator('.list-row', { hasText: 'PR 等你審' }).locator('.row-meta').getByText('有 2 則新留言').dblclick();
+    check((await page.evaluate(() => window.getSelection().toString())).length > 0, 'relay log text can be selected to copy');
+    await page.evaluate(() => window.getSelection().removeAllRanges());
     if (shotDir) await page.screenshot({ path: path.join(shotDir, 'settings-relay-light.png') });
     await page.locator('.list-row', { hasText: 'PR 等你審' }).getByRole('button', { name: '完成' }).click();
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'relayDone' && c.key === '#2')), 'done in the relay log is sent to the core');

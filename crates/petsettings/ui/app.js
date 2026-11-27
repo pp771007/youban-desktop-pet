@@ -1418,7 +1418,7 @@ function renderRelay(page) {
     h('span', {}, '完整用法：', h('code', {}, RELAY_HELP_COMMAND)),
     h('button', { class: 'btn btn-ghost btn-small', onclick: async () => { await navigator.clipboard.writeText(relayPrompt()); toast('已複製，貼給 AI 就好'); } }, icon('copy'), '複製給 AI 的說明')));
   if (!entries.length) {
-    page.append(h('div', { class: 'card empty' },
+    page.append(h('div', { class: 'card empty selectable' },
       h('img', { src: currentPetImage(), alt: '' }),
       h('div', { class: 'empty-title' }, '還沒有人傳話給你'),
       h('div', { class: 'empty-desc' }, RELAY_EXAMPLE)));
@@ -1427,7 +1427,7 @@ function renderRelay(page) {
   // 新的在上面；來源照最近一則的先後排。
   const groups = Map.groupBy([...entries].reverse(), (e) => e.from ?? null);
   for (const [from, list] of groups) {
-    page.append(h('section', { class: 'section' },
+    page.append(h('section', { class: 'section selectable' },
       h('div', { class: 'section-head' },
         h('h2', {}, from ?? RELAY_NO_SENDER),
         h('button', { class: 'btn btn-ghost btn-small', disabled: !state.coreRunning || list.every(relayWaiting), onclick: () => relayCommand({ cmd: 'relayLogClear', from }) }, icon('trash-2'), '清除')),

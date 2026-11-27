@@ -22,6 +22,9 @@ html, body {
 }
 
 input, select, textarea { user-select: text; }
+/* 別人寫的內容（傳話紀錄）要能選起來複製；裡面的按鈕照舊不會被選到。 */
+.selectable { user-select: text; }
+.selectable button { user-select: none; }
 
 button, input, select { font: inherit; color: inherit; }
 
