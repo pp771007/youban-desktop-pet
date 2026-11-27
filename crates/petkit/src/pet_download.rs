@@ -49,6 +49,19 @@ pub fn must_download_first(dir: &Path) -> bool {
     needs_download(dir) && pack::load(dir).is_err()
 }
 
+/// 下載過的動作圖可以刪（要用時再下載）。跟著程式發的、使用者自己做的不算。
+pub fn removable(dir: &Path) -> bool {
+    dir.join(HASH_FILE).is_file() && dir.join(FRAMES_DIR).is_dir()
+}
+
+/// 刪掉下載的動作圖，桌寵回到「要下載」的樣子（名字和預覽圖留著）。
+pub fn remove(dir: &Path) -> std::io::Result<()> {
+    if !removable(dir) {
+        return Err(std::io::Error::other("這隻桌寵沒有下載過的圖"));
+    }
+    fs::remove_dir_all(dir.join(FRAMES_DIR))
+}
+
 /// 跟這支程式同一版的 Release：桌寵包的格式一定對得上。
 fn url(id: &str) -> String {
     let base = std::env::var(URL_ENV)
@@ -188,6 +201,23 @@ mod tests {
             !dir.join(FRAMES_DIR).join("walk_01.png").exists(),
             "舊圖整包換掉"
         );
+    }
+
+    #[test]
+    fn removing_a_download_brings_back_the_download_button() {
+        let dir = stub("remove", Some("v1"));
+        assert!(!removable(&dir), "還沒下載");
+        install(&dir, &zip_of(&["idle_01.png"])).unwrap();
+        assert!(removable(&dir));
+
+        remove(&dir).unwrap();
+        assert!(must_download_first(&dir));
+        assert!(dir.join(pack::MANIFEST_FILE).is_file(), "名字留著");
+
+        let bundled = stub("remove-bundled", None);
+        fs::create_dir_all(bundled.join(FRAMES_DIR)).unwrap();
+        assert!(!removable(&bundled) && remove(&bundled).is_err());
+        assert!(bundled.join(FRAMES_DIR).is_dir(), "跟著程式發的不刪");
     }
 
     #[test]

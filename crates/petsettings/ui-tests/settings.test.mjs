@@ -75,7 +75,7 @@ function mockBackend(tokens) {
   const handlers = {
     initial_page: () => null,
     tokens: () => tokens,
-    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS, coreExe: 'C:\\Pets\\Youban.exe', watched: ['config', 'reminders', 'pets', 'windows', 'focus', 'relay', 'update'] }),
+    constants: () => ({ sizes: [96, 128, 176], defaultPet: 'capybara', version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS, coreExe: 'C:\\Pets\\Youban.exe', watched: ['config', 'reminders', 'pets', 'windows', 'focus', 'relay', 'update'] }),
     // 真的換算在 Rust（petkit::anniversary 有測）；這裡只回固定的「下一次在 2027/4/11、還有 12 天」。
     anniversary_info: ({ anniversary: a }) => ({
       label: a.date.calendar === 'lunar' ? `農曆${a.date.leap ? '閏' : ''}${LUNAR_MONTHS[a.date.month - 1]}${LUNAR_DAYS[a.date.day - 1]}` : `國曆 ${a.date.month}/${a.date.day}`,
@@ -115,12 +115,13 @@ function mockBackend(tokens) {
     example_frames: () => [png, png],
     save_example: ({ state }) => { db.calls.push({ cmd: 'save_example', state }); },
     delete_pet: ({ id }) => { db.pets = db.pets.filter((p) => p.id !== id); },
+    remove_pet_download: ({ id }) => { db.calls.push({ cmd: 'remove_pet_download', id }); Object.assign(db.pets.find((p) => p.id === id), { download: true, removable: false }); },
     // 測試自己決定下載什麼時候結束、成不成功（`finishDownload(true / false)`）。
     download_pet: ({ id }) => new Promise((resolve, reject) => {
       db.finishDownload = (ok) => {
         db.finishDownload = null;
         if (!ok) { reject(new Error('offline')); return; }
-        db.pets.find((p) => p.id === id).download = false;
+        Object.assign(db.pets.find((p) => p.id === id), { download: false, removable: true });
         resolve();
       };
     }),
@@ -392,6 +393,18 @@ for (const scheme of ['light', 'dark']) {
     await page.evaluate(() => window.__mock.finishDownload(true));
     await page.waitForFunction(() => window.__mock.config.pet === 'dolphin');
     check(!(await dolphin.innerText()).includes('下載'), 'a downloaded pet is switched to and loses the download badge');
+    // 刪掉下載的圖：一樣先確認；刪的是正在用的那隻就換回預設那隻，卡片變回「下載」
+    const removeDolphin = page.locator('.pet-cell', { hasText: '海豚' }).getByRole('button', { name: '刪除' });
+    await removeDolphin.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '取消' }).click();
+    check(await page.evaluate(() => !window.__mock.calls.some((c) => c.cmd === 'remove_pet_download')), 'removing a download asks first');
+    if (shotDir) await page.locator('.pet-grid').screenshot({ path: path.join(shotDir, 'pets-removable-light.png') });
+    await removeDolphin.click();
+    await page.getByRole('alertdialog').getByRole('button', { name: '刪除' }).click();
+    await page.waitForFunction(() => window.__mock.calls.some((c) => c.cmd === 'remove_pet_download'));
+    await page.locator('.pet-card', { hasText: '海豚' }).getByText('下載').waitFor();
+    check(await page.evaluate(() => window.__mock.config.pet) === 'capybara', 'removing the current pet switches back to the default one');
+    check(await page.locator('.pet-cell', { hasText: '海豚' }).getByRole('button', { name: '刪除' }).count() === 0, 'a removed pet can be downloaded again, not removed');
     await page.locator('.pet-card', { hasText: '水豚（側面）' }).click();
     check((await page.locator('.pet-card', { hasText: '水豚' }).first().innerText()).includes('陪你 12 天'), 'pet card shows days together');
     // 取名字：寫進設定，卡片與側欄跟著換；清空就回到桌寵包自己的名字

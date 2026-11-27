@@ -923,12 +923,31 @@ function renderPets(page) {
       h('span', { class: 'pet-name' }, p.name),
       p.days ? h('span', { class: 'days' }, icon('heart'), `陪你 ${p.days} 天`) : null);
     }).map((card, i) => h('div', { class: 'pet-cell' }, card,
-      state.pets[i].editable ? h('button', { class: 'btn btn-secondary btn-small pet-edit', onclick: () => openPetEdit(state.pets[i].id) }, icon('play'), '編輯動作') : null)),
+      state.pets[i].editable ? h('button', { class: 'btn btn-secondary btn-small pet-edit', onclick: () => openPetEdit(state.pets[i].id) }, icon('play'), '編輯動作') : null,
+      state.pets[i].removable ? h('button', { class: 'btn btn-ghost btn-small pet-remove', onclick: () => removeDownload(state.pets[i]) }, icon('trash-2'), '刪除') : null)),
     h('div', { class: 'pet-cell' },
       h('button', { class: 'pet-card add', onclick: openNewPet }, h('span', { class: 'add-plus' }, icon('plus')), h('span', { class: 'pet-name' }, '新增桌寵')))));
   page.append(h('div', { class: 'pets-more' },
     h('button', { class: 'btn btn-ghost btn-small', onclick: () => invoke('open_pets_dir') }, icon('folder-open'), '打開桌寵資料夾')));
   page.append(renderBehavior());
+}
+
+/** 刪掉下載的內建桌寵（卡片留著，變回「下載」）；正在用的那隻先換回預設那隻。 */
+async function removeDownload(p) {
+  if (!await confirmDialog({ title: `刪除「${p.name}」？`, detail: '要用的時候再下載就好', confirm: '刪除' })) return;
+  if (state.config.pet === p.id) {
+    state.config.pet = state.defaultPet;
+    await saveConfig();
+  }
+  try {
+    await invoke('remove_pet_download', { id: p.id });
+  } catch (err) {
+    toast(`刪不掉：${err}`);
+    return;
+  }
+  await reloadPets();
+  toast(`已刪除 ${p.name}`);
+  render();
 }
 
 /** 讀使用者選的（或拖進來的）圖，交給後端整理。 */
@@ -1572,6 +1591,7 @@ async function main() {
   // 從右鍵選單「新增提醒…」打開的固定停在「提醒」分頁，其他時候回到上次那個（在第一次畫畫面之前定好）。
   state.reminderTab = initialPage === 'reminders' ? DEFAULT_REMINDER_TAB : loadReminderTab();
   state.sizes = constants.sizes;
+  state.defaultPet = constants.defaultPet;
   state.lunarMonths = constants.lunarMonths;
   state.lunarDays = constants.lunarDays;
   state.version = constants.version;

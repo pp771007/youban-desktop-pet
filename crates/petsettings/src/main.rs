@@ -58,6 +58,8 @@ struct PetInfo {
     days: u32,
     /// 動作圖還沒下載，選它之前要先 `download_pet`。
     download: bool,
+    /// 下載過的內建桌寵：可以刪掉動作圖（`remove_pet_download`）。
+    removable: bool,
 }
 
 /// 動作編輯畫面的一組圖：某個動作的某一組（待機可以有好幾組），依播放順序。
@@ -118,6 +120,8 @@ fn tokens() -> serde_json::Value {
 fn constants() -> serde_json::Value {
     serde_json::json!({
         "sizes": petkit::config::SIZE_CHOICES_DIP,
+        // 刪掉正在用的那隻下載的圖時，換回這隻（它的圖跟著程式發）。
+        "defaultPet": petkit::config::DEFAULT_PET,
         "version": env!("CARGO_PKG_VERSION"),
         "lunarMonths": anniversary::LUNAR_MONTHS,
         "lunarDays": anniversary::LUNAR_DAYS,
@@ -233,6 +237,7 @@ fn list_pets() -> Vec<PetInfo> {
                 id,
                 image,
                 editable: manifest.editable,
+                removable: pet_download::removable(&path),
                 download,
             })
         })
@@ -253,6 +258,17 @@ async fn download_pet(id: String) -> CmdResult<()> {
         .await
         .map_err(err)?
         .map_err(|e| e.to_string())
+}
+
+/// 刪掉下載的動作圖（要用時再下載）。正在用的那隻，畫面會先換成預設那隻再呼叫。
+#[tauri::command]
+fn remove_pet_download(id: String) -> CmdResult<()> {
+    let root = pets_root()?;
+    let dir = root.join(&id);
+    if dir.parent() != Some(root.as_path()) {
+        return Err("找不到這隻桌寵".into());
+    }
+    pet_download::remove(&dir).map_err(err)
 }
 
 /// 桌寵資料夾裡的圖給畫面用的網址：畫面直接讀檔（`serve_pet_file`），不用轉成 base64 從指令傳過去 ——
@@ -719,6 +735,7 @@ fn main() {
             anniversary_info,
             list_pets,
             download_pet,
+            remove_pet_download,
             window_layout,
             core_running,
             send_core,
