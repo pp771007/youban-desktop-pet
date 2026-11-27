@@ -4,6 +4,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod importer;
+mod watch;
 
 use std::collections::BTreeMap;
 use std::process::Command;
@@ -27,6 +28,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     ASFW_ANY, AllowSetForegroundWindow, FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow,
 };
 use windows::core::{HSTRING, PCWSTR, w};
+
+use crate::watch::DataWatch;
 
 /// 也用來找已經開著的設定視窗（只開一個）；跟 `tauri.conf.json` 的視窗 title、`ui/index.html` 的 `<title>` 一致。
 const WINDOW_TITLE: &str = "柚伴設定";
@@ -117,6 +120,7 @@ fn constants() -> serde_json::Value {
         "lunarDays": anniversary::LUNAR_DAYS,
         // 「複製給 AI 的說明」要寫出柚伴實際在哪（安裝版、免安裝版位置不同）。
         "coreExe": paths::sibling_exe(paths::CORE_EXE),
+        "watched": watch::KINDS,
     })
 }
 
@@ -151,9 +155,15 @@ fn load_config() -> CmdResult<Config> {
 }
 
 #[tauri::command]
-fn save_config(window: tauri::WebviewWindow, config: Config) -> CmdResult<()> {
+fn save_config(
+    window: tauri::WebviewWindow,
+    watch: State<DataWatch>,
+    config: Config,
+) -> CmdResult<()> {
     apply_color_scheme(&window, config.color_scheme);
-    config.save(&paths::config_file()).map_err(err)
+    watch
+        .write_own(watch::Kind::Config, || config.save(&paths::config_file()))
+        .map_err(err)
 }
 
 #[tauri::command]
@@ -162,8 +172,12 @@ fn load_reminders() -> CmdResult<ReminderFile> {
 }
 
 #[tauri::command]
-fn save_reminders(file: ReminderFile) -> CmdResult<()> {
-    file.save(&paths::reminders_file()).map_err(err)
+fn save_reminders(watch: State<DataWatch>, file: ReminderFile) -> CmdResult<()> {
+    watch
+        .write_own(watch::Kind::Reminders, || {
+            file.save(&paths::reminders_file())
+        })
+        .map_err(err)
 }
 
 /// 只讀：要改就送指令給核心（`petkit::relay_log` 只有核心寫）。
@@ -666,6 +680,7 @@ fn main() {
         .cloned();
     tauri::Builder::default()
         .manage(Init { page })
+        .manage(DataWatch::new())
         .invoke_handler(tauri::generate_handler![
             initial_page,
             tokens,
@@ -711,6 +726,7 @@ fn main() {
                         .color_scheme,
                 );
             }
+            watch::spawn(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

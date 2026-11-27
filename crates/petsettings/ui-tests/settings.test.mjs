@@ -64,10 +64,18 @@ function mockBackend(tokens) {
   db.pets = [{ id: 'capybara', name: '水豚', image: png, editable: false, days: 12 }, { id: 'capybara-side', name: '水豚（側面）', image: png, editable: false, days: 0 }];
   const allStates = ['idle', 'walk', 'drag', 'fall', 'sleep', 'notify', 'blink', 'happy', 'sit', 'land', 'yawn', 'wake', 'talk', 'hop', 'look', 'doze', 'climb', 'dizzy'];
   db.actions = { groups: [{ state: 'idle', variant: 'default', frames: [png] }], fps: Object.fromEntries(allStates.map((s) => [s, 8])), defaultFps: Object.fromEntries(allStates.map((s) => [s, 8])) };
+  // `src/watch.rs` 看到檔案變了發的通知；跟真的一樣晚一點才到，連續變幾次就發幾次。
+  const listeners = {};
+  const DATA_CHANGED_DELAY_MS = 30;
+  const dataChanged = (kind, times = 1) => {
+    for (let i = 1; i <= times; i += 1) {
+      setTimeout(() => (listeners['data-changed'] || []).forEach((cb) => cb({ payload: kind })), DATA_CHANGED_DELAY_MS * i);
+    }
+  };
   const handlers = {
     initial_page: () => null,
     tokens: () => tokens,
-    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS, coreExe: 'C:\\Pets\\Youban.exe' }),
+    constants: () => ({ sizes: [96, 128, 176], version: '0.1.0', lunarMonths: LUNAR_MONTHS, lunarDays: LUNAR_DAYS, coreExe: 'C:\\Pets\\Youban.exe', watched: ['config', 'reminders', 'pets', 'windows', 'focus', 'relay', 'update'] }),
     // 真的換算在 Rust（petkit::anniversary 有測）；這裡只回固定的「下一次在 2027/4/11、還有 12 天」。
     anniversary_info: ({ anniversary: a }) => ({
       label: a.date.calendar === 'lunar' ? `農曆${a.date.leap ? '閏' : ''}${LUNAR_MONTHS[a.date.month - 1]}${LUNAR_DAYS[a.date.day - 1]}` : `國曆 ${a.date.month}/${a.date.day}`,
@@ -112,7 +120,15 @@ function mockBackend(tokens) {
     send_core: ({ command }) => {
       db.calls.push(command);
       // 核心查新版（send_core 跟真的一樣做完才回來）：每讀一次進度往前走一步，停在最後一個。
-      if (command.cmd === 'checkUpdate') db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
+      if (command.cmd === 'checkUpdate') {
+        db.updateSteps = [{ state: 'checking' }, { state: 'downloading', version: '0.2.0' }, { state: 'ready', version: '0.2.0' }];
+        dataChanged('update', 2);
+      }
+      // 核心畫好範圍會寫進設定檔，設定程式是看到檔案變了才知道（src/watch.rs）。
+      if (command.cmd === 'drawArea' && command.kind === 'forbidden') {
+        db.config.forbiddenAreas.push({ left: 200, top: 200, right: 500, bottom: 400 });
+        dataChanged('config');
+      }
       if (command.cmd === 'focusStart') db.focusStopLabel = '停止專注（還剩 25 分）';
       if (command.cmd === 'focusStop') db.focusStopLabel = null;
       // 傳話紀錄：跟 petkit::relay_log 一樣（清除留著還沒按完成的確認框）。
@@ -137,6 +153,9 @@ function mockBackend(tokens) {
         if (!handlers[cmd]) throw new Error(`no mock for ${cmd}`);
         return handlers[cmd](args || {});
       },
+    },
+    event: {
+      listen: async (name, cb) => { (listeners[name] ||= []).push(cb); return () => {}; },
     },
   };
 }
@@ -380,6 +399,8 @@ for (const scheme of ['light', 'dark']) {
     check(await page.getByText('600 × 140').isVisible(), 'forbidden areas are listed with their size');
     await page.getByRole('button', { name: '新增禁止範圍' }).click();
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'drawArea' && c.kind === 'forbidden')), 'adding a forbidden area asks the core to draw one');
+    await page.locator('.setting', { hasText: '禁止範圍 2' }).waitFor({ timeout: 2000 }).catch(() => {});
+    check(await page.getByText('300 × 200').isVisible(), 'an area the core just drew shows up without reopening settings');
     // 滑鼠移到那一列：請核心在桌面上框出來；移開就收掉
     await page.locator('.setting', { hasText: '禁止範圍 1' }).hover();
     if (shotDir) await page.locator('.setting', { hasText: '禁止範圍 1' }).screenshot({ path: path.join(shotDir, 'settings-area-hover-light.png') });
@@ -391,7 +412,7 @@ for (const scheme of ['light', 'dark']) {
     await page.getByRole('heading', { name: '行為' }).hover();
     check(await page.evaluate(() => { const c = window.__mock.calls.at(-1); return c.cmd === 'previewArea' && !c.area; }), 'leaving the row hides the preview');
     await page.getByRole('button', { name: '刪除禁止範圍 1' }).click();
-    check(await page.evaluate(() => window.__mock.config.forbiddenAreas.length) === 0, 'deleting a forbidden area writes config');
+    check(await page.evaluate(() => window.__mock.config.forbiddenAreas.length) === 1, 'deleting a forbidden area writes config');
     await page.getByRole('button', { name: '只在範圍內' }).click();
     await page.getByRole('button', { name: '畫範圍' }).click();
     check(await page.evaluate(() => window.__mock.calls.some((c) => c.cmd === 'drawArea' && c.kind === 'allowed')), 'drawing the allowed area asks the core');

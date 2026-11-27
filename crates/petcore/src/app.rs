@@ -1969,7 +1969,7 @@ impl App {
         Ok(())
     }
 
-    /// 畫範圍的畫面收到滑鼠或鍵盤：畫好就寫進設定檔（設定程式回到前景時會重新讀）。
+    /// 畫範圍的畫面收到滑鼠或鍵盤：畫好就寫進設定檔（開著的設定程式看到檔案變了會重新讀）。
     fn area_input(&mut self, input: AreaInput) -> Result<()> {
         let Some(editor) = self.area_editor.as_mut() else {
             return Ok(());

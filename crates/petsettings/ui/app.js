@@ -45,8 +45,6 @@ const PLAYER_TICK_MS = 50;
 const TOAST_MS = 2200;
 const CORE_POLL_MS = 3000;
 const PREVIEW_DEBOUNCE_MS = 150;
-const LAYOUT_REFRESH_MS = 600;
-const UPDATE_POLL_MS = 500;
 /** 核心還在查或下載，要繼續等結果。 */
 const UPDATE_BUSY = ['checking', 'downloading'];
 const DEFAULT_PAGE = 'reminders';
@@ -1264,7 +1262,6 @@ function renderWindows(page) {
   const act = async (cmd, done) => {
     await invoke('send_core', { command: { cmd } });
     toast(done);
-    setTimeout(async () => { await refreshWindows(); render(); }, LAYOUT_REFRESH_MS);
   };
   page.append(h('div', { class: 'page-head' },
     featureTitle('windowRestore'),
@@ -1308,7 +1305,6 @@ function openWindowEdit(w) {
           await invoke('send_core', { command: { cmd: 'editWindow', id: w.id, ...draft } });
           closeEditor();
           toast('已套用');
-          setTimeout(async () => { await refreshWindows(); if (state.page === 'windows') render(); }, LAYOUT_REFRESH_MS);
         } }, icon('check'), '套用')));
     setTimeout(() => drawer.querySelector('#win-left')?.focus(), 50);
   });
@@ -1420,13 +1416,6 @@ async function markRelaySeen() {
   await refreshRelayLog();
 }
 
-async function pollRelayLog() {
-  const before = JSON.stringify(state.relayLog);
-  await refreshRelayLog();
-  await markRelaySeen();
-  if (JSON.stringify(state.relayLog) !== before) render();
-}
-
 // ---------- 頁面：一般 ----------
 
 function renderGeneral(page) {
@@ -1478,17 +1467,11 @@ function updateRow() {
     button);
 }
 
+/** 核心查的進度會寫進檔案，接下來每一步由 `data-changed` 跟上。 */
 async function checkUpdate() {
   await invoke('send_core', { command: { cmd: 'checkUpdate' } });
-  await pollUpdate();
-}
-
-/** 核心查完會把結果寫進檔案；查的時候每半秒讀一次。 */
-async function pollUpdate() {
-  clearTimeout(pollUpdate.timer);
   state.update = await invoke('update_status');
   if (state.page === 'general') render();
-  if (UPDATE_BUSY.includes(state.update?.state)) pollUpdate.timer = setTimeout(pollUpdate, UPDATE_POLL_MS);
 }
 
 // ---------- 骨架 ----------
@@ -1522,10 +1505,7 @@ async function go(name) {
   if (state.page === 'general' && state.update === null) {
     // 「已經是最新版」「連不上」是之前哪一次查的結果看不出來，不顯示；還在查、已經下載好的才接著顯示。
     const u = await invoke('update_status');
-    if (u && (u.state === 'ready' || UPDATE_BUSY.includes(u.state))) {
-      state.update = u;
-      if (UPDATE_BUSY.includes(u.state)) pollUpdate();
-    }
+    if (u && (u.state === 'ready' || UPDATE_BUSY.includes(u.state))) state.update = u;
   }
   render();
 }
@@ -1539,7 +1519,32 @@ async function pollCore() {
     render();
   }
   await refreshFocus();
-  if (state.page === 'relay') await pollRelayLog();
+}
+
+/**
+ * 畫面上的資料檔被別人改了（核心畫好範圍、換桌寵、傳話進來、記住視窗位置、查新版，或玩家往桌寵資料夾丟東西）：
+ * `src/watch.rs` 發 `data-changed`，這裡重讀那一份，有變才重畫。名字跟 `watch::Kind` 一樣，每一個都要有。
+ */
+const RELOADERS = {
+  config: async () => { state.config = await invoke('load_config'); },
+  reminders: loadReminders,
+  pets: async () => { state.pets = await invoke('list_pets'); },
+  windows: refreshWindows,
+  focus: refreshFocus,
+  relay: async () => {
+    await refreshRelayLog();
+    if (state.page === 'relay') await markRelaySeen();
+  },
+  update: async () => { state.update = await invoke('update_status'); },
+};
+
+async function onDataChanged(kind) {
+  const snapshot = () => JSON.stringify([state.config, state.file, state.pets, state.windows, state.relayLog, state.update]);
+  const before = snapshot();
+  await RELOADERS[kind]();
+  if (snapshot() === before) return;
+  updateBrand();
+  render();
 }
 
 async function main() {
@@ -1563,14 +1568,9 @@ async function main() {
   document.getElementById('start-core').addEventListener('click', async () => { await invoke('start_core'); setTimeout(pollCore, 800); });
   // 切到別的視窗時，滑鼠移開範圍那一列的通知收不到：框一起收掉。
   window.addEventListener('blur', () => previewArea());
-  // 核心也會寫設定檔（畫好範圍、從托盤換桌寵）：回到這個視窗時重新讀，畫面才不會停在舊的。
-  window.addEventListener('focus', async () => {
-    const config = await invoke('load_config');
-    if (JSON.stringify(config) !== JSON.stringify(state.config)) {
-      state.config = config;
-      render();
-    }
-  });
+  const missing = constants.watched.filter((k) => !RELOADERS[k]);
+  if (missing.length) throw new Error(`RELOADERS missing ${missing.join(', ')}`);
+  await window.__TAURI__.event.listen('data-changed', (e) => onDataChanged(e.payload));
   await pollCore();
   await go(initialPage || DEFAULT_PAGE);
   setInterval(pollCore, CORE_POLL_MS);
